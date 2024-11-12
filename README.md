@@ -21,8 +21,7 @@ Shown here with [Forager](https://github.com/carrefinho/forager).
 | Waveshare 1.69inch Round LCD Display Module with Touch | 27057 | 1 | https://www.waveshare.com/1.69inch-touch-lcd-module.htm |
 | Adafruit APDS9960 Proximity, Light, RGB, and Gesture Sensor | 3595 | 1 | https://www.adafruit.com/product/3595 |
 | M2x6 pan/wafer head screws | - | 4 |  |
-| M2.5x4 pan/wafer head screws | - | 2 |  |
-| M2.5x6 pan/wafer head screws | - | 2 |  |
+| M2.5x4 pan/wafer head screws | - | 4 |  |
 
 ## Build Guide
 
