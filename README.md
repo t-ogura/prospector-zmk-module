@@ -16,7 +16,7 @@ Shown here with [Forager](https://github.com/carrefinho/forager).
 
 | Part Name | Part Number | Count | Notes |
 | --------- | ----------- | ----- | ----- |
-| 3D-printed case | - | 1 | [Find STLs here](../case/) |
+| 3D-printed case | - | 1 | [Find STLs here](./case/) |
 | Seeed XIAO nRF52840 | - | 1 |  |
 | Waveshare 1.69inch Round LCD Display Module with Touch | 27057 | 1 | https://www.waveshare.com/1.69inch-touch-lcd-module.htm |
 | Adafruit APDS9960 Proximity, Light, RGB, and Gesture Sensor | 3595 | 1 | https://www.adafruit.com/product/3595 |
