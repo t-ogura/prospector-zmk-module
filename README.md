@@ -12,6 +12,10 @@ Shown here with [Forager](https://github.com/carrefinho/forager).
 - Auto brightness with ambient light sensor
 - 3D-printed case
 
+## Firmware & Usage
+
+Coming Soon™
+
 ## Bill of Materials
 
 | Part Name | Part Number | Count | Notes |
