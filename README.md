@@ -4,7 +4,7 @@ Prospector is a desktop ZMK dongle with full color LCD screen.
 
 ![Prospector between split keyboards on white background](/docs/images/prospector_hero.jpg)
 
-Shown here with [Forager](https://github.com/carrefinho/forager).
+Shown here alongside [Forager](https://github.com/carrefinho/forager).
 
 ## Design
 
@@ -29,4 +29,4 @@ Coming Soon™
 
 ## Build Guide
 
-Coming Soon™
+[Find the Assembly Manual here.](/docs/prospector_assembly_manual.jpg)
