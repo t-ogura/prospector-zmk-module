@@ -4,17 +4,23 @@ Prospector is a desktop ZMK dongle with full color LCD screen.
 
 ![Prospector between split keyboards on white background](/docs/images/prospector_hero.jpg)
 
+> not doing a great job showcasing those 16-bit colors am i
+
 Shown here alongside [Forager](https://github.com/carrefinho/forager).
 
 ## Design
 
 - 1.69-inch IPS LCD screen with curved cover glass
 - Auto brightness with ambient light sensor
-- 3D-printed case
+- 3D-printed case with externally accessible reset button
+
+## Build Guide
+
+[Find the Assembly Manual here.](/docs/prospector_assembly_manual.jpg)
 
 ## Firmware & Usage
 
-Coming Soon™
+[Find the ZMK module and instructions here.](https://github.com/carrefinho/prospector-zmk-module)
 
 ## Bill of Materials
 
@@ -27,6 +33,10 @@ Coming Soon™
 | M2x6 pan/wafer head screws | - | 4 |  |
 | M2.5x4 pan/wafer head screws | - | 4 |  |
 
-## Build Guide
+## Credits
 
-[Find the Assembly Manual here.](/docs/prospector_assembly_manual.jpg)
+- [englmaxi\/zmk-dongle-display](https://github.com/englmaxi/zmk-dongle-display): inspiration, display code, module docs
+- [badjeff's many modules](https://github.com/badjeff): CMake magic
+- [JetKVM](https://jetkvm.com/): form factor
+- [caksoylar\/zmk-rgbled-widget](https://github.com/caksoylar/zmk-rgbled-widget): module docs
+- IKEA(???): assembly manual design
