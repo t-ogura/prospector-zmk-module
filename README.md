@@ -2,7 +2,7 @@
 
 Prospector is a desktop ZMK dongle with full color LCD screen.
 
-![Prospector between split keyboards on white background](/docs/images/prospector_hero.jpg)
+![Prospector between split keyboards on white background](/docs/images/prospector_hero2.jpg)
 
 > not doing a great job showcasing those 16-bit colors am i
 
