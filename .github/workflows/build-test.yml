@@ -1,0 +1,70 @@
+name: Build Test
+
+on:
+  push:
+    branches: [ main, feature/scanner-mode ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: zmkfirmware/zmk-build-arm:stable
+    
+    strategy:
+      matrix:
+        include:
+          # Test Scanner Mode
+          - board: seeeduino_xiao_ble
+            shield: prospector_scanner
+            artifact-name: prospector_scanner
+          
+          # Test Advertisement with Corne (without actual corne shield)
+          - board: nice_nano_v2
+            shield: ""
+            artifact-name: advertisement_test
+            cmake-args: -DCONFIG_ZMK_STATUS_ADVERTISEMENT=y -DCONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME="TestBoard"
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Cache west modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          modules/
+          tools/
+          zephyr/
+          bootloader/
+          zmk/
+        key: ${{ runner.os }}-build-${{ hashFiles('**/west.yml', '**/build.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-build-
+    
+    - name: West Init
+      run: west init -l config/
+    
+    - name: West Update
+      run: west update
+    
+    - name: West Zephyr export
+      run: west zephyr-export
+    
+    - name: West Build (${{ matrix.board }})
+      run: |
+        if [ -n "${{ matrix.shield }}" ]; then
+          west build -s zmk/app -b ${{ matrix.board }} -- -DSHIELD=${{ matrix.shield }} ${{ matrix.cmake-args }}
+        else
+          west build -s zmk/app -b ${{ matrix.board }} -- ${{ matrix.cmake-args }}
+        fi
+    
+    - name: Archive firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-${{ matrix.artifact-name }}
+        path: |
+          build/zephyr/zmk.uf2
+          build/zephyr/zmk.hex
+        if-no-files-found: ignore

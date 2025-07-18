@@ -1,16 +1,72 @@
 # Prospector ZMK Module
 
-All the necessary stuff for [Prospector](https://github.com/carrefinho/prospector) to display things with ZMK. Currently functional albeit barebones.
+All the necessary stuff for [Prospector](https://github.com/carrefinho/prospector) to display things with ZMK. 
 
 ## Features
 
+### Dongle Mode (Original)
 - Highest active layer roller
 - Peripheral battery bar
 - Peripheral connection status
 - Caps word indicator
 
+### Scanner Mode (New)
+- **Independent status display device**
+- BLE Advertisement scanning for keyboard status
+- Multiple keyboard support (up to 3 simultaneously)
+- Works with any ZMK keyboard without limiting connections
+- Automatic brightness control with ambient light sensor
+- USB-powered or battery operation
+
+### Status Advertisement (New)
+- **Keyboard status broadcasting via BLE Advertisement**
+- Non-intrusive - doesn't affect keyboard's normal operation
+- Broadcasts battery, layer, connection status
+- Configurable update interval and keyboard identification
+
 ## Installation
 
+### Option 1: Scanner Mode (Recommended)
+Use Prospector as an independent status display device.
+
+#### Keyboard Side
+Add this module to your keyboard's `config/west.yml`:
+
+```yaml
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: t-ogura
+      url-base: https://github.com/t-ogura
+  projects:
+    - name: zmk
+      remote: zmkfirmware
+      revision: main
+      import: app/west.yml
+    - name: prospector-zmk-module
+      remote: t-ogura
+      revision: feature/scanner-mode
+  self:
+    path: config
+```
+
+Add to your keyboard's `.conf` file:
+```conf
+CONFIG_ZMK_STATUS_ADVERTISEMENT=y
+CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME="MyKeyboard"
+```
+
+#### Prospector Side
+Use the `prospector_scanner` shield:
+
+```yaml
+include:
+  - board: seeeduino_xiao_ble
+    shield: prospector_scanner
+```
+
+### Option 2: Dongle Mode (Original)
 Your ZMK keyboard should be set up with a dongle as central.
 
 Add this module to your `config/west.yml` with these new entries under `remotes` and `projects`:
