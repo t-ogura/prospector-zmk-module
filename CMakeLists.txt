@@ -20,3 +20,8 @@ if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
         zephyr_library_sources(src/split/bluetooth/central_status_changed_observer.c)
 
 endif()
+
+# Add status advertisement support
+if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+        zephyr_library_sources(src/status_advertisement.c)
+endif()
