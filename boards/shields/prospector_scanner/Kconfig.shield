@@ -19,6 +19,7 @@ config BT_OBSERVER
     default y
 
 config BT_SCAN_FILTER_ENABLE
+    bool
     default y
 
 # Disable unused features to save memory
@@ -39,21 +40,27 @@ config LVGL
     default y
 
 config LVGL_USE_LABEL
+    bool
     default y
 
 config LVGL_USE_BAR
+    bool
     default y
 
 config LVGL_USE_ROLLER
+    bool
     default y
 
 config LVGL_FONT_MONTSERRAT_20
+    bool
     default y
 
 config LVGL_FONT_MONTSERRAT_16
+    bool
     default y
 
 config LVGL_FONT_MONTSERRAT_14
+    bool
     default y
 
 config DISPLAY_LOG_LEVEL

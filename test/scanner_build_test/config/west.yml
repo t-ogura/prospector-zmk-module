@@ -7,5 +7,9 @@ manifest:
       remote: zmkfirmware
       revision: main
       import: app/west.yml
+    - name: prospector-zmk-module
+      path: prospector-zmk-module
+      url: ../../../
+      revision: feature/scanner-mode
   self:
     path: config
