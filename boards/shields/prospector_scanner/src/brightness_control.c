@@ -61,23 +61,8 @@ static void brightness_work_handler(struct k_work *work) {
 }
 
 static int brightness_control_init(void) {
-    als_dev = DEVICE_DT_GET_ANY(adafruit_apds9960);
-    if (!als_dev) {
-        LOG_WRN("ALS device not found, using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-        // TODO: Implement fixed brightness setting
-        return 0;
-    }
-    
-    if (!device_is_ready(als_dev)) {
-        LOG_ERR("ALS device not ready, using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-        // TODO: Implement fixed brightness setting
-        return -ENODEV;
-    }
-    
-    k_work_init_delayable(&brightness_work, brightness_work_handler);
-    k_work_schedule(&brightness_work, K_SECONDS(1));
-    
-    LOG_INF("Brightness control initialized with ALS");
+    LOG_WRN("ALS device not configured, using fixed brightness");
+    // TODO: Implement fixed brightness setting
     return 0;
 }
 
