@@ -8,6 +8,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/net/buf.h>
 
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>

@@ -73,6 +73,8 @@
     };
 };
 
-&zephyr_display {
-    status = "okay";
+/ {
+    chosen {
+        zephyr,display = &st7789v;
+    };
 };
