@@ -9,8 +9,6 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/logging/log.h>
 
-#include <zmk/display.h>
-
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
@@ -49,10 +47,10 @@ static void update_brightness(void) {
         brightness = 10 + ((light_level - 10) * 90) / 990;
     }
     
-    // Set display brightness
-    zmk_display_set_brightness(brightness);
-    
-    LOG_DBG("ALS: %d lux, Brightness: %d%%", light_level, brightness);
+    // Set display brightness - TODO: Implement proper brightness control
+    // Currently ZMK doesn't have a standard brightness API
+    // This would need to be implemented in the display driver
+    LOG_DBG("ALS: %d lux, Target brightness: %d%% (not implemented)", light_level, brightness);
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -65,14 +63,14 @@ static void brightness_work_handler(struct k_work *work) {
 static int brightness_control_init(void) {
     als_dev = DEVICE_DT_GET_ANY(adafruit_apds9960);
     if (!als_dev) {
-        LOG_WRN("ALS device not found, using fixed brightness");
-        zmk_display_set_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        LOG_WRN("ALS device not found, using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        // TODO: Implement fixed brightness setting
         return 0;
     }
     
     if (!device_is_ready(als_dev)) {
-        LOG_ERR("ALS device not ready");
-        zmk_display_set_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        LOG_ERR("ALS device not ready, using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        // TODO: Implement fixed brightness setting
         return -ENODEV;
     }
     
@@ -86,12 +84,12 @@ static int brightness_control_init(void) {
 #else // !CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
 static int brightness_control_init(void) {
-    zmk_display_set_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-    LOG_INF("Brightness control initialized with fixed brightness: %d%%", 
+    // TODO: Implement fixed brightness setting
+    LOG_INF("Brightness control initialized with fixed brightness: %d%% (not implemented)", 
             CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
     return 0;
 }
 
 #endif // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-SYS_INIT(brightness_control_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+SYS_INIT(brightness_control_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);

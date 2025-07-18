@@ -9,6 +9,8 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
+#include <string.h>
+#include <stdio.h>
 
 #include <zmk/battery.h>
 #include <zmk/keymap.h>
@@ -174,6 +176,6 @@ int zmk_status_advertisement_stop(void) {
 }
 
 // Initialize on system startup
-SYS_INIT(zmk_status_advertisement_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+SYS_INIT(zmk_status_advertisement_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 #endif // CONFIG_ZMK_STATUS_ADVERTISEMENT

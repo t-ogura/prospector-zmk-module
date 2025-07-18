@@ -7,8 +7,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
+#include <stdio.h>
 
-#include <zmk/display.h>
 #include <zmk/status_scanner.h>
 
 #include <lvgl.h>
@@ -163,6 +164,6 @@ static int scanner_display_init(void) {
     return 0;
 }
 
-SYS_INIT(scanner_display_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+SYS_INIT(scanner_display_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY

@@ -2,11 +2,13 @@ zephyr_include_directories(include)
 zephyr_include_directories(${APPLICATION_SOURCE_DIR}/include)
 zephyr_library()
 
-if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
-
+# Add display and LVGL support once for any shield that needs it
+if(CONFIG_SHIELD_PROSPECTOR_ADAPTER OR CONFIG_SHIELD_PROSPECTOR_SCANNER)
         add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/drivers/display)
         add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/modules/lvgl)
+endif()
 
+if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
         if(CONFIG_DT_HAS_ZMK_BEHAVIOR_CAPS_WORD_ENABLED)
                 zephyr_library_sources(src/events/caps_word_state_changed.c)
                 set_source_files_properties(
@@ -18,7 +20,6 @@ if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
 
         zephyr_library_sources(src/events/split_central_status_changed.c)
         zephyr_library_sources(src/split/bluetooth/central_status_changed_observer.c)
-
 endif()
 
 # Add status advertisement support
@@ -33,8 +34,6 @@ endif()
 
 # Add scanner shield support
 if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
-        add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/drivers/display)
-        add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/modules/lvgl)
         zephyr_library_sources(boards/shields/prospector_scanner/src/scanner_display.c)
         zephyr_library_sources(boards/shields/prospector_scanner/src/brightness_control.c)
 endif()
