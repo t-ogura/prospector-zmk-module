@@ -21,7 +21,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static lv_obj_t *screen;
 static lv_obj_t *keyboard_name_label;
 static lv_obj_t *layer_label;
-static lv_obj_t *battery_bar;
 static lv_obj_t *battery_label;
 static lv_obj_t *connection_label;
 static lv_obj_t *status_label;
@@ -43,9 +42,8 @@ static void update_display(void) {
             lv_label_set_text(layer_label, layer_buf);
             
             // Update battery
-            lv_bar_set_value(battery_bar, status->data.battery_level, LV_ANIM_OFF);
             char battery_buf[16];
-            snprintf(battery_buf, sizeof(battery_buf), "%d%%", status->data.battery_level);
+            snprintf(battery_buf, sizeof(battery_buf), "Battery: %d%%", status->data.battery_level);
             lv_label_set_text(battery_label, battery_buf);
             
             // Update connection info
@@ -73,7 +71,6 @@ static void update_display(void) {
         // No keyboards found
         lv_label_set_text(keyboard_name_label, "Scanning...");
         lv_label_set_text(layer_label, "No keyboards found");
-        lv_bar_set_value(battery_bar, 0, LV_ANIM_OFF);
         lv_label_set_text(battery_label, "");
         lv_label_set_text(connection_label, "");
         lv_label_set_text(status_label, "Waiting for keyboards");
@@ -93,7 +90,7 @@ static int create_display_ui(void) {
     // Keyboard name (top)
     keyboard_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(keyboard_name_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(keyboard_name_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(keyboard_name_label, &lv_font_montserrat_16, 0);
     lv_obj_align(keyboard_name_label, LV_ALIGN_TOP_MID, 0, 10);
     lv_label_set_text(keyboard_name_label, "Prospector Scanner");
     
@@ -104,32 +101,24 @@ static int create_display_ui(void) {
     lv_obj_align(layer_label, LV_ALIGN_TOP_MID, 0, 40);
     lv_label_set_text(layer_label, "Initializing...");
     
-    // Battery bar
-    battery_bar = lv_bar_create(screen);
-    lv_obj_set_size(battery_bar, 120, 20);
-    lv_obj_align(battery_bar, LV_ALIGN_CENTER, 0, -20);
-    lv_bar_set_range(battery_bar, 0, 100);
-    lv_obj_set_style_bg_color(battery_bar, lv_color_make(64, 64, 64), 0);
-    lv_obj_set_style_bg_color(battery_bar, lv_color_make(0, 200, 0), LV_PART_INDICATOR);
-    
-    // Battery percentage
+    // Battery info
     battery_label = lv_label_create(screen);
     lv_obj_set_style_text_color(battery_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_14, 0);
-    lv_obj_align(battery_label, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_16, 0);
+    lv_obj_align(battery_label, LV_ALIGN_CENTER, 0, -20);
     lv_label_set_text(battery_label, "");
     
     // Connection info
     connection_label = lv_label_create(screen);
     lv_obj_set_style_text_color(connection_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(connection_label, &lv_font_montserrat_14, 0);
-    lv_obj_align(connection_label, LV_ALIGN_CENTER, 0, 35);
+    lv_obj_set_style_text_font(connection_label, &lv_font_montserrat_16, 0);
+    lv_obj_align(connection_label, LV_ALIGN_CENTER, 0, 10);
     lv_label_set_text(connection_label, "");
     
     // Status flags
     status_label = lv_label_create(screen);
     lv_obj_set_style_text_color(status_label, lv_color_make(255, 255, 0), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_16, 0);
     lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_label_set_text(status_label, "Starting...");
     

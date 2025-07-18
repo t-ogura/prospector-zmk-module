@@ -9,6 +9,7 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/buf.h>
+#include <zephyr/init.h>
 #include <string.h>
 
 #include <zmk/status_scanner.h>
@@ -239,6 +240,6 @@ int zmk_status_scanner_get_primary_keyboard(void) {
 }
 
 // Initialize on system startup
-SYS_INIT(zmk_status_scanner_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(zmk_status_scanner_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER
