@@ -1,0 +1,62 @@
+# Copyright (c) 2024 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+config SHIELD_PROSPECTOR_SCANNER
+    def_bool $(shields_list_contains,prospector_scanner)
+
+if SHIELD_PROSPECTOR_SCANNER
+
+config ZMK_KEYBOARD_NAME
+    default "Prospector Scanner"
+
+config ZMK_DISPLAY
+    default y
+
+config PROSPECTOR_MODE_SCANNER
+    default y
+
+config BT_OBSERVER
+    default y
+
+config BT_SCAN_FILTER_ENABLE
+    default y
+
+# Disable unused features to save memory
+config ZMK_SPLIT
+    default n
+
+config ZMK_BLE
+    default y
+
+config ZMK_USB
+    default y
+
+config ZMK_BATTERY
+    default y
+
+# Enable display features
+config LVGL
+    default y
+
+config LVGL_USE_LABEL
+    default y
+
+config LVGL_USE_BAR
+    default y
+
+config LVGL_USE_ROLLER
+    default y
+
+config LVGL_FONT_MONTSERRAT_20
+    default y
+
+config LVGL_FONT_MONTSERRAT_16
+    default y
+
+config LVGL_FONT_MONTSERRAT_14
+    default y
+
+config DISPLAY_LOG_LEVEL
+    default 1
+
+endif # SHIELD_PROSPECTOR_SCANNER

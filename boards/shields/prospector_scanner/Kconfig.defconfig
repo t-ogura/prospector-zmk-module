@@ -1,0 +1,15 @@
+# Copyright (c) 2024 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+if SHIELD_PROSPECTOR_SCANNER
+
+config ZMK_KEYBOARD_NAME
+    default "Prospector Scanner"
+
+config ZMK_DISPLAY
+    default y
+
+config PROSPECTOR_MODE_SCANNER
+    default y
+
+endif # SHIELD_PROSPECTOR_SCANNER
