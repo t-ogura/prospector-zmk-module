@@ -18,9 +18,6 @@ config PROSPECTOR_MODE_SCANNER
 config BT_OBSERVER
     default y
 
-config BT_SCAN_FILTER_ENABLE
-    bool
-    default y
 
 # Disable unused features to save memory
 config ZMK_SPLIT
