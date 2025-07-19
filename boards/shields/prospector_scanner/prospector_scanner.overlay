@@ -28,13 +28,13 @@
     // Ambient light sensor (optional)
     aliases {
         als = &apds9960;
-        backlight = &disp_bl;
     };
 
-    pwmleds {
-        compatible = "pwm-leds";
-        disp_bl: pwm_led_1 {
-            pwms = <&pwm1 0 PWM_MSEC(1) PWM_POLARITY_NORMAL>;
+    // GPIO backlight control (original dongle style)
+    backlight_gpio {
+        compatible = "gpio-leds";
+        backlight_gpio_pin: backlight_gpio {
+            gpios = <&xiao_d 4 GPIO_ACTIVE_HIGH>;
         };
     };
 };

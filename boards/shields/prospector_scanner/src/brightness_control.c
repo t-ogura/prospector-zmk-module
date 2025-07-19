@@ -84,44 +84,48 @@ static int brightness_control_init(void) {
 
 #else // !CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-static const struct device *backlight_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(backlight));
+// Simple GPIO control following original dongle design
+static const struct gpio_dt_spec backlight_gpio = GPIO_DT_SPEC_GET_OR(DT_PATH(backlight_gpio, backlight_gpio_pin), gpios, {0});
 
 static int set_backlight(uint8_t brightness_percent) {
-    if (!backlight_dev) {
-        LOG_ERR("Backlight device not found");
+    if (!gpio_is_ready_dt(&backlight_gpio)) {
+        LOG_ERR("GPIO backlight not ready");
         return -ENODEV;
     }
     
-    if (!device_is_ready(backlight_dev)) {
-        LOG_ERR("Backlight device not ready");
-        return -ENODEV;
-    }
-    
-    // Calculate PWM duty cycle (0-100% brightness)
-    uint32_t period_usec = 1000; // 1kHz PWM
-    uint32_t pulse_usec = (period_usec * brightness_percent) / 100;
-    
-    int ret = pwm_set_usec(backlight_dev, 0, period_usec, pulse_usec, 0);
+    // Simple on/off control - turn on if brightness > 0, following original dongle design
+    bool enable = brightness_percent > 0;
+    int ret = gpio_pin_set_dt(&backlight_gpio, enable ? 1 : 0);
     if (ret < 0) {
-        LOG_ERR("Failed to set PWM backlight: %d", ret);
+        LOG_ERR("Failed to set GPIO backlight: %d", ret);
         return ret;
     }
     
-    LOG_INF("Backlight set to %d%% via PWM", brightness_percent);
+    LOG_INF("Backlight %s via GPIO (original dongle style)", enable ? "enabled" : "disabled");
     return 0;
 }
 
 static int brightness_control_init(void) {
-    LOG_INF("Initializing fixed brightness control at %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+    LOG_INF("Initializing GPIO brightness control (original dongle style)");
     
-    // Set fixed brightness
+    // Configure GPIO output
+    if (gpio_is_ready_dt(&backlight_gpio)) {
+        int ret = gpio_pin_configure_dt(&backlight_gpio, GPIO_OUTPUT_ACTIVE);
+        if (ret < 0) {
+            LOG_ERR("Failed to configure GPIO backlight: %d", ret);
+            return ret;
+        }
+        LOG_INF("GPIO backlight configured successfully");
+    }
+    
+    // Set fixed brightness (on)
     int ret = set_backlight(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
     if (ret < 0) {
         LOG_ERR("Failed to set backlight brightness: %d", ret);
         return ret;
     }
     
-    LOG_INF("Fixed brightness control initialized successfully");
+    LOG_INF("GPIO brightness control initialized successfully");
     return 0;
 }
 
