@@ -81,6 +81,17 @@ int zmk_status_advertisement_start(void);
  */
 int zmk_status_advertisement_stop(void);
 
+/**
+ * @brief Set advertisement interval
+ * 
+ * This function allows dynamic adjustment of the advertisement interval
+ * based on keyboard activity state.
+ * 
+ * @param interval_ms Advertisement interval in milliseconds (100-10000)
+ * @return 0 on success, negative error code on failure
+ */
+int zmk_status_advertisement_set_interval(uint32_t interval_ms);
+
 #ifdef __cplusplus
 }
 #endif
