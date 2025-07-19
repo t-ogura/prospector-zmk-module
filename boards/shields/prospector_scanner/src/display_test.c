@@ -35,11 +35,7 @@ static int display_test_init(void) {
     
     // Get display capabilities
     struct display_capabilities caps;
-    int ret = display_get_capabilities(display_dev, &caps);
-    if (ret < 0) {
-        LOG_ERR("Failed to get display capabilities: %d", ret);
-        return ret;
-    }
+    display_get_capabilities(display_dev, &caps);
     
     LOG_INF("Display capabilities:");
     LOG_INF("  Resolution: %dx%d", caps.x_resolution, caps.y_resolution);

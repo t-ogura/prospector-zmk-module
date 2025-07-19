@@ -84,8 +84,8 @@ static int brightness_control_init(void) {
 
 #else // !CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-// PWM backlight control following original dongle design
-static const struct device *backlight_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(backlight));
+// PWM backlight control following original dongle design (disabled for now)
+// static const struct device *backlight_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(backlight));
 
 static int set_backlight(uint8_t brightness_percent) {
     // Temporarily disable backlight control to focus on display
