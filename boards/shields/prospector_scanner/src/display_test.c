@@ -59,6 +59,7 @@ static int display_test_init(void) {
         .pitch = 240,
     };
     
+    int ret = 0;
     for (int y = 0; y < 280; y++) {
         ret = display_write(display_dev, 0, y, &desc, buffer);
         if (ret < 0) {
