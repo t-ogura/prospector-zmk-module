@@ -36,5 +36,9 @@ endif()
 if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
         zephyr_library_sources(boards/shields/prospector_scanner/src/scanner_display.c)
         zephyr_library_sources(boards/shields/prospector_scanner/src/brightness_control.c)
-        zephyr_library_sources(boards/shields/prospector_scanner/src/display_test.c)
+        
+        # Add display test if enabled
+        if(CONFIG_PROSPECTOR_DISPLAY_TEST)
+                zephyr_library_sources(boards/shields/prospector_scanner/src/display_test.c)
+        endif()
 endif()

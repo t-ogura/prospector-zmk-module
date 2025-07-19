@@ -12,4 +12,10 @@ config ZMK_DISPLAY
 config PROSPECTOR_MODE_SCANNER
     default y
 
+config PROSPECTOR_DISPLAY_TEST
+    bool "Enable display hardware test"
+    default n
+    help
+      Enable basic display hardware test for debugging.
+
 endif # SHIELD_PROSPECTOR_SCANNER
