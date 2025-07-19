@@ -28,22 +28,18 @@
     // Ambient light sensor (optional)
     aliases {
         als = &apds9960;
-    };
-
-    // GPIO backlight control (original dongle style)
-    backlight_gpio {
-        compatible = "gpio-leds";
-        backlight_gpio_pin: backlight_gpio {
-            gpios = <&xiao_d 4 GPIO_ACTIVE_HIGH>;
-        };
+        backlight = &disp_bl;
     };
 };
 
-disp_spi: &spi2 {
+disp_spi: &spi3 {
     status = "okay";
+    pinctrl-0 = <&spi3_default>;
+    pinctrl-1 = <&spi3_sleep>;
+    pinctrl-names = "default", "sleep";
     cs-gpios = <&xiao_d 9 GPIO_ACTIVE_LOW>;
 
-    st7789v: st7789v@0 {
+    st7789: st7789v@0 {
         compatible = "sitronix,st7789v";
         spi-max-frequency = <31000000>;
         reg = <0>;
@@ -84,6 +80,6 @@ disp_spi: &spi2 {
 
 / {
     chosen {
-        zephyr,display = &st7789v;
+        zephyr,display = &st7789;
     };
 };
