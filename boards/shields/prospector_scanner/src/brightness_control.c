@@ -84,12 +84,31 @@ static int brightness_control_init(void) {
 
 #else // !CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-// PWM backlight control following original dongle design (disabled for now)
-// static const struct device *backlight_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(backlight));
+// PWM backlight control following original dongle design
+static const struct device *backlight_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(backlight));
 
 static int set_backlight(uint8_t brightness_percent) {
-    // Temporarily disable backlight control to focus on display
-    LOG_INF("Backlight control disabled - focusing on display first (brightness would be %d%%)", brightness_percent);
+    if (!backlight_dev) {
+        LOG_ERR("Backlight device not found");
+        return -ENODEV;
+    }
+    
+    if (!device_is_ready(backlight_dev)) {
+        LOG_ERR("Backlight device not ready");
+        return -ENODEV;
+    }
+    
+    // Calculate PWM duty cycle (0-100% brightness)
+    uint32_t period_usec = 1000; // 1kHz PWM
+    uint32_t pulse_usec = (period_usec * brightness_percent) / 100;
+    
+    int ret = pwm_set_usec(backlight_dev, 0, period_usec, pulse_usec, 0);
+    if (ret < 0) {
+        LOG_ERR("Failed to set PWM backlight: %d", ret);
+        return ret;
+    }
+    
+    LOG_INF("Backlight set to %d%% via PWM (original dongle style)", brightness_percent);
     return 0;
 }
 

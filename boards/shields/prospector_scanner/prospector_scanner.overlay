@@ -28,7 +28,7 @@
     // Ambient light sensor (optional)
     aliases {
         als = &apds9960;
-        // backlight = &disp_bl;  // Temporarily disabled
+        backlight = &disp_bl;
     };
 };
 
