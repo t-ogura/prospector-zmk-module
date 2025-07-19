@@ -39,11 +39,8 @@
     };
 };
 
-disp_spi: &spi3 {
+disp_spi: &spi2 {
     status = "okay";
-    pinctrl-0 = <&spi3_default>;
-    pinctrl-1 = <&spi3_sleep>;
-    pinctrl-names = "default", "sleep";
     cs-gpios = <&xiao_d 9 GPIO_ACTIVE_LOW>;
 
     st7789v: st7789v@0 {
