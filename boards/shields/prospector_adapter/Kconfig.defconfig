@@ -1,5 +1,11 @@
 if SHIELD_PROSPECTOR_ADAPTER
 
+config PROSPECTOR_MODE_ADAPTER
+    bool "Enable Prospector Adapter Mode"
+    default y
+    help
+      Enable Prospector adapter (dongle) mode.
+
 config ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING
     default y
 
