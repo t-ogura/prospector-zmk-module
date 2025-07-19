@@ -7,6 +7,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pwm.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -61,17 +63,65 @@ static void brightness_work_handler(struct k_work *work) {
 }
 
 static int brightness_control_init(void) {
-    LOG_WRN("ALS device not configured, using fixed brightness");
-    // TODO: Implement fixed brightness setting
+    als_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(als));
+    if (!als_dev) {
+        LOG_WRN("ALS device not found, using fixed brightness");
+        return 0;
+    }
+    
+    if (!device_is_ready(als_dev)) {
+        LOG_WRN("ALS device not ready, using fixed brightness");
+        als_dev = NULL;
+        return 0;
+    }
+    
+    k_work_init_delayable(&brightness_work, brightness_work_handler);
+    k_work_schedule(&brightness_work, K_SECONDS(1));
+    
+    LOG_INF("ALS brightness control initialized");
     return 0;
 }
 
 #else // !CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
+static const struct device *backlight_dev = DEVICE_DT_GET_OR_NULL(DT_ALIAS(backlight));
+
+static int set_backlight(uint8_t brightness_percent) {
+    if (!backlight_dev) {
+        LOG_ERR("Backlight device not found");
+        return -ENODEV;
+    }
+    
+    if (!device_is_ready(backlight_dev)) {
+        LOG_ERR("Backlight device not ready");
+        return -ENODEV;
+    }
+    
+    // Calculate PWM duty cycle (0-100% brightness)
+    uint32_t period_usec = 1000; // 1kHz PWM
+    uint32_t pulse_usec = (period_usec * brightness_percent) / 100;
+    
+    int ret = pwm_set_usec(backlight_dev, 0, period_usec, pulse_usec, 0);
+    if (ret < 0) {
+        LOG_ERR("Failed to set PWM backlight: %d", ret);
+        return ret;
+    }
+    
+    LOG_INF("Backlight set to %d%% via PWM", brightness_percent);
+    return 0;
+}
+
 static int brightness_control_init(void) {
-    // TODO: Implement fixed brightness setting
-    LOG_INF("Brightness control initialized with fixed brightness: %d%% (not implemented)", 
-            CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+    LOG_INF("Initializing fixed brightness control at %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+    
+    // Set fixed brightness
+    int ret = set_backlight(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+    if (ret < 0) {
+        LOG_ERR("Failed to set backlight brightness: %d", ret);
+        return ret;
+    }
+    
+    LOG_INF("Fixed brightness control initialized successfully");
     return 0;
 }
 

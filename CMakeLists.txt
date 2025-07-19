@@ -2,10 +2,10 @@ zephyr_include_directories(include)
 zephyr_include_directories(${APPLICATION_SOURCE_DIR}/include)
 zephyr_library()
 
-# Add display and LVGL support once for any shield that needs it
+# Add display support for shields that need it
 if(CONFIG_SHIELD_PROSPECTOR_ADAPTER OR CONFIG_SHIELD_PROSPECTOR_SCANNER)
         add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/drivers/display)
-        add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/modules/lvgl)
+        # Note: LVGL is provided by Zephyr modules, no need to add manually
 endif()
 
 if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
