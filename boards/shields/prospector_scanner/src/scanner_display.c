@@ -83,9 +83,13 @@ static void scanner_event_callback(struct zmk_status_scanner_event_data *event_d
 }
 
 static int create_display_ui(void) {
-    screen = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(screen, LV_HOR_RES, LV_VER_RES);
-    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    // Create screen exactly like original adapter
+    screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
+    
+    // Load the screen
+    lv_scr_load(screen);
     
     // Keyboard name (top)
     keyboard_name_label = lv_label_create(screen);
