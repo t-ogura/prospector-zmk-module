@@ -109,4 +109,4 @@ static int brightness_control_init(void) {
 
 #endif // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-SYS_INIT(brightness_control_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(brightness_control_init, APPLICATION, 80);

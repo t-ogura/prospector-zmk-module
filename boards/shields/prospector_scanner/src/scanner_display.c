@@ -157,6 +157,6 @@ static int scanner_display_init(void) {
     return 0;
 }
 
-SYS_INIT(scanner_display_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(scanner_display_init, APPLICATION, 85);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY

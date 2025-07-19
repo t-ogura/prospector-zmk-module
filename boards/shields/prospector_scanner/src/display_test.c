@@ -76,6 +76,6 @@ static int display_test_init(void) {
     return 0;
 }
 
-SYS_INIT(display_test_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT + 10);
+SYS_INIT(display_test_init, APPLICATION, 90);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY
