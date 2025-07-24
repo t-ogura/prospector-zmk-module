@@ -10,6 +10,7 @@
     chosen {
         zmk,kscan = &kscan0;
         zmk,matrix_transform = &default_transform;
+        zephyr,display = &st7789v;
     };
 
     default_transform: keymap_transform_0 {
@@ -25,22 +26,82 @@
         input-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 
+    // PWM backlight configuration (Pin 6 = P1.11)
+    pwmleds {
+        compatible = "pwm-leds";
+        disp_bl: pwm_led_1 {
+            pwms = <&pwm1 0 PWM_MSEC(1) PWM_POLARITY_NORMAL>;
+        };
+    };
+
+    // Alternative: Simple GPIO backlight control
+    backlight: backlight {
+        compatible = "gpio-leds";
+        bl_gpio: backlight_gpio {
+            gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+            label = "Display Backlight";
+        };
+    };
+
     // Ambient light sensor (optional)
     aliases {
         als = &apds9960;
     };
 };
 
-&xiao_spi {
+// Disable default SPI2 to avoid conflicts
+&spi2 {
+    status = "disabled";
+};
+
+// Custom pinctrl configuration to match original adapter
+&pinctrl {
+    spi3_default: spi3_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 13)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 15)>,
+                <NRF_PSEL(SPIM_MISO, 1, 10)>;
+        };
+    };
+
+    spi3_sleep: spi3_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 13)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 15)>,
+                <NRF_PSEL(SPIM_MISO, 1, 10)>;
+            low-power-enable;
+        };
+    };
+
+    pwm1_default: pwm1_default {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;
+            nordic,invert;
+        };
+    };
+
+    pwm1_sleep: pwm1_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;
+            low-power-enable;
+        };
+    };
+};
+
+// Use SPI3 with custom pinctrl (matches original adapter)
+disp_spi: &spi3 {
     status = "okay";
-    cs-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
-    
+    pinctrl-0 = <&spi3_default>;
+    pinctrl-1 = <&spi3_sleep>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&xiao_d 9 GPIO_ACTIVE_LOW>;
+
     st7789v: st7789v@0 {
         compatible = "sitronix,st7789v";
+        spi-max-frequency = <31000000>;
         reg = <0>;
-        spi-max-frequency = <20000000>;
-        cmd-data-gpios = <&xiao_d 3 GPIO_ACTIVE_LOW>;
-        reset-gpios = <&xiao_d 2 GPIO_ACTIVE_LOW>;
+        cmd-data-gpios = <&xiao_d 7 GPIO_ACTIVE_LOW>;
+        reset-gpios = <&xiao_d 3 GPIO_ACTIVE_LOW>;
         width = <240>;
         height = <280>;
         x-offset = <0>;
@@ -63,18 +124,22 @@
     };
 };
 
-&xiao_i2c {
+// I2C configuration
+&i2c0 {
     status = "okay";
-    
+
     apds9960: apds9960@39 {
-        compatible = "adafruit,apds9960";
-        reg = <0x39>;
+        compatible = "avago,apds9960";
         status = "okay";
+        reg = <0x39>;
+        int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 };
 
-/ {
-    chosen {
-        zephyr,display = &st7789v;
-    };
+// PWM1 configuration for backlight
+&pwm1 {
+    status = "okay";
+    pinctrl-0 = <&pwm1_default>;
+    pinctrl-1 = <&pwm1_sleep>;
+    pinctrl-names = "default", "sleep";
 };
