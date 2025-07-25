@@ -146,8 +146,13 @@ static void advertisement_work_handler(struct k_work *work) {
     // Start advertising
     int err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
     if (err) {
+        printk("*** PROSPECTOR: Failed to start advertising: %d ***\n", err);
         LOG_ERR("Failed to start advertising: %d", err);
     } else {
+        printk("*** PROSPECTOR: Advertisement sent: %s, battery: %d%%, layer: %d ***\n", 
+                CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
+                adv_data.battery_level, 
+                adv_data.active_layer);
         LOG_INF("Advertisement sent: %s, battery: %d%%, layer: %d", 
                 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
                 adv_data.battery_level, 
@@ -159,6 +164,8 @@ static void advertisement_work_handler(struct k_work *work) {
 }
 
 int zmk_status_advertisement_init(void) {
+    // Use printk for guaranteed output even if LOG doesn't work
+    printk("*** PROSPECTOR: Status advertisement module loading... ***\n");
     LOG_INF("Status advertisement module loading...");
     
     k_work_init_delayable(&adv_work, advertisement_work_handler);
@@ -166,6 +173,10 @@ int zmk_status_advertisement_init(void) {
     // Start advertisement automatically after initialization
     adv_started = true;
     k_work_schedule(&adv_work, K_SECONDS(1)); // Reduced delay to 1 second
+    
+    printk("*** PROSPECTOR: Status advertisement initialized and auto-started ***\n");
+    printk("*** PROSPECTOR: Advertisement interval: %d ms ***\n", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
+    printk("*** PROSPECTOR: Keyboard name: %s ***\n", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
     
     LOG_INF("Status advertisement initialized and auto-started");
     LOG_INF("Advertisement interval: %d ms", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
