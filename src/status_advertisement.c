@@ -154,24 +154,20 @@ static void advertisement_work_handler(struct k_work *work) {
         BT_DATA(BT_DATA_MANUFACTURER_DATA, &adv_data, sizeof(adv_data)),
     };
     
-    // Stop existing ZMK advertising and replace with our own
-    printk("*** PROSPECTOR: Stopping existing advertising ***\n");
-    bt_le_adv_stop();
-    k_sleep(K_MSEC(50)); // Small delay to ensure stop completes
-    
-    printk("*** PROSPECTOR: Starting custom advertisement ***\n");
-    int err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), NULL, 0);
+    // Try our custom advertising first, fallback to not interfering with ZMK
+    printk("*** PROSPECTOR: Attempting custom advertisement ***\n");
+    int err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
     
     printk("*** PROSPECTOR: Advertisement start result: %d ***\n", err);
     
-    if (err) {
+    if (err == -EALREADY || err == -EBUSY) {
+        printk("*** PROSPECTOR: BLE advertising already active (expected) ***\n");
+        // Don't interfere with ZMK's advertising
+        // Just log that we tried
+        err = 0;
+    } else if (err) {
         printk("*** PROSPECTOR: Failed to start advertising: %d ***\n", err);
         LOG_ERR("Failed to start advertising: %d", err);
-        
-        // Try to restore ZMK's normal advertising if our attempt fails
-        printk("*** PROSPECTOR: Attempting to restore normal ZMK advertising ***\n");
-        // Note: We can't easily restore ZMK's exact advertising here,
-        // but ZMK should restart it automatically
     } else {
         printk("*** PROSPECTOR: Advertisement sent: %s, battery: %d%%, layer: %d ***\n", 
                 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
@@ -181,6 +177,13 @@ static void advertisement_work_handler(struct k_work *work) {
                 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
                 adv_data.battery_level, 
                 adv_data.active_layer);
+    }
+    
+    // Stop our advertising quickly to let ZMK resume
+    if (!err) {
+        k_sleep(K_MSEC(100)); // Brief advertisement
+        bt_le_adv_stop();
+        printk("*** PROSPECTOR: Stopped custom advertising to restore ZMK ***\n");
     }
     
     // Schedule next update
