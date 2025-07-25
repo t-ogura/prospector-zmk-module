@@ -260,7 +260,7 @@ int zmk_status_scanner_get_primary_keyboard(void) {
     return primary;
 }
 
-// Initialize on system startup
-SYS_INIT(zmk_status_scanner_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+// Initialize on system startup - use later priority to ensure BT is ready
+SYS_INIT(zmk_status_scanner_init, APPLICATION, 99);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER

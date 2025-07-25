@@ -145,11 +145,22 @@ static void advertisement_work_handler(struct k_work *work) {
         BT_DATA(BT_DATA_MANUFACTURER_DATA, &adv_data, sizeof(adv_data)),
     };
     
+    // Stop any existing advertising first
+    bt_le_adv_stop();
+    
     // Start advertising
     int err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
     if (err) {
         printk("*** PROSPECTOR: Failed to start advertising: %d ***\n", err);
         LOG_ERR("Failed to start advertising: %d", err);
+        
+        // Try to recover by stopping and retrying
+        bt_le_adv_stop();
+        k_sleep(K_MSEC(100));
+        err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
+        if (!err) {
+            printk("*** PROSPECTOR: Advertising started after retry ***\n");
+        }
     } else {
         printk("*** PROSPECTOR: Advertisement sent: %s, battery: %d%%, layer: %d ***\n", 
                 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
@@ -228,7 +239,7 @@ int zmk_status_advertisement_stop(void) {
     return 0;
 }
 
-// Initialize on system startup
-SYS_INIT(zmk_status_advertisement_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+// Initialize on system startup - use later priority to ensure BT is ready
+SYS_INIT(zmk_status_advertisement_init, APPLICATION, 99);
 
 #endif // CONFIG_ZMK_STATUS_ADVERTISEMENT
