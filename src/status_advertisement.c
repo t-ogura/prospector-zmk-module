@@ -38,181 +38,146 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static struct zmk_status_adv_data adv_data;
 static struct k_work_delayable adv_work;
 static bool adv_started = false;
+static bool default_adv_stopped = false;
 
-static void update_advertisement_data(void) {
-    // Clear the structure
-    memset(&adv_data, 0, sizeof(adv_data));
+// Compact payload for 31-byte BLE limit
+static uint8_t compact_payload[8]; // Keep it small for BLE limits
+
+static struct bt_data custom_adv_data[] = {
+    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
+            strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
+    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
+    BT_DATA(BT_DATA_MANUFACTURER_DATA, compact_payload, sizeof(compact_payload)),
+};
+
+static void build_compact_payload(void) {
+    // Create compact 8-byte payload for BLE 31-byte limit
+    memset(compact_payload, 0, sizeof(compact_payload));
     
-    // Set manufacturer ID (0xFFFF = Reserved for local use)
-    adv_data.manufacturer_id[0] = 0xFF;
-    adv_data.manufacturer_id[1] = 0xFF;
+    // Byte 0-1: Manufacturer ID (0xFFFF)
+    compact_payload[0] = 0xFF;
+    compact_payload[1] = 0xFF;
     
-    // Set service UUID
-    adv_data.service_uuid[0] = (ZMK_STATUS_ADV_SERVICE_UUID >> 8) & 0xFF;
-    adv_data.service_uuid[1] = ZMK_STATUS_ADV_SERVICE_UUID & 0xFF;
+    // Byte 2-3: Service UUID (0xABCD)
+    compact_payload[2] = 0xAB;
+    compact_payload[3] = 0xCD;
     
-    // Set protocol version
-    adv_data.version = ZMK_STATUS_ADV_VERSION;
+    // Byte 4: Protocol version
+    compact_payload[4] = ZMK_STATUS_ADV_VERSION;
     
-    // Get battery level
+    // Byte 5: Battery level
     uint8_t battery_level = zmk_battery_state_of_charge();
     if (battery_level > 100) {
         battery_level = 100;
     }
-    adv_data.battery_level = battery_level;
+    compact_payload[5] = battery_level;
     
-    // Get active layer (only available on central/standalone devices)
-    uint8_t layer = 0; // Default for peripheral devices
+    // Byte 6: Active layer (only for central/standalone)
+    uint8_t layer = 0;
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     layer = zmk_keymap_highest_layer_active();
-    adv_data.active_layer = layer;
-#else
-    // Peripheral devices don't have keymap access
-    adv_data.active_layer = 0;
 #endif
+    compact_payload[6] = layer;
     
-    // Get active profile (only available on central/standalone devices)  
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
-    uint8_t profile = zmk_ble_active_profile_index();
-    adv_data.profile_slot = profile;
-#else
-    // Peripheral devices don't have BLE profile access
-    adv_data.profile_slot = 0;
-#endif
-    
-    // Set device role and index for split keyboard support
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    adv_data.device_role = ZMK_DEVICE_ROLE_CENTRAL;
-    adv_data.device_index = 0; // Central is always index 0
-#elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)  
-    adv_data.device_role = ZMK_DEVICE_ROLE_PERIPHERAL;
-    adv_data.device_index = 1; // TODO: Get actual peripheral index
-#else
-    adv_data.device_role = ZMK_DEVICE_ROLE_STANDALONE;
-    adv_data.device_index = 0;
-#endif
-    
-    // Get connection count - simplified for now
-    // TODO: Implement proper connection counting
-    adv_data.connection_count = 1; // Default to 1 for now
-    
-    // Set status flags
-    adv_data.status_flags = 0;
-    
-#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_CAPS_WORD)
-    // Check caps word status - this function might not exist
-    // TODO: Replace with correct caps word check function
-    // if (zmk_behavior_caps_word_is_active()) {
-    //     adv_data.status_flags |= ZMK_STATUS_FLAG_CAPS_WORD;
-    // }
-#endif
-    
+    // Byte 7: Status flags (USB connection, device role, etc.)
+    uint8_t status = 0;
 #if IS_ENABLED(CONFIG_ZMK_USB)
-    // Check USB connection
     if (zmk_usb_is_powered()) {
-        adv_data.status_flags |= ZMK_STATUS_FLAG_USB_CONNECTED;
+        status |= 0x01; // USB connected bit
     }
 #endif
     
-    // Check charging status - this function might not exist
-    // TODO: Replace with correct charging status check
-    // if (zmk_battery_is_charging()) {
-    //     adv_data.status_flags |= ZMK_STATUS_FLAG_CHARGING;
-    // }
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    status |= 0x10; // Central device bit
+#elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)  
+    status |= 0x20; // Peripheral device bit
+#else
+    status |= 0x00; // Standalone device (default)
+#endif
     
-    // Get layer name - use simple layer number for now
-    // TODO: Implement proper layer name lookup
-    snprintf(adv_data.layer_name, sizeof(adv_data.layer_name), "L%d", layer);
-    
-    // Set keyboard ID (derived from device name)
-    const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
-    uint32_t hash = 0;
-    for (int i = 0; keyboard_name[i] != '\0'; i++) {
-        hash = hash * 31 + keyboard_name[i];
+    compact_payload[7] = status;
+}
+
+// Stop default advertising early in boot process
+static int stop_default_advertising(const struct device *dev) {
+    if (default_adv_stopped) {
+        return 0;
     }
-    adv_data.keyboard_id[0] = (hash >> 24) & 0xFF;
-    adv_data.keyboard_id[1] = (hash >> 16) & 0xFF;
-    adv_data.keyboard_id[2] = (hash >> 8) & 0xFF;
-    adv_data.keyboard_id[3] = hash & 0xFF;
+    
+    printk("*** PROSPECTOR: Stopping default ZMK advertising ***\n");
+    int err = bt_le_adv_stop();
+    if (err && err != -EALREADY) {
+        printk("*** PROSPECTOR: bt_le_adv_stop failed: %d ***\n", err);
+        LOG_ERR("bt_le_adv_stop failed: %d", err);
+    } else {
+        printk("*** PROSPECTOR: Default advertising stopped successfully ***\n");
+        LOG_INF("Default advertising stopped");
+        default_adv_stopped = true;
+    }
+    return 0;
+}
+
+static void start_custom_advertising(void) {
+    if (!default_adv_stopped) {
+        printk("*** PROSPECTOR: Default advertising not stopped yet, trying again ***\n");
+        stop_default_advertising(NULL);
+        k_sleep(K_MSEC(50)); // Wait for stop to complete
+    }
+    
+    build_compact_payload();
+    
+    printk("*** PROSPECTOR: Starting custom advertising ***\n");
+    int err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, custom_adv_data, ARRAY_SIZE(custom_adv_data), NULL, 0);
+    
+    printk("*** PROSPECTOR: Custom advertising result: %d ***\n", err);
+    printk("*** PROSPECTOR: Compact payload: %02X %02X %02X %02X %02X %02X %02X %02X ***\n",
+            compact_payload[0], compact_payload[1], compact_payload[2], compact_payload[3],
+            compact_payload[4], compact_payload[5], compact_payload[6], compact_payload[7]);
+    
+    if (err == -EALREADY) {
+        printk("*** PROSPECTOR: Advertising already active (expected) ***\n");
+    } else if (err) {
+        printk("*** PROSPECTOR: Custom advertising failed: %d ***\n", err);
+        LOG_ERR("Custom advertising failed: %d", err);
+    } else {
+        printk("*** PROSPECTOR: Custom advertising started successfully ***\n");
+        LOG_INF("Custom advertising with manufacturer data started");
+    }
 }
 
 static void advertisement_work_handler(struct k_work *work) {
     if (!adv_started) {
-        printk("*** PROSPECTOR: Advertisement work called but not started ***\n");
-        LOG_WRN("Advertisement work called but not started");
         return;
     }
     
-    printk("*** PROSPECTOR: Updating advertisement data ***\n");
-    LOG_DBG("Updating advertisement data");
-    update_advertisement_data();
-    
-    // Stop ZMK's default advertising first
-    int stop_err = bt_le_adv_stop();
-    printk("*** PROSPECTOR: Stopped default advertising, result: %d ***\n", stop_err);
-    
-    // Wait briefly for stop to complete
-    k_sleep(K_MSEC(10));
-    
-    // Create our custom advertising data (within 31-byte limit)
-    struct bt_data custom_ad[] = {
-        BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-        BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
-                strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
-        BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
-        BT_DATA(BT_DATA_MANUFACTURER_DATA, &adv_data, sizeof(adv_data)),
-    };
-    
-    // Start our custom advertising with manufacturer data
-    int start_err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, custom_ad, ARRAY_SIZE(custom_ad), NULL, 0);
-    
-    printk("*** PROSPECTOR: Started custom advertising, result: %d ***\n", start_err);
-    printk("*** PROSPECTOR: Advertising %s, battery: %d%%, layer: %d ***\n", 
-            CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
-            adv_data.battery_level, 
-            adv_data.active_layer);
-    
-    printk("*** PROSPECTOR: Manufacturer data: %02X %02X %02X %02X %02X %02X %02X %02X ***\n",
-            adv_data.manufacturer_id[0], adv_data.manufacturer_id[1],
-            adv_data.service_uuid[0], adv_data.service_uuid[1],
-            adv_data.version, adv_data.battery_level,
-            adv_data.active_layer, adv_data.profile_slot);
-    
-    if (start_err) {
-        LOG_ERR("Failed to start custom advertising: %d", start_err);
-    } else {
-        LOG_INF("Custom advertising with manufacturer data started successfully");
-    }
+    // Update and restart advertising
+    start_custom_advertising();
     
     // Schedule next update
     k_work_schedule(&adv_work, K_MSEC(CONFIG_ZMK_STATUS_ADV_INTERVAL_MS));
 }
 
-int zmk_status_advertisement_init(void) {
-    printk("\n\n*** PROSPECTOR ADVERTISEMENT INIT STARTING ***\n\n");
-    printk("*** PROSPECTOR: Status advertisement module loading... ***\n");
-    LOG_INF("Status advertisement module loading...");
-    
-    // Flash LED or some visible indication if available
-#ifdef CONFIG_LED
-    // Try to flash an LED if available
-#endif
+// Initialize and start custom advertising after ZMK BLE setup
+static int start_custom_adv_system(const struct device *dev) {
+    printk("*** PROSPECTOR: Starting custom advertising system ***\n");
+    LOG_INF("Starting custom advertising system");
     
     k_work_init_delayable(&adv_work, advertisement_work_handler);
     
-    // Start advertisement automatically after initialization
+    // Start advertisement after brief delay to ensure BT is ready
     adv_started = true;
-    k_work_schedule(&adv_work, K_SECONDS(2)); // Start after 2 seconds to ensure BT is ready
+    k_work_schedule(&adv_work, K_SECONDS(1));
     
-    printk("*** PROSPECTOR: Status advertisement initialized and auto-started ***\n");
-    printk("*** PROSPECTOR: Advertisement interval: %d ms ***\n", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
+    printk("*** PROSPECTOR: Custom advertising system scheduled to start ***\n");
     printk("*** PROSPECTOR: Keyboard name: %s ***\n", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
-    printk("\n\n*** PROSPECTOR ADVERTISEMENT INIT COMPLETE ***\n\n");
+    printk("*** PROSPECTOR: Advertisement interval: %d ms ***\n", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
     
-    LOG_INF("Status advertisement initialized and auto-started");
-    LOG_INF("Advertisement interval: %d ms", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
-    LOG_INF("Keyboard name: %s", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
-    
+    return 0;
+}
+
+int zmk_status_advertisement_init(void) {
+    printk("\n\n*** PROSPECTOR ADVERTISEMENT INIT ***\n\n");
     return 0;
 }
 
@@ -258,7 +223,10 @@ int zmk_status_advertisement_stop(void) {
     return 0;
 }
 
-// Initialize AFTER ZMK's BLE system - use late priority to override ZMK advertising
-SYS_INIT(zmk_status_advertisement_init, APPLICATION, 95);
+// Stop default advertising early
+SYS_INIT(stop_default_advertising, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+
+// Start custom advertising system after ZMK BLE setup
+SYS_INIT(start_custom_adv_system, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT + 1);
 
 #endif // CONFIG_ZMK_STATUS_ADVERTISEMENT
