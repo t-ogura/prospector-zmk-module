@@ -71,4 +71,11 @@ config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     select SENSOR
     select APDS9960
 
+config PROSPECTOR_FIXED_BRIGHTNESS
+    int "Fixed display brightness percentage"
+    default 80
+    range 10 100
+    help
+      Fixed brightness level when ambient light sensor is not used
+
 endif # SHIELD_PROSPECTOR_SCANNER
