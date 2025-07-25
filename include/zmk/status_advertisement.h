@@ -41,6 +41,13 @@ struct zmk_status_adv_data {
 #define ZMK_STATUS_FLAG_USB_CONNECTED (1 << 2)
 
 /**
+ * @brief Device role definitions for split keyboard support
+ */
+#define ZMK_DEVICE_ROLE_STANDALONE   0  // Regular keyboard
+#define ZMK_DEVICE_ROLE_CENTRAL      1  // Split keyboard central side
+#define ZMK_DEVICE_ROLE_PERIPHERAL   2  // Split keyboard peripheral side
+
+/**
  * @brief Protocol version
  */
 #define ZMK_STATUS_ADV_VERSION 1

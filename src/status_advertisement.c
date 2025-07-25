@@ -53,13 +53,35 @@ static void update_advertisement_data(void) {
     }
     adv_data.battery_level = battery_level;
     
-    // Get active layer
+    // Get active layer (only available on central/standalone devices)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     uint8_t layer = zmk_keymap_highest_layer_active();
     adv_data.active_layer = layer;
+#else
+    // Peripheral devices don't have keymap access
+    adv_data.active_layer = 0;
+#endif
     
-    // Get active profile
+    // Get active profile (only available on central/standalone devices)  
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     uint8_t profile = zmk_ble_active_profile_index();
     adv_data.profile_slot = profile;
+#else
+    // Peripheral devices don't have BLE profile access
+    adv_data.profile_slot = 0;
+#endif
+    
+    // Set device role and index for split keyboard support
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    adv_data.device_role = ZMK_DEVICE_ROLE_CENTRAL;
+    adv_data.device_index = 0; // Central is always index 0
+#elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)  
+    adv_data.device_role = ZMK_DEVICE_ROLE_PERIPHERAL;
+    adv_data.device_index = 1; // TODO: Get actual peripheral index
+#else
+    adv_data.device_role = ZMK_DEVICE_ROLE_STANDALONE;
+    adv_data.device_index = 0;
+#endif
     
     // Get connection count - simplified for now
     // TODO: Implement proper connection counting
