@@ -147,44 +147,21 @@ static void advertisement_work_handler(struct k_work *work) {
     LOG_DBG("Updating advertisement data");
     update_advertisement_data();
     
-    // Create advertisement data with both device name and manufacturer data
-    struct bt_data ad[] = {
-        BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-        BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
-        BT_DATA(BT_DATA_MANUFACTURER_DATA, &adv_data, sizeof(adv_data)),
-    };
+    // TEMPORARY: Just log the data instead of trying to advertise
+    // This ensures keyboard remains visible while we debug
+    printk("*** PROSPECTOR: Would advertise - %s, battery: %d%%, layer: %d ***\n", 
+            CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
+            adv_data.battery_level, 
+            adv_data.active_layer);
     
-    // Try our custom advertising first, fallback to not interfering with ZMK
-    printk("*** PROSPECTOR: Attempting custom advertisement ***\n");
-    int err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
+    printk("*** PROSPECTOR: Manufacturer data: %02X %02X %02X %02X %02X %02X %02X %02X ***\n",
+            adv_data.manufacturer_id[0], adv_data.manufacturer_id[1],
+            adv_data.service_uuid[0], adv_data.service_uuid[1],
+            adv_data.version, adv_data.battery_level,
+            adv_data.active_layer, adv_data.profile_slot);
     
-    printk("*** PROSPECTOR: Advertisement start result: %d ***\n", err);
-    
-    if (err == -EALREADY || err == -EBUSY) {
-        printk("*** PROSPECTOR: BLE advertising already active (expected) ***\n");
-        // Don't interfere with ZMK's advertising
-        // Just log that we tried
-        err = 0;
-    } else if (err) {
-        printk("*** PROSPECTOR: Failed to start advertising: %d ***\n", err);
-        LOG_ERR("Failed to start advertising: %d", err);
-    } else {
-        printk("*** PROSPECTOR: Advertisement sent: %s, battery: %d%%, layer: %d ***\n", 
-                CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
-                adv_data.battery_level, 
-                adv_data.active_layer);
-        LOG_INF("Advertisement sent: %s, battery: %d%%, layer: %d", 
-                CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
-                adv_data.battery_level, 
-                adv_data.active_layer);
-    }
-    
-    // Stop our advertising quickly to let ZMK resume
-    if (!err) {
-        k_sleep(K_MSEC(100)); // Brief advertisement
-        bt_le_adv_stop();
-        printk("*** PROSPECTOR: Stopped custom advertising to restore ZMK ***\n");
-    }
+    // DON'T actually advertise - just prepare the data
+    // This way ZMK's normal advertising continues uninterrupted
     
     // Schedule next update
     k_work_schedule(&adv_work, K_MSEC(CONFIG_ZMK_STATUS_ADV_INTERVAL_MS));
