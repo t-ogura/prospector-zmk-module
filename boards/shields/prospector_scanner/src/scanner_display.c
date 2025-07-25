@@ -8,11 +8,61 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
+
+// Display rotation initialization (merged from display_rotate_init.c)
+static int scanner_display_init(void) {
+    LOG_INF("Initializing scanner display system");
+    
+    const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+    if (!device_is_ready(display)) {
+        LOG_ERR("Display device not ready");
+        return -EIO;
+    }
+    
+    // Set display orientation
+#ifdef CONFIG_PROSPECTOR_ROTATE_DISPLAY_180
+    int ret = display_set_orientation(display, DISPLAY_ORIENTATION_ROTATED_90);
+#else
+    int ret = display_set_orientation(display, DISPLAY_ORIENTATION_ROTATED_270);
+#endif
+    if (ret < 0) {
+        LOG_ERR("Failed to set display orientation: %d", ret);
+        return ret;
+    }
+    
+    // Ensure display stays on and disable blanking
+    ret = display_blanking_off(display);
+    if (ret < 0) {
+        LOG_WRN("Failed to turn off display blanking: %d", ret);
+    }
+    
+    // Force backlight on using GPIO (fallback method)
+    const struct device *gpio_dev = DEVICE_DT_GET(DT_NODELABEL(gpio1));
+    if (device_is_ready(gpio_dev)) {
+        ret = gpio_pin_configure(gpio_dev, 11, GPIO_OUTPUT_ACTIVE);
+        if (ret == 0) {
+            gpio_pin_set(gpio_dev, 11, 1);  // Turn on backlight
+            LOG_INF("Backlight GPIO set to ON");
+        } else {
+            LOG_WRN("Failed to configure backlight GPIO: %d", ret);
+        }
+    }
+    
+    // Add a delay to allow display to stabilize
+    k_msleep(100);
+    
+    LOG_INF("Scanner display initialized successfully");
+    return 0;
+}
+
+// Initialize display early in the boot process
+SYS_INIT(scanner_display_init, APPLICATION, 60);
 
 // Required function for ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
 // Following the working adapter pattern with simple, stable display
