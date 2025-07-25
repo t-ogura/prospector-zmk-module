@@ -8,9 +8,8 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
   zephyr_library_include_directories(${ZEPHYR_CURRENT_CMAKE_DIR}/include)
   
-  # Essential scanner sources only
+  # Essential scanner sources
   zephyr_library_sources(src/scanner_display.c)
-  # Temporarily disable other sources to ensure display stability
-  # zephyr_library_sources(src/brightness_control.c)  
-  # zephyr_library_sources(src/display_rotate_init.c)
+  zephyr_library_sources(src/brightness_control.c)  # Re-enabled with PWM control
+  # zephyr_library_sources(src/display_rotate_init.c)  # Merged into scanner_display.c
 endif()
