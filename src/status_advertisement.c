@@ -57,12 +57,15 @@ static struct bt_data prospector_scan_rsp[] = {
 };
 
 // Custom advertising parameters (connectable only, no USE_NAME flag)
-static const struct bt_le_adv_param prospector_adv_params = BT_LE_ADV_PARAM(
-    BT_LE_ADV_OPT_CONNECTABLE,
-    BT_GAP_ADV_FAST_INT_MIN_2,
-    BT_GAP_ADV_FAST_INT_MAX_2,
-    NULL
-);
+static const struct bt_le_adv_param prospector_adv_params = {
+    .id = BT_ID_DEFAULT,
+    .sid = 0,
+    .secondary_max_skip = 0,
+    .options = BT_LE_ADV_OPT_CONNECTABLE,
+    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
+    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
+    .peer = NULL
+};
 
 static void build_compact_payload(void) {
     // Create ultra-compact 6-byte payload for guaranteed transmission
