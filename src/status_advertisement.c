@@ -40,63 +40,72 @@ static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static bool default_adv_stopped = false;
 
-// Compact payload for 31-byte BLE limit
-static uint8_t compact_payload[8]; // Keep it small for BLE limits
+// Compact payload for 31-byte BLE limit - make it even smaller for guaranteed transmission
+static uint8_t compact_payload[6];
 
-static struct bt_data custom_adv_data[] = {
+// Advertisement packet: Flags + Manufacturer Data ONLY (minimal for 31-byte limit)
+static struct bt_data adv_data[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
-            strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
-    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
     BT_DATA(BT_DATA_MANUFACTURER_DATA, compact_payload, sizeof(compact_payload)),
 };
 
+// Scan response: Name + Appearance (sent separately)
+static struct bt_data scan_rsp[] = {
+    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
+            strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
+    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
+};
+
+// Custom advertising parameters (connectable only, no USE_NAME flag)
+static const struct bt_le_adv_param adv_params = BT_LE_ADV_PARAM(
+    BT_LE_ADV_OPT_CONNECTABLE,
+    BT_GAP_ADV_FAST_INT_MIN_2,
+    BT_GAP_ADV_FAST_INT_MAX_2,
+    NULL
+);
+
 static void build_compact_payload(void) {
-    // Create compact 8-byte payload for BLE 31-byte limit
+    // Create ultra-compact 6-byte payload for guaranteed transmission
     memset(compact_payload, 0, sizeof(compact_payload));
     
-    // Byte 0-1: Manufacturer ID (0xFFFF)
+    // Byte 0-1: Manufacturer ID (0xFFFF for local use)
     compact_payload[0] = 0xFF;
     compact_payload[1] = 0xFF;
     
-    // Byte 2-3: Service UUID (0xABCD)
+    // Byte 2-3: Service UUID (0xABCD - Prospector identifier)
     compact_payload[2] = 0xAB;
     compact_payload[3] = 0xCD;
     
-    // Byte 4: Protocol version
-    compact_payload[4] = ZMK_STATUS_ADV_VERSION;
-    
-    // Byte 5: Battery level
+    // Byte 4: Battery level
     uint8_t battery_level = zmk_battery_state_of_charge();
     if (battery_level > 100) {
         battery_level = 100;
     }
-    compact_payload[5] = battery_level;
+    compact_payload[4] = battery_level;
     
-    // Byte 6: Active layer (only for central/standalone)
+    // Byte 5: Combined layer + status flags
     uint8_t layer = 0;
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     layer = zmk_keymap_highest_layer_active();
+    if (layer > 15) layer = 15; // Limit to 4 bits
 #endif
-    compact_payload[6] = layer;
     
-    // Byte 7: Status flags (USB connection, device role, etc.)
-    uint8_t status = 0;
+    uint8_t combined = layer & 0x0F; // Lower 4 bits = layer
+    
 #if IS_ENABLED(CONFIG_ZMK_USB)
     if (zmk_usb_is_powered()) {
-        status |= 0x01; // USB connected bit
+        combined |= 0x10; // Bit 4 = USB connected
     }
 #endif
     
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    status |= 0x10; // Central device bit
+    combined |= 0x40; // Bit 6 = Central device
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)  
-    status |= 0x20; // Peripheral device bit
-#else
-    status |= 0x00; // Standalone device (default)
+    combined |= 0x80; // Bit 7 = Peripheral device
 #endif
+    // Bit 5 reserved for future use
     
-    compact_payload[7] = status;
+    compact_payload[5] = combined;
 }
 
 // Stop default advertising early in boot process
@@ -127,22 +136,34 @@ static void start_custom_advertising(void) {
     
     build_compact_payload();
     
-    printk("*** PROSPECTOR: Starting custom advertising ***\n");
-    int err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, custom_adv_data, ARRAY_SIZE(custom_adv_data), NULL, 0);
+    printk("*** PROSPECTOR: Starting separated adv/scan_rsp advertising ***\n");
+    printk("*** PROSPECTOR: ADV packet: Flags + Manufacturer Data ***\n");
+    printk("*** PROSPECTOR: SCAN_RSP: Name + Appearance ***\n");
+    
+    // Start advertising with separated adv_data and scan_rsp
+    int err = bt_le_adv_start(&adv_params, adv_data, ARRAY_SIZE(adv_data), scan_rsp, ARRAY_SIZE(scan_rsp));
     
     printk("*** PROSPECTOR: Custom advertising result: %d ***\n", err);
-    printk("*** PROSPECTOR: Compact payload: %02X %02X %02X %02X %02X %02X %02X %02X ***\n",
-            compact_payload[0], compact_payload[1], compact_payload[2], compact_payload[3],
-            compact_payload[4], compact_payload[5], compact_payload[6], compact_payload[7]);
+    printk("*** PROSPECTOR: Manufacturer data (6 bytes): %02X %02X %02X %02X %02X %02X ***\n",
+            compact_payload[0], compact_payload[1], compact_payload[2], 
+            compact_payload[3], compact_payload[4], compact_payload[5]);
     
     if (err == -EALREADY) {
-        printk("*** PROSPECTOR: Advertising already active (expected) ***\n");
-    } else if (err) {
+        printk("*** PROSPECTOR: Advertising already active - stopping and retrying ***\n");
+        bt_le_adv_stop();
+        k_sleep(K_MSEC(10));
+        err = bt_le_adv_start(&adv_params, adv_data, ARRAY_SIZE(adv_data), scan_rsp, ARRAY_SIZE(scan_rsp));
+        printk("*** PROSPECTOR: Retry result: %d ***\n", err);
+    }
+    
+    if (err) {
         printk("*** PROSPECTOR: Custom advertising failed: %d ***\n", err);
         LOG_ERR("Custom advertising failed: %d", err);
     } else {
         printk("*** PROSPECTOR: Custom advertising started successfully ***\n");
-        LOG_INF("Custom advertising with manufacturer data started");
+        printk("*** PROSPECTOR: ADV: Flags + FF FF AB CD %02X %02X ***\n", 
+                compact_payload[4], compact_payload[5]);
+        LOG_INF("Separated advertising started - manufacturer data in ADV packet");
     }
 }
 
