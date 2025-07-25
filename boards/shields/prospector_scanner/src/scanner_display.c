@@ -126,23 +126,24 @@ static int create_display_ui(void) {
 }
 
 static int scanner_display_init(void) {
-    LOG_INF("Initializing scanner background services");
+    LOG_INF("Scanner display system ready");
     
-    // Register scanner callback for future BLE scanning features
+    // Temporarily disable scanner services to focus on display stability
+    // TODO: Re-enable after display is confirmed working
+    /*
     int ret = zmk_status_scanner_register_callback(scanner_event_callback);
     if (ret < 0) {
         LOG_ERR("Failed to register scanner callback: %d", ret);
         return ret;
     }
     
-    // Start scanning service
     ret = zmk_status_scanner_start();
     if (ret < 0) {
         LOG_ERR("Failed to start scanner: %d", ret);
         return ret;
     }
+    */
     
-    LOG_INF("Scanner background services initialized");
     return 0;
 }
 
@@ -150,25 +151,17 @@ SYS_INIT(scanner_display_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT)
 
 // Required function for ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
 lv_obj_t *zmk_display_status_screen() {
-    // Create a new screen each time (following adapter pattern)
-    lv_obj_t *new_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(new_screen, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(new_screen, 255, LV_PART_MAIN);
+    // Create a minimal screen for testing
+    lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);
     
-    // Simple scanner status display
-    lv_obj_t *title_label = lv_label_create(new_screen);
-    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 20);
-    lv_label_set_text(title_label, "Prospector Scanner");
+    // Single simple label
+    lv_obj_t *label = lv_label_create(screen);
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(label, "Scanner Ready");
     
-    lv_obj_t *status_label = lv_label_create(new_screen);
-    lv_obj_set_style_text_color(status_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(status_label, "Scanning for keyboards...");
-    
-    return new_screen;
+    return screen;
 }
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY

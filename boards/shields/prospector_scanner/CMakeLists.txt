@@ -9,7 +9,7 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   zephyr_library_include_directories(${ZEPHYR_CURRENT_CMAKE_DIR}/include)
   
   # Scanner-specific sources
-  zephyr_library_sources(src/brightness_control.c)
+  # zephyr_library_sources(src/brightness_control.c)  # Temporarily disabled for display testing
   zephyr_library_sources(src/scanner_display.c)
   zephyr_library_sources(src/display_rotate_init.c)
 endif()
