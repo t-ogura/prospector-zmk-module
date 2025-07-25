@@ -32,6 +32,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #error "CONFIG_ZMK_STATUS_ADVERTISEMENT is not enabled!"
 #endif
 
+// Force a compilation message to verify module is being compiled
+#pragma message "*** PROSPECTOR MODULE IS BEING COMPILED ***"
+
 static struct zmk_status_adv_data adv_data;
 static struct k_work_delayable adv_work;
 static bool adv_started = false;
@@ -150,22 +153,20 @@ static void advertisement_work_handler(struct k_work *work) {
         BT_DATA(BT_DATA_MANUFACTURER_DATA, &adv_data, sizeof(adv_data)),
     };
     
-    // Stop any existing advertising first
-    bt_le_adv_stop();
-    
-    // Start advertising
+    // Don't stop existing advertising - try to start in parallel
+    // This might fail with -EBUSY but we'll log it
     int err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
-    if (err) {
+    
+    printk("*** PROSPECTOR: Advertisement start attempt result: %d ***\n", err);
+    
+    if (err == -EALREADY || err == -EBUSY) {
+        printk("*** PROSPECTOR: BLE advertising already active (error %d) ***\n", err);
+        // This is expected if ZMK is already advertising
+        // For now, we'll consider this "success" for testing
+        err = 0;
+    } else if (err) {
         printk("*** PROSPECTOR: Failed to start advertising: %d ***\n", err);
         LOG_ERR("Failed to start advertising: %d", err);
-        
-        // Try to recover by stopping and retrying
-        bt_le_adv_stop();
-        k_sleep(K_MSEC(100));
-        err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
-        if (!err) {
-            printk("*** PROSPECTOR: Advertising started after retry ***\n");
-        }
     } else {
         printk("*** PROSPECTOR: Advertisement sent: %s, battery: %d%%, layer: %d ***\n", 
                 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
