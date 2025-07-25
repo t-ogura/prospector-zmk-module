@@ -32,8 +32,4 @@ if(CONFIG_PROSPECTOR_MODE_SCANNER)
         zephyr_library_sources(src/status_scanner.c)
 endif()
 
-# Add scanner shield support
-if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
-        zephyr_library_sources(boards/shields/prospector_scanner/src/scanner_display.c)
-        zephyr_library_sources(boards/shields/prospector_scanner/src/brightness_control.c)
-endif()
+# Scanner shield sources are handled by boards/shields/prospector_scanner/CMakeLists.txt
