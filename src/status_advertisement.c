@@ -54,8 +54,9 @@ static void update_advertisement_data(void) {
     adv_data.battery_level = battery_level;
     
     // Get active layer (only available on central/standalone devices)
+    uint8_t layer = 0; // Default for peripheral devices
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
-    uint8_t layer = zmk_keymap_highest_layer_active();
+    layer = zmk_keymap_highest_layer_active();
     adv_data.active_layer = layer;
 #else
     // Peripheral devices don't have keymap access
