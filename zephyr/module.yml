@@ -4,3 +4,5 @@ build:
   kconfig: Kconfig
   settings:
     board_root: .
+  depends:
+    - lvgl
