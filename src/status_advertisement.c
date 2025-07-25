@@ -130,9 +130,11 @@ static void update_advertisement_data(void) {
 
 static void advertisement_work_handler(struct k_work *work) {
     if (!adv_started) {
+        LOG_WRN("Advertisement work called but not started");
         return;
     }
     
+    LOG_DBG("Updating advertisement data");
     update_advertisement_data();
     
     // Create advertisement data
@@ -145,6 +147,11 @@ static void advertisement_work_handler(struct k_work *work) {
     int err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
     if (err) {
         LOG_ERR("Failed to start advertising: %d", err);
+    } else {
+        LOG_INF("Advertisement sent: %s, battery: %d%%, layer: %d", 
+                CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
+                adv_data.battery_level, 
+                adv_data.active_layer);
     }
     
     // Schedule next update
@@ -152,13 +159,18 @@ static void advertisement_work_handler(struct k_work *work) {
 }
 
 int zmk_status_advertisement_init(void) {
+    LOG_INF("Status advertisement module loading...");
+    
     k_work_init_delayable(&adv_work, advertisement_work_handler);
     
     // Start advertisement automatically after initialization
-    k_work_schedule(&adv_work, K_SECONDS(2)); // 2 second delay to ensure system is ready
     adv_started = true;
+    k_work_schedule(&adv_work, K_SECONDS(1)); // Reduced delay to 1 second
     
-    LOG_INF("Status advertisement initialized and started");
+    LOG_INF("Status advertisement initialized and auto-started");
+    LOG_INF("Advertisement interval: %d ms", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
+    LOG_INF("Keyboard name: %s", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
+    
     return 0;
 }
 
