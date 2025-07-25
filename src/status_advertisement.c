@@ -23,9 +23,17 @@
 #include <zmk/behavior.h>
 #endif
 
+#include <zmk/event_manager.h>
+#include <zmk/events/keycode_state_changed.h>
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+
+// Force a compilation error if not enabled properly
+#if !IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+#error "CONFIG_ZMK_STATUS_ADVERTISEMENT is not enabled!"
+#endif
 
 static struct zmk_status_adv_data adv_data;
 static struct k_work_delayable adv_work;
@@ -177,8 +185,14 @@ static void advertisement_work_handler(struct k_work *work) {
 }
 
 int zmk_status_advertisement_init(void) {
+    printk("\n\n*** PROSPECTOR ADVERTISEMENT INIT STARTING ***\n\n");
     printk("*** PROSPECTOR: Status advertisement module loading... ***\n");
     LOG_INF("Status advertisement module loading...");
+    
+    // Flash LED or some visible indication if available
+#ifdef CONFIG_LED
+    // Try to flash an LED if available
+#endif
     
     k_work_init_delayable(&adv_work, advertisement_work_handler);
     
@@ -189,6 +203,7 @@ int zmk_status_advertisement_init(void) {
     printk("*** PROSPECTOR: Status advertisement initialized and auto-started ***\n");
     printk("*** PROSPECTOR: Advertisement interval: %d ms ***\n", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
     printk("*** PROSPECTOR: Keyboard name: %s ***\n", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
+    printk("\n\n*** PROSPECTOR ADVERTISEMENT INIT COMPLETE ***\n\n");
     
     LOG_INF("Status advertisement initialized and auto-started");
     LOG_INF("Advertisement interval: %d ms", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
@@ -238,6 +253,25 @@ int zmk_status_advertisement_stop(void) {
     LOG_INF("Stopped status advertisement broadcasting");
     return 0;
 }
+
+// Event listener for key presses to trigger advertisement
+static int status_adv_keycode_state_changed_listener(const zmk_event_t *eh) {
+    struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
+    if (ev == NULL) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+    
+    // Only respond to key press (not release)
+    if (ev->state) {
+        printk("*** PROSPECTOR: Key pressed, triggering advertisement ***\n");
+        zmk_status_advertisement_update();
+    }
+    
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(status_adv, status_adv_keycode_state_changed_listener);
+ZMK_SUBSCRIPTION(status_adv, zmk_keycode_state_changed);
 
 // Initialize on system startup - use later priority to ensure BT is ready
 SYS_INIT(zmk_status_advertisement_init, APPLICATION, 99);
