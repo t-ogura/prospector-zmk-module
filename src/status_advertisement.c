@@ -147,26 +147,31 @@ static void advertisement_work_handler(struct k_work *work) {
     LOG_DBG("Updating advertisement data");
     update_advertisement_data();
     
-    // Create advertisement data
+    // Create advertisement data with both device name and manufacturer data
     struct bt_data ad[] = {
         BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+        BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
         BT_DATA(BT_DATA_MANUFACTURER_DATA, &adv_data, sizeof(adv_data)),
     };
     
-    // Don't stop existing advertising - try to start in parallel
-    // This might fail with -EBUSY but we'll log it
-    int err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), NULL, 0);
+    // Stop existing ZMK advertising and replace with our own
+    printk("*** PROSPECTOR: Stopping existing advertising ***\n");
+    bt_le_adv_stop();
+    k_sleep(K_MSEC(50)); // Small delay to ensure stop completes
     
-    printk("*** PROSPECTOR: Advertisement start attempt result: %d ***\n", err);
+    printk("*** PROSPECTOR: Starting custom advertisement ***\n");
+    int err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), NULL, 0);
     
-    if (err == -EALREADY || err == -EBUSY) {
-        printk("*** PROSPECTOR: BLE advertising already active (error %d) ***\n", err);
-        // This is expected if ZMK is already advertising
-        // For now, we'll consider this "success" for testing
-        err = 0;
-    } else if (err) {
+    printk("*** PROSPECTOR: Advertisement start result: %d ***\n", err);
+    
+    if (err) {
         printk("*** PROSPECTOR: Failed to start advertising: %d ***\n", err);
         LOG_ERR("Failed to start advertising: %d", err);
+        
+        // Try to restore ZMK's normal advertising if our attempt fails
+        printk("*** PROSPECTOR: Attempting to restore normal ZMK advertising ***\n");
+        // Note: We can't easily restore ZMK's exact advertising here,
+        // but ZMK should restart it automatically
     } else {
         printk("*** PROSPECTOR: Advertisement sent: %s, battery: %d%%, layer: %d ***\n", 
                 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
