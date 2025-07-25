@@ -155,4 +155,13 @@ static int scanner_display_init(void) {
 
 SYS_INIT(scanner_display_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
+// Required function for ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+lv_obj_t *zmk_display_status_screen() {
+    // If screen is not yet created, create it now
+    if (!screen) {
+        create_display_ui();
+    }
+    return screen;
+}
+
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY
