@@ -25,6 +25,15 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+// Default configuration values if not defined
+#ifndef CONFIG_ZMK_STATUS_ADV_INTERVAL_MS
+#define CONFIG_ZMK_STATUS_ADV_INTERVAL_MS 1000
+#endif
+
+#ifndef CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME
+#define CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME "ZMK"
+#endif
+
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
 
 static struct zmk_status_adv_data adv_data;

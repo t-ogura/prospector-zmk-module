@@ -22,14 +22,10 @@ if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
         zephyr_library_sources(src/split/bluetooth/central_status_changed_observer.c)
 endif()
 
-# Add status advertisement support
-if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
-        zephyr_library_sources(src/status_advertisement.c)
-endif()
+# Add status advertisement support - always include for keyboard builds
+zephyr_library_sources_ifdef(CONFIG_ZMK_STATUS_ADVERTISEMENT src/status_advertisement.c)
 
-# Add scanner mode support
-if(CONFIG_PROSPECTOR_MODE_SCANNER)
-        zephyr_library_sources(src/status_scanner.c)
-endif()
+# Add scanner mode support - always include for scanner builds
+zephyr_library_sources_ifdef(CONFIG_PROSPECTOR_MODE_SCANNER src/status_scanner.c)
 
 # Scanner shield sources are handled by boards/shields/prospector_scanner/CMakeLists.txt
