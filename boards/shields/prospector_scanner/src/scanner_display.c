@@ -124,6 +124,9 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_align(info_label, LV_ALIGN_BOTTOM_MID, 0, -20);
     lv_label_set_text(info_label, "Starting scanner...");
     
+    // Trigger scanner initialization after screen is ready
+    trigger_scanner_start();
+    
     LOG_INF("Scanner screen created successfully");
     return screen;
 }
@@ -165,13 +168,10 @@ static void start_scanner_delayed(struct k_work *work) {
 
 static K_WORK_DELAYABLE_DEFINE(scanner_start_work, start_scanner_delayed);
 
-static int late_scanner_init(void) {
-    LOG_INF("Scheduling delayed scanner start");
+// Trigger scanner start automatically when screen is created
+static void trigger_scanner_start(void) {
+    LOG_INF("Scheduling delayed scanner start from display creation");
     k_work_schedule(&scanner_start_work, K_SECONDS(3)); // Wait 3 seconds for display
-    return 0;
 }
-
-// Initialize scanner after other systems are ready
-SYS_INIT(late_scanner_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT + 10);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY
