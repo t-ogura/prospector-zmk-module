@@ -11,4 +11,5 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # Scanner-specific sources
   zephyr_library_sources(src/brightness_control.c)
   zephyr_library_sources(src/scanner_display.c)
+  zephyr_library_sources(src/display_rotate_init.c)
 endif()
