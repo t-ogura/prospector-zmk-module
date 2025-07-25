@@ -90,35 +90,35 @@ static int create_display_ui(void) {
     // Keyboard name (top)
     keyboard_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(keyboard_name_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(keyboard_name_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(keyboard_name_label, &lv_font_montserrat_20, 0);
     lv_obj_align(keyboard_name_label, LV_ALIGN_TOP_MID, 0, 10);
     lv_label_set_text(keyboard_name_label, "Prospector Scanner");
     
     // Layer info
     layer_label = lv_label_create(screen);
     lv_obj_set_style_text_color(layer_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(layer_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(layer_label, &lv_font_montserrat_20, 0);
     lv_obj_align(layer_label, LV_ALIGN_TOP_MID, 0, 40);
     lv_label_set_text(layer_label, "Initializing...");
     
     // Battery info
     battery_label = lv_label_create(screen);
     lv_obj_set_style_text_color(battery_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(battery_label, &lv_font_montserrat_20, 0);
     lv_obj_align(battery_label, LV_ALIGN_CENTER, 0, -20);
     lv_label_set_text(battery_label, "");
     
     // Connection info
     connection_label = lv_label_create(screen);
     lv_obj_set_style_text_color(connection_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(connection_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(connection_label, &lv_font_montserrat_20, 0);
     lv_obj_align(connection_label, LV_ALIGN_CENTER, 0, 10);
     lv_label_set_text(connection_label, "");
     
     // Status flags
     status_label = lv_label_create(screen);
     lv_obj_set_style_text_color(status_label, lv_color_make(255, 255, 0), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_20, 0);
     lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_label_set_text(status_label, "Starting...");
     

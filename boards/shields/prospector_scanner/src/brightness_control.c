@@ -53,7 +53,7 @@ static void update_brightness(void) {
     LOG_DBG("ALS: %d lux, Target brightness: %d%% (not implemented)", light_level, brightness);
 }
 
-static void brightness_work_handler(struct k_work *work) {
+static void __attribute__((unused)) brightness_work_handler(struct k_work *work) {
     update_brightness();
     
     // Schedule next update
