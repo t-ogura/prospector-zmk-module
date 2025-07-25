@@ -153,6 +153,12 @@ static void advertisement_work_handler(struct k_work *work) {
 
 int zmk_status_advertisement_init(void) {
     k_work_init_delayable(&adv_work, advertisement_work_handler);
+    
+    // Start advertisement automatically after initialization
+    k_work_schedule(&adv_work, K_SECONDS(2)); // 2 second delay to ensure system is ready
+    adv_started = true;
+    
+    LOG_INF("Status advertisement initialized and started");
     return 0;
 }
 
