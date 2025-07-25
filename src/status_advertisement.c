@@ -224,9 +224,9 @@ int zmk_status_advertisement_stop(void) {
 }
 
 // Stop default advertising early
-SYS_INIT(stop_default_advertising, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(stop_default_advertising, APPLICATION, 90);
 
 // Start custom advertising system after ZMK BLE setup
-SYS_INIT(start_custom_adv_system, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT + 1);
+SYS_INIT(start_custom_adv_system, APPLICATION, 91);
 
 #endif // CONFIG_ZMK_STATUS_ADVERTISEMENT
