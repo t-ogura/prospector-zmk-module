@@ -28,9 +28,11 @@ struct zmk_status_adv_data {
     uint8_t profile_slot;        // Active profile slot 0-4
     uint8_t connection_count;    // Number of connected devices 0-5
     uint8_t status_flags;        // Status flags (bit field)
-    char layer_name[8];          // Layer name (null-terminated)
+    uint8_t device_role;         // Device role (CENTRAL/PERIPHERAL/STANDALONE)
+    uint8_t device_index;        // Device index for split keyboards
+    char layer_name[6];          // Layer name (null-terminated, reduced for role fields)
     uint8_t keyboard_id[4];      // Keyboard identifier
-    uint8_t reserved[8];         // Reserved for future use
+    uint8_t reserved[6];         // Reserved for future use
 } __packed;
 
 /**
