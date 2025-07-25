@@ -136,40 +136,6 @@ static void update_advertisement_data(void) {
     adv_data.keyboard_id[3] = hash & 0xFF;
 }
 
-// BLE advertising modification approach
-#include <zephyr/bluetooth/bluetooth.h>
-
-// External reference to ZMK's advertising data (declared in zmk/app/src/ble.c)
-extern struct bt_data zmk_ble_ad[];
-
-// Storage for our extended advertising data
-static struct bt_data zmk_extended_ad[4]; // Original 3 + our manufacturer data
-static bool ad_extended = false;
-
-static void extend_zmk_advertising(void) {
-    if (ad_extended) {
-        return; // Already extended
-    }
-    
-    // Copy original ZMK advertising data
-    zmk_extended_ad[0] = zmk_ble_ad[0]; // GAP Appearance
-    zmk_extended_ad[1] = zmk_ble_ad[1]; // Flags
-    zmk_extended_ad[2] = zmk_ble_ad[2]; // Service UUIDs
-    
-    // Add our manufacturer data
-    zmk_extended_ad[3] = (struct bt_data){
-        .type = BT_DATA_MANUFACTURER_DATA,
-        .data_len = sizeof(adv_data),
-        .data = (uint8_t*)&adv_data
-    };
-    
-    // Replace ZMK's advertising data with our extended version
-    memcpy(zmk_ble_ad, zmk_extended_ad, sizeof(zmk_extended_ad));
-    
-    ad_extended = true;
-    printk("*** PROSPECTOR: Extended ZMK advertising with manufacturer data ***\n");
-}
-
 static void advertisement_work_handler(struct k_work *work) {
     if (!adv_started) {
         printk("*** PROSPECTOR: Advertisement work called but not started ***\n");
@@ -181,10 +147,27 @@ static void advertisement_work_handler(struct k_work *work) {
     LOG_DBG("Updating advertisement data");
     update_advertisement_data();
     
-    // Extend ZMK's advertising to include our manufacturer data
-    extend_zmk_advertising();
+    // Stop ZMK's default advertising first
+    int stop_err = bt_le_adv_stop();
+    printk("*** PROSPECTOR: Stopped default advertising, result: %d ***\n", stop_err);
     
-    printk("*** PROSPECTOR: Updated manufacturer data - %s, battery: %d%%, layer: %d ***\n", 
+    // Wait briefly for stop to complete
+    k_sleep(K_MSEC(10));
+    
+    // Create our custom advertising data (within 31-byte limit)
+    struct bt_data custom_ad[] = {
+        BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+        BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
+                strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
+        BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
+        BT_DATA(BT_DATA_MANUFACTURER_DATA, &adv_data, sizeof(adv_data)),
+    };
+    
+    // Start our custom advertising with manufacturer data
+    int start_err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, custom_ad, ARRAY_SIZE(custom_ad), NULL, 0);
+    
+    printk("*** PROSPECTOR: Started custom advertising, result: %d ***\n", start_err);
+    printk("*** PROSPECTOR: Advertising %s, battery: %d%%, layer: %d ***\n", 
             CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
             adv_data.battery_level, 
             adv_data.active_layer);
@@ -195,7 +178,11 @@ static void advertisement_work_handler(struct k_work *work) {
             adv_data.version, adv_data.battery_level,
             adv_data.active_layer, adv_data.profile_slot);
     
-    // ZMK will use our extended advertising data automatically
+    if (start_err) {
+        LOG_ERR("Failed to start custom advertising: %d", start_err);
+    } else {
+        LOG_INF("Custom advertising with manufacturer data started successfully");
+    }
     
     // Schedule next update
     k_work_schedule(&adv_work, K_MSEC(CONFIG_ZMK_STATUS_ADV_INTERVAL_MS));
@@ -271,7 +258,7 @@ int zmk_status_advertisement_stop(void) {
     return 0;
 }
 
-// Initialize on system startup - use later priority to ensure BT is ready
-SYS_INIT(zmk_status_advertisement_init, APPLICATION, 99);
+// Initialize AFTER ZMK's BLE system - use late priority to override ZMK advertising
+SYS_INIT(zmk_status_advertisement_init, APPLICATION, 95);
 
 #endif // CONFIG_ZMK_STATUS_ADVERTISEMENT
