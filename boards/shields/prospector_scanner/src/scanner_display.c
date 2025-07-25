@@ -20,6 +20,9 @@ static lv_obj_t *title_label = NULL;
 static lv_obj_t *status_label = NULL;
 static lv_obj_t *info_label = NULL;
 
+// Forward declaration
+static void trigger_scanner_start(void);
+
 // Scanner event callback for display updates
 static void update_display_from_scanner(struct zmk_status_scanner_event_data *event_data) {
     if (!status_label || !info_label) {
