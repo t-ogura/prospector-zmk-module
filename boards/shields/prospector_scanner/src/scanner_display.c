@@ -9,10 +9,51 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/logging/log.h>
+#include <zmk/status_scanner.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
+
+// Global UI objects for dynamic updates
+static lv_obj_t *title_label = NULL;
+static lv_obj_t *status_label = NULL;
+static lv_obj_t *info_label = NULL;
+
+// Scanner event callback for display updates
+static void update_display_from_scanner(struct zmk_status_scanner_event_data *event_data) {
+    if (!status_label || !info_label) {
+        return; // UI not ready yet
+    }
+    
+    LOG_INF("Scanner event received: %d for keyboard %d", event_data->event, event_data->keyboard_index);
+    
+    int active_count = zmk_status_scanner_get_active_count();
+    int primary = zmk_status_scanner_get_primary_keyboard();
+    
+    if (active_count == 0) {
+        // No keyboards found
+        lv_label_set_text(status_label, "Scanning...");
+        lv_label_set_text(info_label, "No keyboards found");
+        LOG_INF("Display updated: No keyboards");
+    } else if (primary >= 0) {
+        // Show primary keyboard info
+        struct zmk_keyboard_status *status = zmk_status_scanner_get_keyboard(primary);
+        if (status) {
+            char status_buf[64];
+            char info_buf[64];
+            
+            snprintf(status_buf, sizeof(status_buf), "Found: %d keyboard%s", 
+                     active_count, active_count > 1 ? "s" : "");
+            snprintf(info_buf, sizeof(info_buf), "Battery: %d%% Layer: %d", 
+                     status->data.battery_level, status->data.active_layer);
+            
+            lv_label_set_text(status_label, status_buf);
+            lv_label_set_text(info_label, info_buf);
+            LOG_INF("Display updated: %s, %s", status_buf, info_buf);
+        }
+    }
+}
 
 // Display rotation initialization (merged from display_rotate_init.c)
 static int scanner_display_init(void) {
@@ -62,29 +103,75 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     
-    // Main title
-    lv_obj_t *title_label = lv_label_create(screen);
+    // Main title (save reference for updates)
+    title_label = lv_label_create(screen);
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_20, 0);
     lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 20);
     lv_label_set_text(title_label, "Prospector Scanner");
     
-    // Status label
-    lv_obj_t *status_label = lv_label_create(screen);
+    // Status label (save reference for updates)
+    status_label = lv_label_create(screen);
     lv_obj_set_style_text_color(status_label, lv_color_make(255, 255, 0), 0);
     lv_obj_set_style_text_font(status_label, &lv_font_montserrat_20, 0);
     lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(status_label, "Scanning...");
+    lv_label_set_text(status_label, "Initializing...");
     
-    // Info label
-    lv_obj_t *info_label = lv_label_create(screen);
+    // Info label (save reference for updates)
+    info_label = lv_label_create(screen);
     lv_obj_set_style_text_color(info_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(info_label, &lv_font_montserrat_20, 0);
     lv_obj_align(info_label, LV_ALIGN_BOTTOM_MID, 0, -20);
-    lv_label_set_text(info_label, "Ready for keyboards");
+    lv_label_set_text(info_label, "Starting scanner...");
     
     LOG_INF("Scanner screen created successfully");
     return screen;
 }
+
+// Late initialization to start scanner after display is ready
+static void start_scanner_delayed(struct k_work *work) {
+    if (!status_label || !info_label) {
+        LOG_WRN("Display not ready yet, retrying scanner start...");
+        k_work_schedule(k_work_delayable_from_work(work), K_SECONDS(1));
+        return;
+    }
+    
+    LOG_INF("Starting BLE scanner...");
+    lv_label_set_text(status_label, "Starting scanner...");
+    lv_label_set_text(info_label, "Initializing BLE...");
+    
+    // Register callback first
+    int ret = zmk_status_scanner_register_callback(update_display_from_scanner);
+    if (ret < 0) {
+        LOG_ERR("Failed to register scanner callback: %d", ret);
+        lv_label_set_text(status_label, "Scanner Error");
+        lv_label_set_text(info_label, "Callback failed");
+        return;
+    }
+    
+    // Start scanning
+    ret = zmk_status_scanner_start();
+    if (ret < 0) {
+        LOG_ERR("Failed to start scanner: %d", ret);
+        lv_label_set_text(status_label, "Scanner Error");
+        lv_label_set_text(info_label, "Start failed");
+        return;
+    }
+    
+    LOG_INF("BLE scanner started successfully");
+    lv_label_set_text(status_label, "Scanning...");
+    lv_label_set_text(info_label, "Ready for keyboards");
+}
+
+static K_WORK_DELAYABLE_DEFINE(scanner_start_work, start_scanner_delayed);
+
+static int late_scanner_init(void) {
+    LOG_INF("Scheduling delayed scanner start");
+    k_work_schedule(&scanner_start_work, K_SECONDS(3)); // Wait 3 seconds for display
+    return 0;
+}
+
+// Initialize scanner after other systems are ready
+SYS_INIT(late_scanner_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT + 10);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY
