@@ -42,15 +42,27 @@ static int scanner_display_init(void) {
         LOG_WRN("Failed to turn off display blanking: %d", ret);
     }
     
-    // Force backlight on using GPIO (fallback method)
-    const struct device *gpio_dev = DEVICE_DT_GET(DT_NODELABEL(gpio1));
-    if (device_is_ready(gpio_dev)) {
-        ret = gpio_pin_configure(gpio_dev, 11, GPIO_OUTPUT_ACTIVE);
+    // Force backlight on using GPIO (correct pin: Pin 6 = P0.04)
+    const struct device *gpio0_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
+    if (device_is_ready(gpio0_dev)) {
+        ret = gpio_pin_configure(gpio0_dev, 4, GPIO_OUTPUT_ACTIVE);
         if (ret == 0) {
-            gpio_pin_set(gpio_dev, 11, 1);  // Turn on backlight
-            LOG_INF("Backlight GPIO set to ON");
+            gpio_pin_set(gpio0_dev, 4, 1);  // Turn on backlight (Pin 6)
+            LOG_INF("Backlight GPIO Pin 6 (P0.04) set to ON");
         } else {
-            LOG_WRN("Failed to configure backlight GPIO: %d", ret);
+            LOG_WRN("Failed to configure backlight GPIO Pin 6: %d", ret);
+        }
+    }
+    
+    // Also try P1.11 as fallback (in case overlay configuration is correct)
+    const struct device *gpio1_dev = DEVICE_DT_GET(DT_NODELABEL(gpio1));
+    if (device_is_ready(gpio1_dev)) {
+        ret = gpio_pin_configure(gpio1_dev, 11, GPIO_OUTPUT_ACTIVE);
+        if (ret == 0) {
+            gpio_pin_set(gpio1_dev, 11, 1);  // Turn on backlight (P1.11)
+            LOG_INF("Backlight GPIO P1.11 also set to ON as fallback");
+        } else {
+            LOG_WRN("Failed to configure fallback backlight GPIO P1.11: %d", ret);
         }
     }
     
