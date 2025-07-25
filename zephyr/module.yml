@@ -1,5 +1,6 @@
 name: prospector-zmk-module
 build:
   cmake: .
+  kconfig: Kconfig
   settings:
     board_root: .
