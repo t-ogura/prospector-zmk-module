@@ -1,0 +1,28 @@
+# Copyright (c) 2024 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+config ZMK_STATUS_ADVERTISEMENT
+    bool "Enable ZMK Status Advertisement"
+    default n
+    depends on BT
+    help
+      Enable broadcasting of keyboard status information via BLE Advertisement.
+      This allows external devices to receive status updates without establishing
+      a connection to the keyboard.
+
+config ZMK_STATUS_ADV_INTERVAL_MS
+    int "Status advertisement interval in milliseconds"
+    range 100 10000
+    default 1000
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Interval between status advertisement broadcasts in milliseconds.
+      Lower values provide more frequent updates but consume more battery.
+
+config ZMK_STATUS_ADV_KEYBOARD_NAME
+    string "Keyboard name for status advertisement"
+    default "ZMK Keyboard"
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Name to identify this keyboard in status advertisements.
+      Limited to 8 characters including null terminator.

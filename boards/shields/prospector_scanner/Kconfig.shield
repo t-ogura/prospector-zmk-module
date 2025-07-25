@@ -39,4 +39,20 @@ config LVGL
 config DISPLAY_LOG_LEVEL
     default 1
 
+# Scanner-specific configurations
+config PROSPECTOR_MULTI_KEYBOARD
+    bool "Support multiple keyboards"
+    default y
+    depends on SHIELD_PROSPECTOR_SCANNER
+    help
+      Support receiving status from multiple keyboards simultaneously.
+
+config PROSPECTOR_MAX_KEYBOARDS
+    int "Maximum number of keyboards to track"
+    range 1 5
+    default 3
+    depends on PROSPECTOR_MULTI_KEYBOARD
+    help
+      Maximum number of keyboards that can be tracked simultaneously.
+
 endif # SHIELD_PROSPECTOR_SCANNER
