@@ -44,20 +44,20 @@ static bool default_adv_stopped = false;
 static uint8_t compact_payload[6];
 
 // Advertisement packet: Flags + Manufacturer Data ONLY (minimal for 31-byte limit)
-static struct bt_data adv_data[] = {
+static struct bt_data prospector_adv_data[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA(BT_DATA_MANUFACTURER_DATA, compact_payload, sizeof(compact_payload)),
 };
 
 // Scan response: Name + Appearance (sent separately)
-static struct bt_data scan_rsp[] = {
+static struct bt_data prospector_scan_rsp[] = {
     BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
             strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
 };
 
 // Custom advertising parameters (connectable only, no USE_NAME flag)
-static const struct bt_le_adv_param adv_params = BT_LE_ADV_PARAM(
+static const struct bt_le_adv_param prospector_adv_params = BT_LE_ADV_PARAM(
     BT_LE_ADV_OPT_CONNECTABLE,
     BT_GAP_ADV_FAST_INT_MIN_2,
     BT_GAP_ADV_FAST_INT_MAX_2,
@@ -141,7 +141,7 @@ static void start_custom_advertising(void) {
     printk("*** PROSPECTOR: SCAN_RSP: Name + Appearance ***\n");
     
     // Start advertising with separated adv_data and scan_rsp
-    int err = bt_le_adv_start(&adv_params, adv_data, ARRAY_SIZE(adv_data), scan_rsp, ARRAY_SIZE(scan_rsp));
+    int err = bt_le_adv_start(&prospector_adv_params, prospector_adv_data, ARRAY_SIZE(prospector_adv_data), prospector_scan_rsp, ARRAY_SIZE(prospector_scan_rsp));
     
     printk("*** PROSPECTOR: Custom advertising result: %d ***\n", err);
     printk("*** PROSPECTOR: Manufacturer data (6 bytes): %02X %02X %02X %02X %02X %02X ***\n",
@@ -152,7 +152,7 @@ static void start_custom_advertising(void) {
         printk("*** PROSPECTOR: Advertising already active - stopping and retrying ***\n");
         bt_le_adv_stop();
         k_sleep(K_MSEC(10));
-        err = bt_le_adv_start(&adv_params, adv_data, ARRAY_SIZE(adv_data), scan_rsp, ARRAY_SIZE(scan_rsp));
+        err = bt_le_adv_start(&prospector_adv_params, prospector_adv_data, ARRAY_SIZE(prospector_adv_data), prospector_scan_rsp, ARRAY_SIZE(prospector_scan_rsp));
         printk("*** PROSPECTOR: Retry result: %d ***\n", err);
     }
     
