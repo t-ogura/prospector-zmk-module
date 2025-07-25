@@ -90,15 +90,27 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     
     // Notify event
     if (is_new) {
+        printk("*** PROSPECTOR SCANNER: New keyboard found: %s (slot %d) ***\n", adv_data->layer_name, index);
         LOG_INF("New keyboard found: %s (slot %d)", adv_data->layer_name, index);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
     } else {
+        printk("*** PROSPECTOR SCANNER: Keyboard updated: %s, battery: %d%% ***\n", 
+               adv_data->layer_name, adv_data->battery_level);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
     }
 }
 
 static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                          struct net_buf_simple *buf) {
+    static int scan_count = 0;
+    scan_count++;
+    
+    // Log every 10th scan to avoid spam
+    if (scan_count % 10 == 1) {
+        printk("*** PROSPECTOR SCANNER: Received BLE adv %d, RSSI: %d, len: %d ***\n", 
+               scan_count, rssi, buf->len);
+    }
+    
     if (!scanning) {
         return;
     }
@@ -114,17 +126,26 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         len--; // Subtract type byte
         
         if (ad_type == BT_DATA_MANUFACTURER_DATA && len >= sizeof(struct zmk_status_adv_data)) {
+            printk("*** PROSPECTOR SCANNER: Found manufacturer data! len=%d, expected=%d ***\n", 
+                   len, sizeof(struct zmk_status_adv_data));
+            
             const struct zmk_status_adv_data *adv_data = 
                 (const struct zmk_status_adv_data *)buf->data;
             
             // Check if this is a valid status advertisement
+            printk("*** PROSPECTOR SCANNER: Checking UUID - got %02X%02X, expect %04X ***\n",
+                   adv_data->service_uuid[0], adv_data->service_uuid[1], ZMK_STATUS_ADV_SERVICE_UUID);
+            
             if (adv_data->manufacturer_id[0] == 0xFF && 
                 adv_data->manufacturer_id[1] == 0xFF &&
                 adv_data->service_uuid[0] == ((ZMK_STATUS_ADV_SERVICE_UUID >> 8) & 0xFF) &&
                 adv_data->service_uuid[1] == (ZMK_STATUS_ADV_SERVICE_UUID & 0xFF) &&
                 adv_data->version == ZMK_STATUS_ADV_VERSION) {
                 
+                printk("*** PROSPECTOR SCANNER: Valid Prospector advertisement found! ***\n");
                 process_advertisement(adv_data, rssi);
+            } else {
+                printk("*** PROSPECTOR SCANNER: Invalid advertisement - wrong UUID or version ***\n");
             }
         }
         
