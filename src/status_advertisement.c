@@ -79,22 +79,30 @@ static void build_compact_payload(void) {
     compact_payload[2] = 0xAB;
     compact_payload[3] = 0xCD;
     
-    // Byte 4: Battery level
+    // Byte 4: Battery level - handle split keyboard battery fetching
     uint8_t battery_level = zmk_battery_state_of_charge();
     if (battery_level > 100) {
         battery_level = 100;
     }
     compact_payload[4] = battery_level;
     
+    printk("*** PROSPECTOR: Battery level: %d%% ***\n", battery_level);
+    
     // Byte 5: Combined layer + status flags
     uint8_t layer = 0;
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15; // Limit to 4 bits
-    printk("*** PROSPECTOR: Current layer from keymap: %d ***\n", layer);
+    printk("*** PROSPECTOR: Central/Standalone - layer from keymap: %d ***\n", layer);
 #else
     printk("*** PROSPECTOR: Peripheral device - layer fixed at 0 ***\n");
 #endif
+    
+    static uint8_t last_layer = 255; // Initialize to invalid value
+    if (last_layer != layer) {
+        printk("*** PROSPECTOR: LAYER CHANGED! %d -> %d ***\n", last_layer, layer);
+        last_layer = layer;
+    }
     
     uint8_t combined = layer & 0x0F; // Lower 4 bits = layer
     
@@ -170,6 +178,9 @@ static void start_custom_advertising(void) {
         printk("*** PROSPECTOR: ADV: Flags + FF FF AB CD %02X %02X ***\n", 
                 compact_payload[4], compact_payload[5]);
         LOG_INF("Separated advertising started - manufacturer data in ADV packet");
+        
+        // TODO: For split keyboards, also advertise peripheral battery levels
+        // This would require additional advertising packets with different device_index
     }
 }
 
