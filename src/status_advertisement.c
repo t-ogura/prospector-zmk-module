@@ -96,27 +96,34 @@ static void build_prospector_data(void) {
     LOG_INF("Prospector %s: Battery %d%%, Layer %d", role_str, battery_level, layer);
 }
 
+// Advertising data structures (moved outside function to avoid initialization issues)
+static struct bt_data prospector_burst_data[2];
+
+// Ultra-fast, non-connectable advertising parameters
+static const struct bt_le_adv_param burst_params = {
+    .id = BT_ID_DEFAULT,
+    .options = 0, // Non-connectable, no name
+    .interval_min = BT_GAP_ADV_FAST_INT_MIN_1, // Fastest interval
+    .interval_max = BT_GAP_ADV_FAST_INT_MIN_1,
+};
+
 // ULTRA-SAFE APPROACH: Send brief manufacturer data bursts without interfering with ZMK
 static void send_prospector_burst(void) {
     // Update manufacturer data with current status
     build_prospector_data();
     
-    // Create minimal advertising packet - just manufacturer data
-    static struct bt_data prospector_burst_data[] = {
-        BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-        BT_DATA(BT_DATA_MANUFACTURER_DATA, prospector_mfg_data, sizeof(prospector_mfg_data)),
-    };
+    // Build advertising packet dynamically to avoid static initialization issues
+    prospector_burst_data[0].type = BT_DATA_FLAGS;
+    prospector_burst_data[0].data_len = 1;
+    static const uint8_t flags = BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR;
+    prospector_burst_data[0].data = &flags;
     
-    // Ultra-fast, non-connectable advertising parameters
-    static const struct bt_le_adv_param burst_params = {
-        .id = BT_ID_DEFAULT,
-        .options = 0, // Non-connectable, no name
-        .interval_min = BT_GAP_ADV_FAST_INT_MIN_1, // Fastest interval
-        .interval_max = BT_GAP_ADV_FAST_INT_MIN_1,
-    };
+    prospector_burst_data[1].type = BT_DATA_MANUFACTURER_DATA;
+    prospector_burst_data[1].data_len = sizeof(prospector_mfg_data);
+    prospector_burst_data[1].data = prospector_mfg_data;
     
     // Send short burst (100ms) then stop to let ZMK resume
-    int err = bt_le_adv_start(&burst_params, prospector_burst_data, ARRAY_SIZE(prospector_burst_data), NULL, 0);
+    int err = bt_le_adv_start(&burst_params, prospector_burst_data, 2, NULL, 0);
     if (err) {
         LOG_WRN("Prospector burst start failed: %d", err);
         return;
