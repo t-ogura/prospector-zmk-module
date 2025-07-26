@@ -109,6 +109,8 @@ static const struct bt_le_adv_param burst_params = {
 
 // ULTRA-SAFE APPROACH: Send brief manufacturer data bursts without interfering with ZMK
 static void send_prospector_burst(void) {
+    LOG_INF("*** PROSPECTOR BURST: Starting burst transmission ***");
+    
     // Update manufacturer data with current status
     build_prospector_data();
     
@@ -122,23 +124,32 @@ static void send_prospector_burst(void) {
     prospector_burst_data[1].data_len = sizeof(prospector_mfg_data);
     prospector_burst_data[1].data = prospector_mfg_data;
     
-    // Send short burst (100ms) then stop to let ZMK resume
-    int err = bt_le_adv_start(&burst_params, prospector_burst_data, 2, NULL, 0);
-    if (err) {
-        LOG_WRN("Prospector burst start failed: %d", err);
-        return;
-    }
-    
-    LOG_INF("Prospector burst: %02X %02X %02X %02X %02X %02X",
+    LOG_INF("*** PROSPECTOR BURST: Data prepared, attempting bt_le_adv_start ***");
+    LOG_INF("*** PROSPECTOR BURST: MFG data: %02X %02X %02X %02X %02X %02X ***",
             prospector_mfg_data[0], prospector_mfg_data[1], prospector_mfg_data[2],
             prospector_mfg_data[3], prospector_mfg_data[4], prospector_mfg_data[5]);
     
+    // Send short burst (100ms) then stop to let ZMK resume
+    int err = bt_le_adv_start(&burst_params, prospector_burst_data, 2, NULL, 0);
+    if (err) {
+        LOG_ERR("*** PROSPECTOR BURST: bt_le_adv_start FAILED: %d ***", err);
+        LOG_ERR("*** PROSPECTOR BURST: Error codes: -EALREADY=%d, -EINVAL=%d, -ENODEV=%d ***", 
+                -EALREADY, -EINVAL, -ENODEV);
+        return;
+    }
+    
+    LOG_INF("*** PROSPECTOR BURST: bt_le_adv_start SUCCESS - advertising for 100ms ***");
+    
     // Stop after 100ms to give control back to ZMK
     k_sleep(K_MSEC(100));
-    bt_le_adv_stop();
+    
+    int stop_err = bt_le_adv_stop();
+    LOG_INF("*** PROSPECTOR BURST: bt_le_adv_stop result: %d ***", stop_err);
     
     // Let ZMK restart its advertising naturally
     k_sleep(K_MSEC(50));
+    
+    LOG_INF("*** PROSPECTOR BURST: Burst cycle complete ***");
 }
 
 static void status_update_work_handler(struct k_work *work) {
@@ -155,18 +166,22 @@ static void status_update_work_handler(struct k_work *work) {
 
 // Initialize Prospector burst advertising system safely
 static int init_prospector_status(const struct device *dev) {
-    LOG_INF("Initializing Prospector burst advertising system");
+    LOG_INF("*** PROSPECTOR INIT: Starting burst advertising system ***");
     
     k_work_init_delayable(&status_update_work, status_update_work_handler);
     
     // Initialize manufacturer data with defaults
     build_prospector_data();
     
+    LOG_INF("*** PROSPECTOR INIT: Initial data: %02X %02X %02X %02X %02X %02X ***",
+            prospector_mfg_data[0], prospector_mfg_data[1], prospector_mfg_data[2],
+            prospector_mfg_data[3], prospector_mfg_data[4], prospector_mfg_data[5]);
+    
     // Start burst advertising after ZMK is fully initialized (longer delay for safety)
     status_initialized = true;
     k_work_schedule(&status_update_work, K_SECONDS(5)); // Wait 5 seconds for ZMK stability
     
-    LOG_INF("Prospector burst advertising system ready");
+    LOG_INF("*** PROSPECTOR INIT: System ready, first burst in 5 seconds ***");
     return 0;
 }
 
