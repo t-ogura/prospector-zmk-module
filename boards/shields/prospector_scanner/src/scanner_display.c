@@ -10,6 +10,7 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/logging/log.h>
 #include <zmk/status_scanner.h>
+#include "scanner_battery_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -19,6 +20,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static lv_obj_t *title_label = NULL;
 static lv_obj_t *status_label = NULL;
 static lv_obj_t *info_label = NULL;
+static struct zmk_widget_scanner_battery battery_widget;
 
 // Forward declaration
 static void trigger_scanner_start(void);
@@ -32,28 +34,66 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
     LOG_INF("Scanner event received: %d for keyboard %d", event_data->event, event_data->keyboard_index);
     
     int active_count = zmk_status_scanner_get_active_count();
-    int primary = zmk_status_scanner_get_primary_keyboard();
     
     if (active_count == 0) {
         // No keyboards found
         lv_label_set_text(status_label, "Scanning...");
         lv_label_set_text(info_label, "No keyboards found");
         LOG_INF("Display updated: No keyboards");
-    } else if (primary >= 0) {
-        // Show primary keyboard info
-        struct zmk_keyboard_status *status = zmk_status_scanner_get_keyboard(primary);
-        if (status) {
-            char status_buf[64];
+    } else {
+        // Find and display split keyboard info
+        struct zmk_keyboard_status *central = NULL;
+        struct zmk_keyboard_status *peripheral = NULL;
+        
+        // Look for central and peripheral devices
+        for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+            struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
+            if (kbd) {
+                if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL) {
+                    central = kbd;
+                } else if (kbd->data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) {
+                    peripheral = kbd;
+                }
+            }
+        }
+        
+        // Update display based on what we found
+        if (central && peripheral) {
+            // Split keyboard with both sides
+            lv_label_set_text(status_label, "Split Keyboard");
             char info_buf[64];
-            
-            snprintf(status_buf, sizeof(status_buf), "Found: %d keyboard%s", 
-                     active_count, active_count > 1 ? "s" : "");
-            snprintf(info_buf, sizeof(info_buf), "Battery: %d%% Layer: %d", 
-                     status->data.battery_level, status->data.active_layer);
-            
-            lv_label_set_text(status_label, status_buf);
+            snprintf(info_buf, sizeof(info_buf), "Layer: %d", central->data.active_layer);
             lv_label_set_text(info_label, info_buf);
-            LOG_INF("Display updated: %s, %s", status_buf, info_buf);
+            
+            // Update both sides of battery widget
+            zmk_widget_scanner_battery_update(&battery_widget, central);
+            zmk_widget_scanner_battery_update(&battery_widget, peripheral);
+            
+            LOG_INF("Split keyboard: Central %d%%, Peripheral %d%%, Layer: %d", 
+                    central->data.battery_level, peripheral->data.battery_level, central->data.active_layer);
+        } else if (central) {
+            // Only central side
+            lv_label_set_text(status_label, "Central Side");
+            char info_buf[64];
+            snprintf(info_buf, sizeof(info_buf), "Layer: %d", central->data.active_layer);
+            lv_label_set_text(info_label, info_buf);
+            
+            zmk_widget_scanner_battery_update(&battery_widget, central);
+            
+            LOG_INF("Central only: %d%%, Layer: %d", 
+                    central->data.battery_level, central->data.active_layer);
+        } else if (peripheral) {
+            // Only peripheral side
+            lv_label_set_text(status_label, "Peripheral Side");
+            lv_label_set_text(info_label, "Layer: --");
+            
+            zmk_widget_scanner_battery_update(&battery_widget, peripheral);
+            
+            LOG_INF("Peripheral only: %d%%", peripheral->data.battery_level);
+        } else {
+            // Unknown device
+            lv_label_set_text(status_label, "Unknown Device");
+            lv_label_set_text(info_label, "Checking...");
         }
     }
 }
@@ -110,21 +150,26 @@ lv_obj_t *zmk_display_status_screen() {
     title_label = lv_label_create(screen);
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 10);
     lv_label_set_text(title_label, "Prospector Scanner");
     
     // Status label (save reference for updates)
     status_label = lv_label_create(screen);
     lv_obj_set_style_text_color(status_label, lv_color_make(255, 255, 0), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_12, 0);
+    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, -40);
     lv_label_set_text(status_label, "Initializing...");
+    
+    // Battery widget in the center
+    zmk_widget_scanner_battery_init(&battery_widget, screen);
+    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 60);
     
     // Info label (save reference for updates)
     info_label = lv_label_create(screen);
     lv_obj_set_style_text_color(info_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(info_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(info_label, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_style_text_font(info_label, &lv_font_montserrat_12, 0);
+    lv_obj_align(info_label, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_label_set_text(info_label, "Starting scanner...");
     
     // Trigger scanner initialization after screen is ready
