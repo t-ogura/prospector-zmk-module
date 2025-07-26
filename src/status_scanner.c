@@ -187,13 +187,21 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 static void timeout_work_handler(struct k_work *work) {
     uint32_t now = k_uptime_get_32();
     
+    printk("*** PROSPECTOR SCANNER: Timeout check at time %u ***\n", now);
+    
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
-        if (keyboards[i].active && 
-            (now - keyboards[i].last_seen) > KEYBOARD_TIMEOUT_MS) {
+        if (keyboards[i].active) {
+            uint32_t age = now - keyboards[i].last_seen;
+            printk("*** SCANNER: Slot %d age: %ums (timeout at %ums) ***\n", 
+                   i, age, KEYBOARD_TIMEOUT_MS);
             
-            LOG_INF("Keyboard timeout: %s (slot %d)", keyboards[i].data.layer_name, i);
-            keyboards[i].active = false;
-            notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_LOST, i);
+            if (age > KEYBOARD_TIMEOUT_MS) {
+                printk("*** SCANNER: TIMEOUT! Removing keyboard %s from slot %d ***\n", 
+                       keyboards[i].data.layer_name, i);
+                LOG_INF("Keyboard timeout: %s (slot %d)", keyboards[i].data.layer_name, i);
+                keyboards[i].active = false;
+                notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_LOST, i);
+            }
         }
     }
     
@@ -269,11 +277,22 @@ struct zmk_keyboard_status *zmk_status_scanner_get_keyboard(int index) {
 
 int zmk_status_scanner_get_active_count(void) {
     int count = 0;
+    uint32_t now = k_uptime_get_32();
+    
+    printk("*** PROSPECTOR SCANNER: Active keyboard check at time %u ***\n", now);
+    
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) {
+            uint32_t age = now - keyboards[i].last_seen;
+            printk("*** SCANNER: Slot %d: ACTIVE, last_seen=%u, age=%ums, name=%s ***\n", 
+                   i, keyboards[i].last_seen, age, keyboards[i].data.layer_name);
             count++;
+        } else {
+            printk("*** SCANNER: Slot %d: INACTIVE ***\n", i);
         }
     }
+    
+    printk("*** PROSPECTOR SCANNER: Total active count: %d ***\n", count);
     return count;
 }
 
