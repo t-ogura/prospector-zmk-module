@@ -131,8 +131,14 @@ static void build_compact_payload(void) {
     compact_payload[5] = combined;
 }
 
-// Stop default advertising early in boot process
+// Stop default advertising early in boot process - ONLY when Prospector is enabled
 static int stop_default_advertising(const struct device *dev) {
+#if !IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+    // If Prospector advertisement is disabled, don't stop default advertising
+    printk("*** PROSPECTOR: Advertisement disabled, keeping default ZMK advertising ***\n");
+    return 0;
+#endif
+
     if (default_adv_stopped) {
         return 0;
     }
@@ -207,6 +213,12 @@ static void advertisement_work_handler(struct k_work *work) {
 
 // Initialize and start custom advertising after ZMK BLE setup
 static int start_custom_adv_system(const struct device *dev) {
+#if !IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+    // If Prospector advertisement is disabled, don't start custom advertising
+    printk("*** PROSPECTOR: Advertisement disabled, not starting custom advertising ***\n");
+    return 0;
+#endif
+
     printk("*** PROSPECTOR: Starting custom advertising system ***\n");
     LOG_INF("Starting custom advertising system");
     
