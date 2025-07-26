@@ -38,6 +38,17 @@ static void notify_event(enum zmk_status_scanner_event event, int keyboard_index
     }
 }
 
+static int find_keyboard_by_id_and_role(uint32_t keyboard_id, uint8_t device_role) {
+    for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active && 
+            memcmp(keyboards[i].data.keyboard_id, &keyboard_id, 4) == 0 &&
+            keyboards[i].data.device_role == device_role) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 static int find_keyboard_by_id(uint32_t keyboard_id) {
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (keyboards[i].active && 
