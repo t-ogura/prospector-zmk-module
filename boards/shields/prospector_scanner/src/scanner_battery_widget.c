@@ -75,7 +75,7 @@ static lv_obj_t *create_battery_container(lv_obj_t *parent) {
     
     // Battery percentage label (connected state)
     lv_obj_t *num = lv_label_create(info_container);
-    lv_obj_set_style_text_font(num, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(num, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(num, lv_color_white(), 0);
     lv_obj_set_style_opa(num, 255, 0);
     lv_obj_align(num, LV_ALIGN_CENTER, 0, 0);
