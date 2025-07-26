@@ -91,6 +91,9 @@ static void build_compact_payload(void) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15; // Limit to 4 bits
+    printk("*** PROSPECTOR: Current layer from keymap: %d ***\n", layer);
+#else
+    printk("*** PROSPECTOR: Peripheral device - layer fixed at 0 ***\n");
 #endif
     
     uint8_t combined = layer & 0x0F; // Lower 4 bits = layer
