@@ -162,12 +162,16 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                 adv_data.connection_count = 1;
                 snprintf(adv_data.layer_name, sizeof(adv_data.layer_name), "L%d", adv_data.active_layer);
                 
-                // Generate keyboard ID from name (temporary - should be in payload)
+                // Generate keyboard ID - use base name for grouping split keyboards
                 const char *name = "LalaPad"; // TODO: Get from scan response
                 uint32_t hash = 0;
                 for (int i = 0; name[i] != '\0'; i++) {
                     hash = hash * 31 + name[i];
                 }
+                
+                // For split keyboards, use the same base ID for both central and peripheral
+                // This allows grouping them together as one logical keyboard
+                // Only differentiate if we need separate tracking
                 adv_data.keyboard_id[0] = (hash >> 24) & 0xFF;
                 adv_data.keyboard_id[1] = (hash >> 16) & 0xFF;
                 adv_data.keyboard_id[2] = (hash >> 8) & 0xFF;
