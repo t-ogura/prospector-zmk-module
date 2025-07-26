@@ -86,7 +86,16 @@ static void build_compact_payload(void) {
     }
     compact_payload[4] = battery_level;
     
-    printk("*** PROSPECTOR: Battery level: %d%% ***\n", battery_level);
+    const char *role_str = "UNKNOWN";
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    role_str = "CENTRAL";
+#elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
+    role_str = "PERIPHERAL";
+#else
+    role_str = "STANDALONE";
+#endif
+    
+    printk("*** PROSPECTOR %s: Battery level: %d%% ***\n", role_str, battery_level);
     
     // Byte 5: Combined layer + status flags
     uint8_t layer = 0;

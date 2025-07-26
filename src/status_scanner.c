@@ -79,8 +79,8 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
     uint32_t now = k_uptime_get_32();
     
-    // Find existing keyboard
-    int index = find_keyboard_by_id(keyboard_id);
+    // Find existing keyboard by ID AND role for split keyboards
+    int index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
     bool is_new = false;
     
     if (index < 0) {
@@ -101,12 +101,22 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     
     // Notify event
     if (is_new) {
-        printk("*** PROSPECTOR SCANNER: New keyboard found: %s (slot %d) ***\n", adv_data->layer_name, index);
-        LOG_INF("New keyboard found: %s (slot %d)", adv_data->layer_name, index);
+        const char *role_str = "UNKNOWN";
+        if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
+        
+        printk("*** PROSPECTOR SCANNER: New %s device found: %s (slot %d) ***\n", role_str, adv_data->layer_name, index);
+        LOG_INF("New %s device found: %s (slot %d)", role_str, adv_data->layer_name, index);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
     } else {
-        printk("*** PROSPECTOR SCANNER: Keyboard updated: %s, battery: %d%% ***\n", 
-               adv_data->layer_name, adv_data->battery_level);
+        const char *role_str = "UNKNOWN";
+        if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL"; 
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
+        
+        printk("*** PROSPECTOR SCANNER: %s device updated: %s, battery: %d%% ***\n", 
+               role_str, adv_data->layer_name, adv_data->battery_level);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
     }
 }
