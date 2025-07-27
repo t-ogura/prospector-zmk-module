@@ -31,7 +31,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #pragma message "*** PROSPECTOR STRATEGIC ADVERTISING ***"
 
 #include <zmk/events/battery_state_changed.h>
-#include <zmk/events/layer_state_changed.h>
 #include <zmk/event_manager.h>
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -53,12 +52,8 @@ ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
 ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_changed);
 #endif
 
-// Layer change event listener (only available in keyboard builds with keymap)
-#if IS_ENABLED(CONFIG_ZMK_KEYMAP)
-static int layer_state_listener(const zmk_event_t *eh);
-ZMK_LISTENER(prospector_layer_state, layer_state_listener);
-ZMK_SUBSCRIPTION(prospector_layer_state, zmk_layer_state_changed);
-#endif
+// Note: Layer event listeners removed to avoid undefined symbol issues
+// Using periodic polling approach for better compatibility
 
 // Strategic timing to work with ZMK
 static uint32_t burst_count = 0;
@@ -82,21 +77,7 @@ static int peripheral_battery_listener(const zmk_event_t *eh) {
 }
 #endif
 
-// Layer change event listener 
-#if IS_ENABLED(CONFIG_ZMK_KEYMAP)
-static int layer_state_listener(const zmk_event_t *eh) {
-    const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
-    if (ev) {
-        LOG_INF("Layer changed: %d, active: %s", ev->layer, ev->state ? "true" : "false");
-        // Trigger immediate status update when layer changes
-        if (status_initialized) {
-            k_work_cancel_delayable(&status_update_work);
-            k_work_schedule(&status_update_work, K_NO_WAIT);
-        }
-    }
-    return ZMK_EV_EVENT_BUBBLE;
-}
-#endif
+// Layer change listener removed - using polling approach for compatibility
 
 static void build_prospector_data(void) {
     // Build complete zmk_status_adv_data structure
