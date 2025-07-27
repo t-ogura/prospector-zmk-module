@@ -38,15 +38,12 @@ static void notify_event(enum zmk_status_scanner_event event, int keyboard_index
     }
 }
 
-static int find_keyboard_by_id_and_role(uint32_t keyboard_id, uint8_t device_role) {
-    for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
-        if (keyboards[i].active && 
-            memcmp(keyboards[i].data.keyboard_id, &keyboard_id, 4) == 0 &&
-            keyboards[i].data.device_role == device_role) {
-            return i;
-        }
-    }
-    return -1;
+// Helper function to get keyboard ID
+static uint32_t get_keyboard_id_from_data(const struct zmk_status_adv_data *data) {
+    return (data->keyboard_id[0] << 24) | 
+           (data->keyboard_id[1] << 16) | 
+           (data->keyboard_id[2] << 8) | 
+           data->keyboard_id[3];
 }
 
 static int find_keyboard_by_id(uint32_t keyboard_id) {
@@ -88,13 +85,6 @@ static int find_empty_slot(void) {
         }
     }
     return -1;
-}
-
-static uint32_t get_keyboard_id_from_data(const struct zmk_status_adv_data *data) {
-    return (data->keyboard_id[0] << 24) | 
-           (data->keyboard_id[1] << 16) | 
-           (data->keyboard_id[2] << 8) | 
-           data->keyboard_id[3];
 }
 
 static void process_advertisement(const struct zmk_status_adv_data *adv_data, int8_t rssi) {
