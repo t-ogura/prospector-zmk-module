@@ -132,24 +132,43 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
         return;
     }
     
-    LOG_INF("Updating scanner battery widget - device_role: %d, battery: %d%%", 
-            status->data.device_role, status->data.battery_level);
+    LOG_INF("Updating scanner battery widget - device_role: %d, battery: %d%%, peripheral: %d%%", 
+            status->data.device_role, status->data.battery_level, status->data.peripheral_battery[0]);
     
-    // Determine which container to update based on device role
-    int container_index = -1;
-    
-    if (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL || 
-        status->data.device_role == ZMK_DEVICE_ROLE_STANDALONE) {
-        container_index = 0; // First container for Central/Standalone
-    } else if (status->data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) {
-        container_index = 1; // Second container for Peripheral
-    }
-    
-    if (container_index >= 0 && container_index < 2) {
-        lv_obj_t *container = lv_obj_get_child(widget->obj, container_index);
-        if (container) {
-            set_battery_bar_value(container, status->data.battery_level, true);
+    // Handle split keyboard display
+    if (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && 
+        status->data.peripheral_battery[0] > 0) {
+        // Split keyboard: show both Central and Peripheral batteries
+        
+        // Container 0: Central (Right side)
+        lv_obj_t *central_container = lv_obj_get_child(widget->obj, 0);
+        if (central_container) {
+            set_battery_bar_value(central_container, status->data.battery_level, true);
+            LOG_INF("Updated Central battery container with %d%%", status->data.battery_level);
+        }
+        
+        // Container 1: Peripheral (Left side)  
+        lv_obj_t *peripheral_container = lv_obj_get_child(widget->obj, 1);
+        if (peripheral_container) {
+            set_battery_bar_value(peripheral_container, status->data.peripheral_battery[0], true);
+            LOG_INF("Updated Peripheral battery container with %d%%", status->data.peripheral_battery[0]);
+        }
+    } else {
+        // Single device: use first container, clear second
+        int container_index = (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL || 
+                              status->data.device_role == ZMK_DEVICE_ROLE_STANDALONE) ? 0 : 1;
+        
+        lv_obj_t *main_container = lv_obj_get_child(widget->obj, container_index);
+        if (main_container) {
+            set_battery_bar_value(main_container, status->data.battery_level, true);
             LOG_INF("Updated battery container %d with %d%%", container_index, status->data.battery_level);
+        }
+        
+        // Clear the other container for non-split devices
+        lv_obj_t *other_container = lv_obj_get_child(widget->obj, 1 - container_index);
+        if (other_container) {
+            set_battery_bar_value(other_container, 0, false);
+            LOG_INF("Cleared battery container %d", 1 - container_index);
         }
     }
 }
