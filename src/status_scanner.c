@@ -87,6 +87,81 @@ static int find_empty_slot(void) {
     return -1;
 }
 
+static void process_advertisement_with_name(const struct zmk_status_adv_data *adv_data, int8_t rssi, const bt_addr_le_t *addr) {
+    uint32_t now = k_uptime_get_32();
+    uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
+    
+    // Get device name
+    const char *device_name = get_device_name(addr);
+    
+    const char *role_str = "UNKNOWN";
+    if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
+    else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
+    else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
+    
+    printk("*** SCANNER DEBUG: Received %s (%s), ID=%08X, Battery=%d%%, Layer=%d ***\n",
+           role_str, device_name, keyboard_id, adv_data->battery_level, adv_data->active_layer);
+    
+    // Find existing keyboard by ID AND role for split keyboards
+    int index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
+    bool is_new = false;
+    
+    if (index < 0) {
+        // Find empty slot for new keyboard
+        index = find_empty_slot();
+        if (index < 0) {
+            LOG_WRN("No empty slots for new keyboard");
+            return;
+        }
+        is_new = true;
+        printk("*** SCANNER: Creating NEW slot %d for %s (%s) ID=%08X ***\n", 
+               index, role_str, device_name, keyboard_id);
+    }
+    
+    // Update keyboard status
+    keyboards[index].active = true;
+    keyboards[index].last_seen = now;
+    keyboards[index].rssi = rssi;
+    memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
+    strncpy(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name) - 1);
+    keyboards[index].ble_name[sizeof(keyboards[index].ble_name) - 1] = '\0';
+    
+    // Debug: Print current active slots
+    if (is_new) {
+        printk("*** SCANNER: Current active slots: ***\n");
+        for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+            if (keyboards[i].active) {
+                uint32_t id = get_keyboard_id_from_data(&keyboards[i].data);
+                const char *role = (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+                                  (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE";
+                printk("*** SLOT %d: %s (%s) ID=%08X Battery=%d%% ***\n", 
+                       i, role, keyboards[i].ble_name, id, keyboards[i].data.battery_level);
+            }
+        }
+    }
+    
+    // Notify event
+    if (is_new) {
+        const char *role_str = "UNKNOWN";
+        if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
+        
+        printk("*** PROSPECTOR SCANNER: New %s device found: %s (slot %d) ***\n", role_str, device_name, index);
+        LOG_INF("New %s device found: %s (slot %d)", role_str, device_name, index);
+        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
+    } else {
+        const char *role_str = "UNKNOWN";
+        if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL"; 
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
+        
+        printk("*** PROSPECTOR SCANNER: %s device updated: %s, battery: %d%% ***\n", 
+               role_str, device_name, adv_data->battery_level);
+        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
+    }
+}
+
 static void process_advertisement(const struct zmk_status_adv_data *adv_data, int8_t rssi) {
     uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
     uint32_t now = k_uptime_get_32();
@@ -158,6 +233,39 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     }
 }
 
+// Temporary storage for device name and data correlation
+static struct {
+    bt_addr_le_t addr;
+    char name[32];
+    uint32_t timestamp;
+} temp_device_names[5];
+
+static void store_device_name(const bt_addr_le_t *addr, const char *name) {
+    uint32_t now = k_uptime_get_32();
+    // Find or create slot for this address
+    for (int i = 0; i < 5; i++) {
+        if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0 ||
+            (now - temp_device_names[i].timestamp) > 5000) { // Expire after 5 seconds
+            bt_addr_le_copy(&temp_device_names[i].addr, addr);
+            strncpy(temp_device_names[i].name, name, sizeof(temp_device_names[i].name) - 1);
+            temp_device_names[i].name[sizeof(temp_device_names[i].name) - 1] = '\0';
+            temp_device_names[i].timestamp = now;
+            break;
+        }
+    }
+}
+
+static const char* get_device_name(const bt_addr_le_t *addr) {
+    uint32_t now = k_uptime_get_32();
+    for (int i = 0; i < 5; i++) {
+        if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0 &&
+            (now - temp_device_names[i].timestamp) <= 5000) {
+            return temp_device_names[i].name;
+        }
+    }
+    return "Unknown";
+}
+
 static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                          struct net_buf_simple *buf) {
     static int scan_count = 0;
@@ -173,41 +281,52 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         return;
     }
     
-    // Parse advertisement data
-    while (buf->len > 1) {
-        uint8_t len = net_buf_simple_pull_u8(buf);
-        if (len == 0 || len > buf->len) {
+    const struct zmk_status_adv_data *prospector_data = NULL;
+    
+    // Parse advertisement data to extract both name and Prospector data
+    struct net_buf_simple buf_copy = *buf; // Make a copy for parsing
+    while (buf_copy.len > 1) {
+        uint8_t len = net_buf_simple_pull_u8(&buf_copy);
+        if (len == 0 || len > buf_copy.len) {
             break;
         }
         
-        uint8_t ad_type = net_buf_simple_pull_u8(buf);
+        uint8_t ad_type = net_buf_simple_pull_u8(&buf_copy);
         len--; // Subtract type byte
         
-        // Check for Prospector manufacturer data (31 bytes for new format)
+        // Extract device name
+        if ((ad_type == BT_DATA_NAME_COMPLETE || ad_type == BT_DATA_NAME_SHORTENED) && len > 0) {
+            char device_name[32];
+            memcpy(device_name, buf_copy.data, MIN(len, sizeof(device_name) - 1));
+            device_name[MIN(len, sizeof(device_name) - 1)] = '\0';
+            store_device_name(addr, device_name);
+            printk("*** PROSPECTOR SCANNER: Found device name: %s ***\n", device_name);
+        }
+        
+        // Check for Prospector manufacturer data
         if (ad_type == BT_DATA_MANUFACTURER_DATA && len >= sizeof(struct zmk_status_adv_data)) {
-            printk("*** PROSPECTOR SCANNER: Found manufacturer data! len=%d ***\n", len);
-            
-            const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf->data;
+            const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf_copy.data;
             
             // Check if this is Prospector data: FF FF AB CD
             if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF && 
                 data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
-                
+                prospector_data = data;
                 printk("*** PROSPECTOR SCANNER: Valid Prospector data found! Version=%d ***\n", data->version);
-                printk("*** PROSPECTOR SCANNER: Central=%d%%, Peripheral=[%d,%d,%d], Layer=%d ***\n",
-                       data->battery_level, data->peripheral_battery[0], 
-                       data->peripheral_battery[1], data->peripheral_battery[2], data->active_layer);
-                
-                // Process the complete advertisement data directly
-                process_advertisement(data, rssi);
-            } else {
-                printk("*** PROSPECTOR SCANNER: Not Prospector data - got %02X %02X %02X %02X ***\n",
-                       data->manufacturer_id[0], data->manufacturer_id[1], 
-                       data->service_uuid[0], data->service_uuid[1]);
             }
         }
         
-        net_buf_simple_pull(buf, len);
+        net_buf_simple_pull(&buf_copy, len);
+    }
+    
+    // Process Prospector data if found
+    if (prospector_data) {
+        printk("*** PROSPECTOR SCANNER: Central=%d%%, Peripheral=[%d,%d,%d], Layer=%d ***\n",
+               prospector_data->battery_level, prospector_data->peripheral_battery[0], 
+               prospector_data->peripheral_battery[1], prospector_data->peripheral_battery[2], 
+               prospector_data->active_layer);
+        
+        // Process advertisement with device name
+        process_advertisement_with_name(prospector_data, rssi, addr);
     }
 }
 

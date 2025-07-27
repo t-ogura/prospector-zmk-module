@@ -27,6 +27,7 @@ struct zmk_keyboard_status {
     uint32_t last_seen;                    // Timestamp of last advertisement
     struct zmk_status_adv_data data;       // Latest status data
     int8_t rssi;                          // Signal strength
+    char ble_name[32];                     // BLE device name from advertisement
 };
 
 /**

@@ -52,7 +52,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && 
                     kbd->data.peripheral_battery[0] > 0) {
                     // Split keyboard - Central contains both battery levels
-                    lv_label_set_text(status_label, kbd->data.device_name);
+                    lv_label_set_text(status_label, kbd->ble_name);
                     char info_buf[64];
                     snprintf(info_buf, sizeof(info_buf), "L%d | R:%d%% L:%d%%", 
                             kbd->data.active_layer, 
@@ -66,7 +66,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                             kbd->data.battery_level, kbd->data.peripheral_battery[0], kbd->data.active_layer);
                 } else if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL) {
                     // Central device without peripheral data
-                    lv_label_set_text(status_label, kbd->data.device_name);
+                    lv_label_set_text(status_label, kbd->ble_name);
                     char info_buf[64];
                     snprintf(info_buf, sizeof(info_buf), "L%d: %d%%", 
                             kbd->data.active_layer, kbd->data.battery_level);
@@ -78,7 +78,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                             kbd->data.battery_level, kbd->data.active_layer);
                 } else if (kbd->data.device_role == ZMK_DEVICE_ROLE_STANDALONE) {
                     // Standalone keyboard
-                    lv_label_set_text(status_label, kbd->data.device_name);
+                    lv_label_set_text(status_label, kbd->ble_name);
                     char info_buf[64];
                     snprintf(info_buf, sizeof(info_buf), "L%d: %d%%", 
                             kbd->data.active_layer, kbd->data.battery_level);

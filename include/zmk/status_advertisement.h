@@ -31,9 +31,9 @@ struct zmk_status_adv_data {
     uint8_t device_role;         // Device role (CENTRAL/PERIPHERAL/STANDALONE)
     uint8_t device_index;        // Device index for split keyboards
     uint8_t peripheral_battery[3]; // Peripheral battery levels (up to 3 devices, 0 = N/A)
-    char device_name[8];         // Device name (null-terminated, up to 7 chars + null)
-    uint8_t keyboard_id[4];      // Keyboard identifier  
-    uint8_t reserved[2];         // Reserved for future use
+    char layer_name[6];          // Layer name (null-terminated, restored for future use)
+    uint8_t keyboard_id[4];      // Keyboard identifier
+    uint8_t reserved[3];         // Reserved for future use (restored space)
 } __packed;
 
 /**

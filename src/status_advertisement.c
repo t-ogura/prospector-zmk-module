@@ -117,12 +117,8 @@ static void build_prospector_data(void) {
     uint8_t layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15;
     prospector_adv_data.active_layer = layer;
+    snprintf(prospector_adv_data.layer_name, sizeof(prospector_adv_data.layer_name), "L%d", layer);
 #endif
-    
-    // Device name from config
-    const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
-    strncpy(prospector_adv_data.device_name, keyboard_name, sizeof(prospector_adv_data.device_name) - 1);
-    prospector_adv_data.device_name[sizeof(prospector_adv_data.device_name) - 1] = '\0';
     
     // Profile and connection info (placeholder for now)
     prospector_adv_data.profile_slot = 0; // TODO: Get actual profile
