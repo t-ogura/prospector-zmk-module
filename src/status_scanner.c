@@ -183,70 +183,27 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         uint8_t ad_type = net_buf_simple_pull_u8(buf);
         len--; // Subtract type byte
         
-        // Check for compact 6-byte Prospector manufacturer data
-        if (ad_type == BT_DATA_MANUFACTURER_DATA && len >= 6) {
+        // Check for Prospector manufacturer data (31 bytes for new format)
+        if (ad_type == BT_DATA_MANUFACTURER_DATA && len >= sizeof(struct zmk_status_adv_data)) {
             printk("*** PROSPECTOR SCANNER: Found manufacturer data! len=%d ***\n", len);
             
-            const uint8_t *data = buf->data;
+            const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf->data;
             
             // Check if this is Prospector data: FF FF AB CD
-            if (data[0] == 0xFF && data[1] == 0xFF && 
-                data[2] == 0xAB && data[3] == 0xCD) {
+            if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF && 
+                data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
                 
-                printk("*** PROSPECTOR SCANNER: Valid Prospector data found! ***\n");
-                printk("*** PROSPECTOR SCANNER: Data: %02X %02X %02X %02X %02X %02X ***\n",
-                       data[0], data[1], data[2], data[3], data[4], data[5]);
+                printk("*** PROSPECTOR SCANNER: Valid Prospector data found! Version=%d ***\n", data->version);
+                printk("*** PROSPECTOR SCANNER: Central=%d%%, Peripheral=[%d,%d,%d], Layer=%d ***\n",
+                       data->battery_level, data->peripheral_battery[0], 
+                       data->peripheral_battery[1], data->peripheral_battery[2], data->active_layer);
                 
-                // Create zmk_status_adv_data from compact payload
-                struct zmk_status_adv_data adv_data = {0};
-                adv_data.manufacturer_id[0] = data[0];
-                adv_data.manufacturer_id[1] = data[1];
-                adv_data.service_uuid[0] = data[2];
-                adv_data.service_uuid[1] = data[3];
-                adv_data.version = ZMK_STATUS_ADV_VERSION;
-                adv_data.battery_level = data[4];
-                
-                // Parse combined layer + status byte
-                uint8_t combined = data[5];
-                adv_data.active_layer = combined & 0x0F;  // Lower 4 bits
-                adv_data.status_flags = 0;
-                if (combined & 0x10) adv_data.status_flags |= ZMK_STATUS_FLAG_USB_CONNECTED;
-                if (combined & 0x40) adv_data.device_role = ZMK_DEVICE_ROLE_CENTRAL;
-                else if (combined & 0x80) adv_data.device_role = ZMK_DEVICE_ROLE_PERIPHERAL;
-                else adv_data.device_role = ZMK_DEVICE_ROLE_STANDALONE;
-                
-                // Set defaults for missing data
-                adv_data.profile_slot = 0;
-                adv_data.connection_count = 1;
-                snprintf(adv_data.layer_name, sizeof(adv_data.layer_name), "L%d", adv_data.active_layer);
-                
-                // Generate keyboard ID - use base name for grouping split keyboards
-                const char *name = "LalaPad"; // TODO: Get from scan response
-                uint32_t hash = 0;
-                for (int i = 0; name[i] != '\0'; i++) {
-                    hash = hash * 31 + name[i];
-                }
-                
-                // For split keyboards, use the same base ID for grouping
-                // But set device_index based on role for proper tracking
-                adv_data.keyboard_id[0] = (hash >> 24) & 0xFF;
-                adv_data.keyboard_id[1] = (hash >> 16) & 0xFF;
-                adv_data.keyboard_id[2] = (hash >> 8) & 0xFF;
-                adv_data.keyboard_id[3] = hash & 0xFF;
-                
-                // Set device_index based on role
-                if (adv_data.device_role == ZMK_DEVICE_ROLE_CENTRAL) {
-                    adv_data.device_index = 0;
-                } else if (adv_data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) {
-                    adv_data.device_index = 1;
-                } else {
-                    adv_data.device_index = 0;
-                }
-                
-                process_advertisement(&adv_data, rssi);
+                // Process the complete advertisement data directly
+                process_advertisement(data, rssi);
             } else {
                 printk("*** PROSPECTOR SCANNER: Not Prospector data - got %02X %02X %02X %02X ***\n",
-                       data[0], data[1], data[2], data[3]);
+                       data->manufacturer_id[0], data->manufacturer_id[1], 
+                       data->service_uuid[0], data->service_uuid[1]);
             }
         }
         

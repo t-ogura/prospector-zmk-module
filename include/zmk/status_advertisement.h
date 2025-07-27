@@ -23,16 +23,17 @@ struct zmk_status_adv_data {
     uint8_t manufacturer_id[2];  // 0xFF, 0xFF (Company ID: 0xFFFF = Reserved)
     uint8_t service_uuid[2];     // 0xAB, 0xCD (Custom UUID for Prospector)
     uint8_t version;             // Protocol version
-    uint8_t battery_level;       // Battery level 0-100%
+    uint8_t battery_level;       // Central/Standalone battery level 0-100%
     uint8_t active_layer;        // Current active layer 0-15
     uint8_t profile_slot;        // Active profile slot 0-4
     uint8_t connection_count;    // Number of connected devices 0-5
     uint8_t status_flags;        // Status flags (bit field)
     uint8_t device_role;         // Device role (CENTRAL/PERIPHERAL/STANDALONE)
     uint8_t device_index;        // Device index for split keyboards
-    char layer_name[6];          // Layer name (null-terminated, reduced for role fields)
+    uint8_t peripheral_battery[3]; // Peripheral battery levels (up to 3 devices, 0 = N/A)
+    char layer_name[3];          // Shortened layer name (null-terminated)
     uint8_t keyboard_id[4];      // Keyboard identifier
-    uint8_t reserved[6];         // Reserved for future use
+    uint8_t reserved[3];         // Reserved for future use
 } __packed;
 
 /**
