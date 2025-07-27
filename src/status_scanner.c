@@ -51,11 +51,33 @@ static int find_keyboard_by_id_and_role(uint32_t keyboard_id, uint8_t device_rol
 
 static int find_keyboard_by_id(uint32_t keyboard_id) {
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
-        if (keyboards[i].active && 
-            memcmp(keyboards[i].data.keyboard_id, &keyboard_id, 4) == 0) {
-            return i;
+        if (keyboards[i].active) {
+            uint32_t stored_id = get_keyboard_id_from_data(&keyboards[i].data);
+            if (stored_id == keyboard_id) {
+                return i;
+            }
         }
     }
+    return -1;
+}
+
+static int find_keyboard_by_id_and_role(uint32_t keyboard_id, uint8_t device_role) {
+    for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active) {
+            uint32_t stored_id = get_keyboard_id_from_data(&keyboards[i].data);
+            if (stored_id == keyboard_id && keyboards[i].data.device_role == device_role) {
+                printk("*** SCANNER: Found existing slot %d for %s ID=%08X ***\n", 
+                       i, (device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+                          (device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE",
+                       keyboard_id);
+                return i;
+            }
+        }
+    }
+    printk("*** SCANNER: No existing slot found for %s ID=%08X ***\n", 
+           (device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+           (device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE",
+           keyboard_id);
     return -1;
 }
 
@@ -79,6 +101,15 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
     uint32_t now = k_uptime_get_32();
     
+    // Debug: Print what we received
+    const char *role_str = "UNKNOWN";
+    if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
+    else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
+    else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
+    
+    printk("*** SCANNER DEBUG: Received %s, ID=%08X, Battery=%d%%, Layer=%d ***\n",
+           role_str, keyboard_id, adv_data->battery_level, adv_data->active_layer);
+    
     // Find existing keyboard by ID AND role for split keyboards
     int index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
     bool is_new = false;
@@ -91,6 +122,8 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
             return;
         }
         is_new = true;
+        printk("*** SCANNER: Creating NEW slot %d for %s ID=%08X ***\n", 
+               index, role_str, keyboard_id);
     }
     
     // Update keyboard status
@@ -98,6 +131,20 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
+    
+    // Debug: Print current active slots
+    if (is_new) {
+        printk("*** SCANNER: Current active slots: ***\n");
+        for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+            if (keyboards[i].active) {
+                uint32_t id = get_keyboard_id_from_data(&keyboards[i].data);
+                const char *role = (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+                                  (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE";
+                printk("*** SLOT %d: %s ID=%08X Battery=%d%% ***\n", 
+                       i, role, id, keyboards[i].data.battery_level);
+            }
+        }
+    }
     
     // Notify event
     if (is_new) {
