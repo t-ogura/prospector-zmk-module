@@ -66,9 +66,11 @@ static void build_prospector_data(void) {
     uint8_t layer = 0;
     uint8_t combined = 0;
     
-    // Always try to get layer info - even peripherals might have it
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP)
+    // Only try to get layer info if keymap module is available
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15; // Limit to 4 bits
+#endif
     
     combined = layer & 0x0F; // Lower 4 bits = layer
     
