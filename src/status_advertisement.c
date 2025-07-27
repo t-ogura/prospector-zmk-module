@@ -163,47 +163,35 @@ static void build_prospector_data(void) {
             prospector_adv_data.active_layer);
 }
 
-// Strategic advertising approach
-static struct bt_data prospector_burst_data[2];
-
-// Slower, longer advertising to compete with ZMK effectively  
-static const struct bt_le_adv_param strategic_params = {
-    .id = BT_ID_DEFAULT,
-    .options = BT_LE_ADV_OPT_CONNECTABLE, // Make it connectable like ZMK's
-    .interval_min = BT_GAP_ADV_SLOW_INT_MIN, // Slower intervals
-    .interval_max = BT_GAP_ADV_SLOW_INT_MAX,
-};
-
-// STRATEGIC APPROACH: Forcibly take control for longer periods
-static void send_prospector_strategic(void) {
-    burst_count++;
-    
+// Simple approach: Let ZMK handle connectivity, we just add our data periodically
+static void send_prospector_data(void) {
     // Update manufacturer data with current status
     build_prospector_data();
     
-    // Build complete advertising packet like ZMK does
-    prospector_burst_data[0].type = BT_DATA_FLAGS;
-    prospector_burst_data[0].data_len = 1;
-    static const uint8_t flags = BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR;
-    prospector_burst_data[0].data = &flags;
+    // Build our advertising data
+    static struct bt_data ad[] = {
+        BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+        BT_DATA(BT_DATA_MANUFACTURER_DATA, &prospector_adv_data, sizeof(prospector_adv_data)),
+    };
     
-    prospector_burst_data[1].type = BT_DATA_MANUFACTURER_DATA;
-    prospector_burst_data[1].data_len = sizeof(prospector_adv_data);
-    prospector_burst_data[1].data = (uint8_t *)&prospector_adv_data;
+    // Use connectable advertising to not break ZMK
+    static const struct bt_le_adv_param param = {
+        .id = BT_ID_DEFAULT,
+        .options = BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_USE_NAME,
+        .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
+        .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
+    };
     
-    // Stop any existing advertising first
-    bt_le_adv_stop();
-    k_sleep(K_MSEC(50)); // Wait for stop to complete
-    
-    // Start our advertising with longer duration (5 seconds)
-    int err = bt_le_adv_start(&strategic_params, prospector_burst_data, 2, NULL, 0);
-    if (err == 0) {
-        // Success - let it run for 5 seconds
-        k_sleep(K_SECONDS(5));
-        bt_le_adv_stop();
-        
-        // Give ZMK time to resume its advertising
-        k_sleep(K_MSEC(500));
+    // Try to start advertising (will fail if ZMK is already advertising)
+    int err = bt_le_adv_start(&param, ad, ARRAY_SIZE(ad), NULL, 0);
+    if (err == -EALREADY) {
+        // ZMK is advertising, that's fine
+        LOG_DBG("ZMK advertising active");
+    } else if (err == 0) {
+        LOG_INF("Prospector advertising started");
+        // Don't stop it - let ZMK handle that
+    } else {
+        LOG_ERR("Failed to start advertising: %d", err);
     }
 }
 
@@ -220,8 +208,8 @@ static void status_update_work_handler(struct k_work *work) {
         return;
     }
     
-    // Send strategic advertising to compete with ZMK (Central side only)
-    send_prospector_strategic();
+    // Send prospector advertising data
+    send_prospector_data();
     
     // Schedule next burst with longer interval (30 seconds)
     // This gives enough time for ZMK to work normally, but ensures we get our data out
