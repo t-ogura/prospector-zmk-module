@@ -53,10 +53,12 @@ ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
 ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_changed);
 #endif
 
-// Layer change event listener
+// Layer change event listener (only available in keyboard builds with keymap)
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP) && IS_ENABLED(CONFIG_ZMK_STUDIO)
 static int layer_state_listener(const zmk_event_t *eh);
 ZMK_LISTENER(prospector_layer_state, layer_state_listener);
 ZMK_SUBSCRIPTION(prospector_layer_state, zmk_layer_state_changed);
+#endif
 
 // Strategic timing to work with ZMK
 static uint32_t burst_count = 0;
@@ -81,6 +83,7 @@ static int peripheral_battery_listener(const zmk_event_t *eh) {
 #endif
 
 // Layer change event listener 
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP) && IS_ENABLED(CONFIG_ZMK_STUDIO)
 static int layer_state_listener(const zmk_event_t *eh) {
     const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
     if (ev) {
@@ -93,6 +96,7 @@ static int layer_state_listener(const zmk_event_t *eh) {
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
+#endif
 
 static void build_prospector_data(void) {
     // Build complete zmk_status_adv_data structure

@@ -87,6 +87,9 @@ static int find_empty_slot(void) {
     return -1;
 }
 
+// Forward declaration
+static const char* get_device_name(const bt_addr_le_t *addr);
+
 static void process_advertisement_with_name(const struct zmk_status_adv_data *adv_data, int8_t rssi, const bt_addr_le_t *addr) {
     uint32_t now = k_uptime_get_32();
     uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
