@@ -163,53 +163,92 @@ static void build_prospector_data(void) {
             prospector_adv_data.active_layer);
 }
 
-// Simple approach: Let ZMK handle connectivity, we just add our data periodically
-static void send_prospector_data(void) {
-    // Update manufacturer data with current status
-    build_prospector_data();
+// Ultra-minimal approach: Store compact 6-byte payload like the successful implementation
+static uint8_t compact_payload[6];
+
+// Build 6-byte payload as in successful implementation
+static void build_compact_payload(void) {
+    // Byte 0-1: Manufacturer ID (0xFFFF for local use)
+    compact_payload[0] = 0xFF;
+    compact_payload[1] = 0xFF;
     
-    // Build our advertising data
-    static struct bt_data ad[] = {
+    // Byte 2-3: Service UUID (0xABCD - Prospector identifier)
+    compact_payload[2] = 0xAB;
+    compact_payload[3] = 0xCD;
+    
+    // Byte 4: Battery level
+    uint8_t battery_level = zmk_battery_state_of_charge();
+    if (battery_level > 100) {
+        battery_level = 100;
+    }
+    compact_payload[4] = battery_level;
+    
+    // Byte 5: Combined layer + status flags
+    uint8_t layer = 0;
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP)
+    layer = zmk_keymap_highest_layer_active();
+    if (layer > 15) layer = 15; // Limit to 4 bits
+#endif
+    
+    uint8_t combined = layer & 0x0F; // Lower 4 bits = layer
+    
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    if (zmk_usb_is_powered()) {
+        combined |= 0x10; // Bit 4 = USB connected
+    }
+#endif
+    
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    combined |= 0x40; // Bit 6 = Central device
+#elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)  
+    combined |= 0x80; // Bit 7 = Peripheral device
+#endif
+    
+    compact_payload[5] = combined;
+}
+
+// Try to send compact prospector data without interfering with ZMK
+static void send_compact_prospector_data(void) {
+    build_compact_payload();
+    
+    // Build minimal advertising data
+    struct bt_data ad[] = {
         BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-        BT_DATA(BT_DATA_MANUFACTURER_DATA, &prospector_adv_data, sizeof(prospector_adv_data)),
+        BT_DATA(BT_DATA_MANUFACTURER_DATA, compact_payload, sizeof(compact_payload)),
     };
     
-    // Use connectable advertising to not break ZMK
+    // Use ZMK-compatible parameters
     static const struct bt_le_adv_param param = {
         .id = BT_ID_DEFAULT,
-        .options = BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_USE_NAME,
+        .options = BT_LE_ADV_OPT_CONNECTABLE,
         .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
         .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
     };
     
-    // Try to start advertising (will fail if ZMK is already advertising)
+    // Try to advertise briefly
     int err = bt_le_adv_start(&param, ad, ARRAY_SIZE(ad), NULL, 0);
-    if (err == -EALREADY) {
-        // ZMK is advertising, that's fine
-        LOG_DBG("ZMK advertising active");
-    } else if (err == 0) {
-        LOG_INF("Prospector advertising started");
-        // Don't stop it - let ZMK handle that
-    } else {
-        LOG_ERR("Failed to start advertising: %d", err);
+    if (err == 0) {
+        LOG_INF("Compact Prospector data sent: %02X %02X %02X %02X %02X %02X", 
+                compact_payload[0], compact_payload[1], compact_payload[2],
+                compact_payload[3], compact_payload[4], compact_payload[5]);
+        
+        // Brief advertisement, then let ZMK resume
+        k_sleep(K_MSEC(500));
+        bt_le_adv_stop();
+    } else if (err != -EALREADY) {
+        LOG_ERR("Failed to start compact advertising: %d", err);
     }
 }
 
 static void status_update_work_handler(struct k_work *work) {
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
-    // CRITICAL FIX: Don't interfere with peripheral split communication
-    // Peripheral devices need to maintain their advertising for split connection
-    LOG_DBG("Skipping advertising on peripheral device to preserve split communication");
-    k_work_schedule(&status_update_work, K_SECONDS(30)); // Keep checking
-    return;
-#endif
+// Note: Removed peripheral skip logic - let all devices advertise Prospector data
 
     if (!status_initialized) {
         return;
     }
     
-    // Send prospector advertising data
-    send_prospector_data();
+    // Send compact prospector data
+    send_compact_prospector_data();
     
     // Schedule next burst with longer interval (30 seconds)
     // This gives enough time for ZMK to work normally, but ensures we get our data out
@@ -223,13 +262,7 @@ static int init_prospector_status(const struct device *dev) {
     // Initialize manufacturer data with defaults
     build_prospector_data();
     
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
-    LOG_INF("Prospector: Peripheral device - advertising disabled to preserve split communication");
-#elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    LOG_INF("Prospector: Central device - will advertise status for both keyboard sides");
-#else
-    LOG_INF("Prospector: Standalone device - advertising enabled");
-#endif
+    LOG_INF("Prospector: Compact 6-byte advertising enabled for all device types");
     
     // Start strategic advertising after ZMK is fully initialized
     status_initialized = true;
