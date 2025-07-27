@@ -190,13 +190,21 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                     hash = hash * 31 + name[i];
                 }
                 
-                // For split keyboards, use the same base ID for both central and peripheral
-                // This allows grouping them together as one logical keyboard
-                // Only differentiate if we need separate tracking
+                // For split keyboards, use the same base ID for grouping
+                // But set device_index based on role for proper tracking
                 adv_data.keyboard_id[0] = (hash >> 24) & 0xFF;
                 adv_data.keyboard_id[1] = (hash >> 16) & 0xFF;
                 adv_data.keyboard_id[2] = (hash >> 8) & 0xFF;
                 adv_data.keyboard_id[3] = hash & 0xFF;
+                
+                // Set device_index based on role
+                if (adv_data.device_role == ZMK_DEVICE_ROLE_CENTRAL) {
+                    adv_data.device_index = 0;
+                } else if (adv_data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) {
+                    adv_data.device_index = 1;
+                } else {
+                    adv_data.device_index = 0;
+                }
                 
                 process_advertisement(&adv_data, rssi);
             } else {
