@@ -140,18 +140,18 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
         status->data.peripheral_battery[0] > 0) {
         // Split keyboard: show both Central and Peripheral batteries
         
-        // Container 0: Central (Right side)
-        lv_obj_t *central_container = lv_obj_get_child(widget->obj, 0);
-        if (central_container) {
-            set_battery_bar_value(central_container, status->data.battery_level, true);
-            LOG_INF("Updated Central battery container with %d%%", status->data.battery_level);
-        }
-        
-        // Container 1: Peripheral (Left side)  
-        lv_obj_t *peripheral_container = lv_obj_get_child(widget->obj, 1);
+        // Container 0: Peripheral (Left side) - Left display for Left keyboard
+        lv_obj_t *peripheral_container = lv_obj_get_child(widget->obj, 0);
         if (peripheral_container) {
             set_battery_bar_value(peripheral_container, status->data.peripheral_battery[0], true);
-            LOG_INF("Updated Peripheral battery container with %d%%", status->data.peripheral_battery[0]);
+            LOG_INF("Updated Left container with Peripheral battery %d%%", status->data.peripheral_battery[0]);
+        }
+        
+        // Container 1: Central (Right side) - Right display for Right keyboard  
+        lv_obj_t *central_container = lv_obj_get_child(widget->obj, 1);
+        if (central_container) {
+            set_battery_bar_value(central_container, status->data.battery_level, true);
+            LOG_INF("Updated Right container with Central battery %d%%", status->data.battery_level);
         }
     } else {
         // Single device: use first container, clear second
