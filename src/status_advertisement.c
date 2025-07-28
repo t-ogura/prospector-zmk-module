@@ -18,7 +18,8 @@
 #include <zmk/endpoints.h>
 #include <zmk/status_advertisement.h>
 
-#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
+// keymap API is available on Central or Standalone (non-Split) builds only
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
 #include <zmk/keymap.h>
 #endif
 
@@ -175,10 +176,14 @@ static void build_manufacturer_payload(void) {
     }
     manufacturer_data[5] = battery_level;
     
-    // Layer information - split-aware approach
+    // Layer information - proper ZMK split-aware approach
     uint8_t layer = 0;
     
-#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
+    /*
+     * Central or Standalone (Split disabled): keymap API available
+     * Peripheral (Split enabled but not Central): no keymap, layer = 0
+     */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     // Central/Standalone: Use keymap API for layer detection
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15;
