@@ -176,10 +176,15 @@ static void build_manufacturer_payload(void) {
         "STANDALONE";
 #endif
     
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     LOG_INF("Prospector %s: Central %d%%, Peripheral [%d,%d,%d], Layer %d", 
             role_str, battery_level, 
             peripheral_batteries[0], peripheral_batteries[1], peripheral_batteries[2],
             layer);
+#else
+    LOG_INF("Prospector %s: Battery %d%%, Layer %d", 
+            role_str, battery_level, layer);
+#endif
 }
 
 // Stop default advertising early in boot process
