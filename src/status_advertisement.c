@@ -31,6 +31,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #pragma message "*** PROSPECTOR SIMPLE SEPARATED ADVERTISING ***"
 
 #include <zmk/events/battery_state_changed.h>
+#include <zmk/events/layer_state_changed.h>
 #include <zmk/event_manager.h>
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -50,6 +51,23 @@ static int peripheral_battery_listener(const zmk_event_t *eh);
 ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
 ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_changed);
 #endif
+
+// Layer change event listener for immediate layer updates
+static int layer_state_listener(const zmk_event_t *eh) {
+    const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
+    if (ev) {
+        LOG_INF("🔄 Layer changed: layer=%d %s", ev->layer, ev->state ? "on" : "off");
+        // Trigger immediate status update when layer changes
+        if (adv_started) {
+            k_work_cancel_delayable(&adv_work);
+            k_work_schedule(&adv_work, K_NO_WAIT);
+        }
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(prospector_layer_listener, layer_state_listener);
+ZMK_SUBSCRIPTION(prospector_layer_listener, zmk_layer_state_changed);
 
 
 // BLE Legacy Advertising 31-byte limit: Flags(3) + Manufacturer(2+N) <= 31
@@ -126,8 +144,11 @@ static void build_manufacturer_payload(void) {
 #if IS_ENABLED(CONFIG_ZMK_KEYMAP)
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15;
-    manufacturer_data[6] = layer; // active_layer
+    LOG_INF("🔍 Layer detection: zmk_keymap_highest_layer_active() = %d", layer);
+#else
+    LOG_WRN("❌ CONFIG_ZMK_KEYMAP not enabled - layer will be 0");
 #endif
+    manufacturer_data[6] = layer; // active_layer
     
     // Profile and connection info (placeholder for now)
     manufacturer_data[7] = 0; // profile_slot
