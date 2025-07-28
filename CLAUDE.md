@@ -1350,6 +1350,12 @@ west build -s zmk/app -b seeeduino_xiao_ble -- -DSHIELD=prospector_scanner
 - 🔄 Advanced multi-keyboard management
 - 🔄 Customization and theming options
 
+### **Phase 4: Power Management & Reliability** (Priority) ⚡
+- 🔄 Smart power management for extended battery life
+- 🔄 Automatic disconnect detection and handling
+- 🔄 Sleep mode optimization for scanner device
+- 🔄 Keyboard-side advertisement interval optimization
+
 ---
 
 **Last Updated**: 2025-01-28  
@@ -1501,6 +1507,31 @@ prospector-zmk-module/
    - Requires additional data capacity analysis
    - May need protocol optimization
 
+#### **⚡ Power Management & Reliability Features**:
+3. **Smart Power Management**
+   - Adaptive advertisement intervals based on activity
+   - Intelligent sleep mode for scanner device
+   - Battery-aware display brightness adjustment
+   - Low-power BLE scanning optimization
+
+4. **Automatic Disconnect Detection**
+   - Timeout-based keyboard disconnection (configurable: 30s-5min)
+   - Graceful UI updates when keyboards go offline
+   - "Last seen" timestamp display for offline keyboards
+   - Auto-reconnection when keyboards return
+
+5. **Scanner Power Optimization**
+   - Progressive scan interval increase when no keyboards detected
+   - Display auto-dimming after inactivity period
+   - Sleep mode with wake-on-advertisement
+   - USB power management for portable operation
+
+6. **Keyboard Advertisement Optimization**
+   - Dynamic interval adjustment based on battery level
+   - Sleep-mode advertisement pause to conserve power
+   - Priority-based data transmission (critical vs. nice-to-have)
+   - Battery-aware feature scaling
+
 #### **🔮 Future Enhancement Ideas**:
 1. **Advanced Layer Visualization**
    - Layer-specific icons or symbols
@@ -1538,6 +1569,56 @@ prospector-zmk-module/
 - **Color Design**: 7 unique pastel colors implemented
 - **Widget Integration**: 4 core widgets operational
 - **Code Quality**: Comprehensive logging and error handling
+
+### 🔋 Power Management & Reliability Implementation Plan
+
+#### **Scanner-Side Power Optimization**:
+```c
+// Proposed implementation structure
+struct power_management_config {
+    uint32_t scan_interval_active;      // 500ms when keyboards active
+    uint32_t scan_interval_idle;        // 2000ms when no keyboards
+    uint32_t scan_interval_sleep;       // 10000ms deep sleep mode
+    uint32_t display_timeout;           // Auto-dim after 30s inactivity
+    uint32_t sleep_timeout;             // Sleep after 5min no keyboards
+    uint8_t brightness_levels[4];       // Battery-aware brightness
+};
+
+struct keyboard_timeout_config {
+    uint32_t disconnect_timeout;        // 60s default (configurable)
+    uint32_t reconnect_grace_period;    // 5s grace for quick reconnection
+    bool show_last_seen_timestamp;      // UI feature toggle
+    bool auto_remove_disconnected;      // Clean up old entries
+};
+```
+
+#### **Keyboard-Side Advertisement Optimization**:
+```c
+// Battery-aware advertisement intervals
+struct adv_power_config {
+    uint32_t battery_high_interval;     // 500ms when >50% battery
+    uint32_t battery_medium_interval;   // 1000ms when 20-50% battery  
+    uint32_t battery_low_interval;      // 2000ms when <20% battery
+    bool sleep_mode_pause;              // Stop advertisements in sleep
+    uint8_t priority_data_mask;         // Which data is critical
+};
+```
+
+#### **Implementation Priority**:
+1. **High Priority** ⚡:
+   - Disconnect timeout detection (scanner-side)
+   - Battery-aware advertisement intervals (keyboard-side)
+   - Progressive scan interval adjustment (scanner-side)
+
+2. **Medium Priority** 🔋:
+   - Display auto-dimming and sleep mode
+   - Last seen timestamp display
+   - Advanced power profiling and optimization
+
+3. **Future Enhancement** 🚀:
+   - Machine learning-based power prediction
+   - User activity pattern recognition
+   - Dynamic feature scaling based on power state
 
 ---
 
