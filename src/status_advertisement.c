@@ -31,6 +31,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #pragma message "*** PROSPECTOR SIMPLE SEPARATED ADVERTISING ***"
 
 #include <zmk/events/battery_state_changed.h>
+#include <zmk/events/position_state_changed.h>
 #include <zmk/event_manager.h>
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -42,6 +43,14 @@ static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static bool default_adv_stopped = false;
 
+// Adaptive update intervals based on activity
+#define ACTIVE_UPDATE_INTERVAL_MS    500   // 2Hz when active (key presses)
+#define IDLE_UPDATE_INTERVAL_MS     5000   // 0.2Hz when idle
+#define ACTIVITY_TIMEOUT_MS        10000   // 10 seconds to consider idle
+
+static uint32_t last_activity_time = 0;
+static bool is_active = false;
+
 // Peripheral battery tracking for split keyboards
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 static uint8_t peripheral_batteries[3] = {0, 0, 0}; // Up to 3 peripheral devices
@@ -50,6 +59,45 @@ static int peripheral_battery_listener(const zmk_event_t *eh);
 ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
 ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_changed);
 #endif
+
+// Activity-based update system: key presses trigger high-frequency updates
+static int position_state_listener(const zmk_event_t *eh) {
+    const struct zmk_position_state_changed *ev = as_zmk_position_state_changed(eh);
+    if (ev && ev->state) { // Only on key press (not release)
+        uint32_t now = k_uptime_get_32();
+        last_activity_time = now;
+        
+        bool was_active = is_active;
+        is_active = true;
+        
+        LOG_INF("🔥 Key activity detected - switching to high frequency updates");
+        
+        // Immediately trigger update if switching from idle to active
+        if (!was_active && adv_started) {
+            k_work_cancel_delayable(&adv_work); 
+            k_work_schedule(&adv_work, K_NO_WAIT);
+        }
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(prospector_position_listener, position_state_listener);
+ZMK_SUBSCRIPTION(prospector_position_listener, zmk_position_state_changed);
+
+// Helper function to determine current update interval
+static uint32_t get_current_update_interval(void) {
+    uint32_t now = k_uptime_get_32();
+    
+    // Check if we should transition from active to idle
+    if (is_active && (now - last_activity_time) > ACTIVITY_TIMEOUT_MS) {
+        is_active = false;
+        LOG_INF("💤 Switching to idle mode - reducing update frequency");
+    }
+    
+    uint32_t interval = is_active ? ACTIVE_UPDATE_INTERVAL_MS : IDLE_UPDATE_INTERVAL_MS;
+    LOG_DBG("Update interval: %dms (%s mode)", interval, is_active ? "ACTIVE" : "IDLE");
+    return interval;
+}
 
 
 // BLE Legacy Advertising 31-byte limit: Flags(3) + Manufacturer(2+N) <= 31
@@ -295,8 +343,9 @@ static void adv_work_handler(struct k_work *work) {
         start_custom_advertising();
     }
     
-    // Schedule next update
-    k_work_schedule(&adv_work, K_SECONDS(CONFIG_ZMK_STATUS_ADV_INTERVAL_MS / 1000));
+    // Schedule next update with adaptive interval
+    uint32_t interval_ms = get_current_update_interval();
+    k_work_schedule(&adv_work, K_MSEC(interval_ms));
 }
 
 // Initialize Prospector simple advertising system  
@@ -315,6 +364,10 @@ static int init_prospector_status(const struct device *dev) {
     
     // Stop ZMK advertising early
     stop_default_advertising(NULL);
+    
+    // Initialize activity tracking
+    last_activity_time = k_uptime_get_32();
+    is_active = true; // Start in active mode
     
     // Start custom advertising after a delay
     adv_started = true;
