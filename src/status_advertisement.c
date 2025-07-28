@@ -123,9 +123,11 @@ static struct bt_data adv_data_array[] = {
 };
 
 // Scan response: Name + Appearance (sent separately)
+// Note: Scan response also has 31-byte limit, so we may need to truncate long names
+static char device_name_buffer[24]; // Reserve space for name (31 - header bytes)
+
 static struct bt_data scan_rsp[] = {
-    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME, 
-            strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME)),
+    BT_DATA(BT_DATA_NAME_COMPLETE, device_name_buffer, 0), // Length set dynamically
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
 };
 
@@ -297,9 +299,29 @@ static void start_custom_advertising(void) {
     
     build_manufacturer_payload();
     
+    // Prepare device name for scan response (respecting 31-byte limit)
+    const char *full_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
+    int full_name_len = strlen(full_name);
+    
+    // Calculate available space: 31 - (name_header=2) - (appearance_header=1) - (appearance_data=2) = 26
+    int max_name_len = sizeof(device_name_buffer) - 1;
+    int actual_name_len = MIN(full_name_len, max_name_len);
+    
+    memcpy(device_name_buffer, full_name, actual_name_len);
+    device_name_buffer[actual_name_len] = '\0';
+    
+    // Update scan response data length
+    scan_rsp[0].data_len = actual_name_len;
+    
     LOG_INF("Prospector: Starting separated adv/scan_rsp advertising");
     LOG_INF("ADV packet: Flags + Manufacturer Data");
     LOG_INF("SCAN_RSP: Name + Appearance");
+    
+    // Debug scan response size calculation
+    const char *name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
+    int name_len = strlen(name);
+    int scan_rsp_size = 1 + 1 + name_len + 1 + 1 + 2; // Name header + name + Appearance header + appearance
+    LOG_INF("Scan response debug: name='%s' len=%d, total_size=%d", name, name_len, scan_rsp_size);
     
     // Start advertising with separated adv_data and scan_rsp
     int err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array), 

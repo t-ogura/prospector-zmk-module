@@ -245,14 +245,35 @@ static struct {
 
 static void store_device_name(const bt_addr_le_t *addr, const char *name) {
     uint32_t now = k_uptime_get_32();
+    bool name_updated = false;
+    
     // Find or create slot for this address
     for (int i = 0; i < 5; i++) {
         if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0 ||
             (now - temp_device_names[i].timestamp) > 5000) { // Expire after 5 seconds
+            
+            // Check if we're updating an existing entry with the same address
+            bool is_update = (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0);
+            
             bt_addr_le_copy(&temp_device_names[i].addr, addr);
             strncpy(temp_device_names[i].name, name, sizeof(temp_device_names[i].name) - 1);
             temp_device_names[i].name[sizeof(temp_device_names[i].name) - 1] = '\0';
             temp_device_names[i].timestamp = now;
+            
+            if (is_update) {
+                name_updated = true;
+                printk("*** PROSPECTOR SCANNER: Device name updated: %s ***\n", name);
+                
+                // Find keyboard with this address and update its display name
+                for (int j = 0; j < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; j++) {
+                    if (keyboards[j].active && bt_addr_le_cmp(&keyboards[j].addr, addr) == 0) {
+                        strncpy(keyboards[j].ble_name, name, sizeof(keyboards[j].ble_name) - 1);
+                        keyboards[j].ble_name[sizeof(keyboards[j].ble_name) - 1] = '\0';
+                        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, j);
+                        break;
+                    }
+                }
+            }
             break;
         }
     }
