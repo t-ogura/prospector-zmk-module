@@ -52,8 +52,14 @@ ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_cha
 #endif
 
 
-// Manufacturer-specific data (Company ID will be included in the data)
-static uint8_t manufacturer_data[31]; // Complete manufacturer data with Company ID
+// BLE Legacy Advertising 31-byte limit: Flags(3) + Manufacturer(2+N) <= 31
+// Therefore: max manufacturer payload = 31 - 3 - 2 = 26 bytes
+#define MAX_ADV_DATA_LEN     31
+#define FLAGS_LEN           3   // 1 length + 1 type + 1 data  
+#define MANUF_OVERHEAD      2   // 1 length + 1 type
+#define MAX_MANUF_PAYLOAD   (MAX_ADV_DATA_LEN - FLAGS_LEN - MANUF_OVERHEAD) // = 26
+
+static uint8_t manufacturer_data[MAX_MANUF_PAYLOAD]; // 26 bytes maximum
 
 // Advertisement packet: Flags + Manufacturer Data ONLY (for 31-byte limit)  
 static struct bt_data adv_data_array[] = {
@@ -96,7 +102,7 @@ static int peripheral_battery_listener(const zmk_event_t *eh) {
 #endif
 
 static void build_manufacturer_payload(void) {
-    // Build complete zmk_status_adv_data structure in manufacturer_data
+    // Build compact 26-byte manufacturer data structure
     memset(manufacturer_data, 0, sizeof(manufacturer_data));
     
     // Manufacturer ID (first 2 bytes)
@@ -153,19 +159,19 @@ static void build_manufacturer_payload(void) {
     memset(&manufacturer_data[12], 0, 3); // peripheral_battery
 #endif
     
-    // Layer name (6 bytes starting at offset 15)
-    snprintf((char*)&manufacturer_data[15], 6, "L%d", layer);
+    // Compact layer name (4 bytes starting at offset 15) - reduced from 6
+    snprintf((char*)&manufacturer_data[15], 4, "L%d", layer);
     
-    // Keyboard ID (4 bytes at offset 21)
+    // Keyboard ID (4 bytes at offset 19) - moved forward
     const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
     uint32_t id_hash = 0;
     for (int i = 0; keyboard_name[i] && i < 8; i++) {
         id_hash = id_hash * 31 + keyboard_name[i];
     }
-    memcpy(&manufacturer_data[21], &id_hash, 4);
+    memcpy(&manufacturer_data[19], &id_hash, 4);
     
-    // Reserved bytes (25-30) for future expansion
-    memset(&manufacturer_data[25], 0, 6);
+    // Reserved bytes (23-25) for future expansion - reduced from 6 to 3
+    memset(&manufacturer_data[23], 0, 3);
     
     const char *role_str = 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -227,7 +233,15 @@ static void start_custom_advertising(void) {
     int err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array), 
                               scan_rsp, ARRAY_SIZE(scan_rsp));
     
-    LOG_INF("Custom advertising result: %d", err);
+    if (err == 0) {
+        LOG_INF("✅ Advertising started successfully");
+    } else if (err == -E2BIG) {
+        LOG_ERR("❌ Advertising failed: -E2BIG (payload too large - %d bytes exceeds 31-byte limit)", 
+                3 + 2 + sizeof(manufacturer_data)); // Flags + ManufData header + payload
+    } else {
+        LOG_ERR("❌ Advertising failed with error: %d", err);
+    }
+    
     LOG_INF("Manufacturer data (%d bytes): %02X%02X %02X%02X %02X %02X %02X %02X %02X %02X %02X", 
             sizeof(manufacturer_data),
             manufacturer_data[0], manufacturer_data[1], 
@@ -236,12 +250,23 @@ static void start_custom_advertising(void) {
             manufacturer_data[7], manufacturer_data[8], manufacturer_data[9], manufacturer_data[10]);
     
     // Log the complete data structure in hex for debugging
-    LOG_INF("Complete manufacturer data:");
+    LOG_INF("Complete manufacturer data (26 bytes):");
     for (int i = 0; i < sizeof(manufacturer_data); i += 8) {
-        LOG_INF("  [%02d-%02d]: %02X %02X %02X %02X %02X %02X %02X %02X", 
-                i, i+7,
-                manufacturer_data[i], manufacturer_data[i+1], manufacturer_data[i+2], manufacturer_data[i+3],
-                manufacturer_data[i+4], manufacturer_data[i+5], manufacturer_data[i+6], manufacturer_data[i+7]);
+        int remaining = sizeof(manufacturer_data) - i;
+        if (remaining >= 8) {
+            LOG_INF("  [%02d-%02d]: %02X %02X %02X %02X %02X %02X %02X %02X", 
+                    i, i+7,
+                    manufacturer_data[i], manufacturer_data[i+1], manufacturer_data[i+2], manufacturer_data[i+3],
+                    manufacturer_data[i+4], manufacturer_data[i+5], manufacturer_data[i+6], manufacturer_data[i+7]);
+        } else {
+            // Handle last incomplete chunk
+            char hex_str[32] = {0};
+            int pos = 0;
+            for (int j = 0; j < remaining; j++) {
+                pos += snprintf(hex_str + pos, sizeof(hex_str) - pos, "%02X ", manufacturer_data[i + j]);
+            }
+            LOG_INF("  [%02d-%02d]: %s", i, i + remaining - 1, hex_str);
+        }
     }
 }
 
