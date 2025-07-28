@@ -1647,7 +1647,23 @@ struct adv_power_config {
 3. **Future Enhancement** 🚀:
    - Machine learning-based power prediction
    - User activity pattern recognition
-   - Dynamic feature scaling based on power state
+   - Dynamic feature scaling based of power state
+
+#### **🎨 UI Polish & Minor Adjustments** (Low Priority):
+8. **Connection Status Widget Spacing**
+   - Fix excessive spacing between "BLE" and profile number "0"
+   - Optimize text alignment and character spacing
+   - Improve overall visual balance in connection display
+
+9. **Layer Display Typography**
+   - Increase layer number font size slightly for better readability
+   - Consider upgrading from montserrat_20 to montserrat_24 or montserrat_28
+   - Maintain elegant spacing while improving visibility
+
+10. **Device Name Display Clipping**
+    - Fix right-side text clipping issue where device name gets cut off
+    - Adjust horizontal positioning and container width
+    - Ensure full device name visibility without overlap with connection status
 
 ---
 
