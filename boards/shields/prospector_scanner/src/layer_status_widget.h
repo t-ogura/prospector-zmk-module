@@ -17,7 +17,8 @@ extern "C" {
 
 struct zmk_widget_layer_status {
     lv_obj_t *obj;
-    lv_obj_t *layer_labels[MAX_LAYER_DISPLAY];
+    lv_obj_t *layer_title;                    // "Layer" title label
+    lv_obj_t *layer_labels[MAX_LAYER_DISPLAY]; // Individual layer number labels (0-6)
 };
 
 int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_t *parent);
