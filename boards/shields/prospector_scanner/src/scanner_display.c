@@ -163,7 +163,7 @@ lv_obj_t *zmk_display_status_screen() {
     // Status label (save reference for updates) - moved higher without title
     status_label = lv_label_create(screen);
     lv_obj_set_style_text_color(status_label, lv_color_make(255, 255, 0), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_12, 0);
     lv_obj_align(status_label, LV_ALIGN_CENTER, 0, -60);
     lv_label_set_text(status_label, "Initializing...");
     
