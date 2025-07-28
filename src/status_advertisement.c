@@ -42,7 +42,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 // No additional includes needed - zmk_peripheral_battery_state_changed is in battery_state_changed.h
 #endif
 
-static struct zmk_status_adv_data adv_data;
 static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static bool default_adv_stopped = false;
@@ -114,12 +113,16 @@ static uint32_t get_current_update_interval(void) {
 #define MANUF_OVERHEAD      2   // 1 length + 1 type
 #define MAX_MANUF_PAYLOAD   (MAX_ADV_DATA_LEN - FLAGS_LEN - MANUF_OVERHEAD) // = 26
 
-static uint8_t manufacturer_data[MAX_MANUF_PAYLOAD]; // 26 bytes maximum
+// Ensure our structure matches the expected 26-byte payload
+_Static_assert(sizeof(struct zmk_status_adv_data) == MAX_MANUF_PAYLOAD, 
+               "zmk_status_adv_data must be exactly 26 bytes");
+
+static struct zmk_status_adv_data manufacturer_data; // Use structured data directly
 
 // Advertisement packet: Flags + Manufacturer Data ONLY (for 31-byte limit)  
 static struct bt_data adv_data_array[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA(BT_DATA_MANUFACTURER_DATA, manufacturer_data, sizeof(manufacturer_data)),
+    BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t*)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
 // Scan response: Name + Appearance (sent separately)
@@ -159,24 +162,22 @@ static int peripheral_battery_listener(const zmk_event_t *eh) {
 #endif
 
 static void build_manufacturer_payload(void) {
-    // Build compact 26-byte manufacturer data structure
-    memset(manufacturer_data, 0, sizeof(manufacturer_data));
+    // Build 26-byte structured manufacturer data
+    memset(&manufacturer_data, 0, sizeof(manufacturer_data));
     
-    // Manufacturer ID (first 2 bytes)
-    manufacturer_data[0] = 0xFF;
-    manufacturer_data[1] = 0xFF;
-    
-    // Service UUID
-    manufacturer_data[2] = 0xAB;
-    manufacturer_data[3] = 0xCD;
-    manufacturer_data[4] = ZMK_STATUS_ADV_VERSION; // version
+    // Fixed header fields
+    manufacturer_data.manufacturer_id[0] = 0xFF;
+    manufacturer_data.manufacturer_id[1] = 0xFF;
+    manufacturer_data.service_uuid[0] = 0xAB; 
+    manufacturer_data.service_uuid[1] = 0xCD;
+    manufacturer_data.version = ZMK_STATUS_ADV_VERSION;
     
     // Central/Standalone battery level
     uint8_t battery_level = zmk_battery_state_of_charge();
     if (battery_level > 100) {
         battery_level = 100;
     }
-    manufacturer_data[5] = battery_level;
+    manufacturer_data.battery_level = battery_level;
     
     // Layer information - proper ZMK split-aware approach
     uint8_t layer = 0;
@@ -195,17 +196,11 @@ static void build_manufacturer_payload(void) {
     layer = 0;
 #endif
     
-    manufacturer_data[6] = layer; // active_layer
-    
-    // Embed debug info in reserved bytes for troubleshooting
-    // This allows us to see the actual values in BLE scanner apps
-    manufacturer_data[23] = layer;  // Current layer (debug copy)
-    manufacturer_data[24] = latest_layer;  // Latest tracked layer  
-    manufacturer_data[25] = 0x42;  // Debug marker
+    manufacturer_data.active_layer = layer;
     
     // Profile and connection info (placeholder for now)
-    manufacturer_data[7] = 0; // profile_slot
-    manufacturer_data[8] = 1; // connection_count
+    manufacturer_data.profile_slot = 0; // TODO: Get actual BLE profile
+    manufacturer_data.connection_count = 1; // TODO: Get actual connection count
     
     // Status flags
     uint8_t flags = 0;
@@ -214,38 +209,38 @@ static void build_manufacturer_payload(void) {
         flags |= ZMK_STATUS_FLAG_USB_CONNECTED;
     }
 #endif
-    manufacturer_data[9] = flags; // status_flags
+    manufacturer_data.status_flags = flags;
     
-    // Device role
+    // Device role and peripheral batteries
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    manufacturer_data[10] = ZMK_DEVICE_ROLE_CENTRAL; // device_role
-    manufacturer_data[11] = 0; // device_index (Central is always index 0)
+    manufacturer_data.device_role = ZMK_DEVICE_ROLE_CENTRAL;
+    manufacturer_data.device_index = 0; // Central is always index 0
     
-    // Copy peripheral battery levels (3 bytes at offset 12)
-    memcpy(&manufacturer_data[12], peripheral_batteries, 3);
+    // Copy peripheral battery levels
+    memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 3);
            
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     // Peripheral: Skip advertising to preserve split communication  
     return;
 #else
-    manufacturer_data[10] = ZMK_DEVICE_ROLE_STANDALONE; // device_role
-    manufacturer_data[11] = 0; // device_index
-    memset(&manufacturer_data[12], 0, 3); // peripheral_battery
+    manufacturer_data.device_role = ZMK_DEVICE_ROLE_STANDALONE;
+    manufacturer_data.device_index = 0;
+    memset(manufacturer_data.peripheral_battery, 0, 3);
 #endif
     
-    // Compact layer name (4 bytes starting at offset 15) - reduced from 6
-    snprintf((char*)&manufacturer_data[15], 4, "L%d", layer);
+    // Compact layer name (4 bytes) - reduced from 6
+    snprintf(manufacturer_data.layer_name, sizeof(manufacturer_data.layer_name), "L%d", layer);
     
-    // Keyboard ID (4 bytes at offset 19) - moved forward
+    // Keyboard ID (4 bytes)
     const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
     uint32_t id_hash = 0;
     for (int i = 0; keyboard_name[i] && i < 8; i++) {
         id_hash = id_hash * 31 + keyboard_name[i];
     }
-    memcpy(&manufacturer_data[19], &id_hash, 4);
+    memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
     
-    // Reserved bytes (23-25) for future expansion - reduced from 6 to 3
-    memset(&manufacturer_data[23], 0, 3);
+    // Reserved bytes (3 bytes) for future expansion
+    memset(manufacturer_data.reserved, 0, 3);
     
     const char *role_str = 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
