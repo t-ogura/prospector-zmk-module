@@ -264,15 +264,10 @@ static void store_device_name(const bt_addr_le_t *addr, const char *name) {
                 name_updated = true;
                 printk("*** PROSPECTOR SCANNER: Device name updated: %s ***\n", name);
                 
-                // Find keyboard with this address and update its display name
-                for (int j = 0; j < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; j++) {
-                    if (keyboards[j].active && bt_addr_le_cmp(&keyboards[j].addr, addr) == 0) {
-                        strncpy(keyboards[j].ble_name, name, sizeof(keyboards[j].ble_name) - 1);
-                        keyboards[j].ble_name[sizeof(keyboards[j].ble_name) - 1] = '\0';
-                        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, j);
-                        break;
-                    }
-                }
+                // Note: We don't immediately update keyboard entries here since
+                // zmk_keyboard_status doesn't store the BLE address.
+                // The name will be updated when process_advertisement_with_name() is called
+                // and get_device_name() returns the updated name from temp_device_names cache.
             }
             break;
         }
