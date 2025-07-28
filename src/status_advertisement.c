@@ -52,13 +52,13 @@ ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_cha
 #endif
 
 
-// Full manufacturer data including the required 0xFF 0xFF prefix
-static uint8_t full_manufacturer_data[31]; // Complete manufacturer data
+// Manufacturer-specific data (Company ID will be included in the data)
+static uint8_t manufacturer_data[31]; // Complete manufacturer data with Company ID
 
-// Advertisement packet: Flags + Manufacturer Data ONLY (for 31-byte limit)
+// Advertisement packet: Flags + Manufacturer Data ONLY (for 31-byte limit)  
 static struct bt_data adv_data_array[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA(BT_DATA_MANUFACTURER_DATA, full_manufacturer_data, sizeof(full_manufacturer_data)),
+    BT_DATA(BT_DATA_MANUFACTURER_DATA, manufacturer_data, sizeof(manufacturer_data)),
 };
 
 // Scan response: Name + Appearance (sent separately)
@@ -96,36 +96,36 @@ static int peripheral_battery_listener(const zmk_event_t *eh) {
 #endif
 
 static void build_manufacturer_payload(void) {
-    // Build complete zmk_status_adv_data structure in full_manufacturer_data
-    memset(full_manufacturer_data, 0, sizeof(full_manufacturer_data));
+    // Build complete zmk_status_adv_data structure in manufacturer_data
+    memset(manufacturer_data, 0, sizeof(manufacturer_data));
     
     // Manufacturer ID (first 2 bytes)
-    full_manufacturer_data[0] = 0xFF;
-    full_manufacturer_data[1] = 0xFF;
+    manufacturer_data[0] = 0xFF;
+    manufacturer_data[1] = 0xFF;
     
     // Service UUID
-    full_manufacturer_data[2] = 0xAB;
-    full_manufacturer_data[3] = 0xCD;
-    full_manufacturer_data[4] = ZMK_STATUS_ADV_VERSION; // version
+    manufacturer_data[2] = 0xAB;
+    manufacturer_data[3] = 0xCD;
+    manufacturer_data[4] = ZMK_STATUS_ADV_VERSION; // version
     
     // Central/Standalone battery level
     uint8_t battery_level = zmk_battery_state_of_charge();
     if (battery_level > 100) {
         battery_level = 100;
     }
-    full_manufacturer_data[5] = battery_level;
+    manufacturer_data[5] = battery_level;
     
     // Layer information
     uint8_t layer = 0;
 #if IS_ENABLED(CONFIG_ZMK_KEYMAP)
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15;
-    full_manufacturer_data[6] = layer; // active_layer
+    manufacturer_data[6] = layer; // active_layer
 #endif
     
     // Profile and connection info (placeholder for now)
-    full_manufacturer_data[7] = 0; // profile_slot
-    full_manufacturer_data[8] = 1; // connection_count
+    manufacturer_data[7] = 0; // profile_slot
+    manufacturer_data[8] = 1; // connection_count
     
     // Status flags
     uint8_t flags = 0;
@@ -134,27 +134,27 @@ static void build_manufacturer_payload(void) {
         flags |= ZMK_STATUS_FLAG_USB_CONNECTED;
     }
 #endif
-    full_manufacturer_data[9] = flags; // status_flags
+    manufacturer_data[9] = flags; // status_flags
     
     // Device role
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    full_manufacturer_data[10] = ZMK_DEVICE_ROLE_CENTRAL; // device_role
-    full_manufacturer_data[11] = 0; // device_index (Central is always index 0)
+    manufacturer_data[10] = ZMK_DEVICE_ROLE_CENTRAL; // device_role
+    manufacturer_data[11] = 0; // device_index (Central is always index 0)
     
     // Copy peripheral battery levels (3 bytes at offset 12)
-    memcpy(&full_manufacturer_data[12], peripheral_batteries, 3);
+    memcpy(&manufacturer_data[12], peripheral_batteries, 3);
            
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
     // Skip advertising on peripheral to preserve split communication
     return;
 #else
-    full_manufacturer_data[10] = ZMK_DEVICE_ROLE_STANDALONE; // device_role
-    full_manufacturer_data[11] = 0; // device_index
-    memset(&full_manufacturer_data[12], 0, 3); // peripheral_battery
+    manufacturer_data[10] = ZMK_DEVICE_ROLE_STANDALONE; // device_role
+    manufacturer_data[11] = 0; // device_index
+    memset(&manufacturer_data[12], 0, 3); // peripheral_battery
 #endif
     
     // Layer name (6 bytes starting at offset 15)
-    snprintf((char*)&full_manufacturer_data[15], 6, "L%d", layer);
+    snprintf((char*)&manufacturer_data[15], 6, "L%d", layer);
     
     // Keyboard ID (4 bytes at offset 21)
     const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
@@ -162,10 +162,10 @@ static void build_manufacturer_payload(void) {
     for (int i = 0; keyboard_name[i] && i < 8; i++) {
         id_hash = id_hash * 31 + keyboard_name[i];
     }
-    memcpy(&full_manufacturer_data[21], &id_hash, 4);
+    memcpy(&manufacturer_data[21], &id_hash, 4);
     
     // Reserved bytes (25-30) for future expansion
-    memset(&full_manufacturer_data[25], 0, 6);
+    memset(&manufacturer_data[25], 0, 6);
     
     const char *role_str = 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -228,10 +228,21 @@ static void start_custom_advertising(void) {
                               scan_rsp, ARRAY_SIZE(scan_rsp));
     
     LOG_INF("Custom advertising result: %d", err);
-    LOG_INF("Manufacturer data: %02X%02X %02X%02X %02X %02X %02X", 
-            full_manufacturer_data[0], full_manufacturer_data[1], 
-            full_manufacturer_data[2], full_manufacturer_data[3], 
-            full_manufacturer_data[4], full_manufacturer_data[5], full_manufacturer_data[6]);
+    LOG_INF("Manufacturer data (%d bytes): %02X%02X %02X%02X %02X %02X %02X %02X %02X %02X %02X", 
+            sizeof(manufacturer_data),
+            manufacturer_data[0], manufacturer_data[1], 
+            manufacturer_data[2], manufacturer_data[3], 
+            manufacturer_data[4], manufacturer_data[5], manufacturer_data[6],
+            manufacturer_data[7], manufacturer_data[8], manufacturer_data[9], manufacturer_data[10]);
+    
+    // Log the complete data structure in hex for debugging
+    LOG_INF("Complete manufacturer data:");
+    for (int i = 0; i < sizeof(manufacturer_data); i += 8) {
+        LOG_INF("  [%02d-%02d]: %02X %02X %02X %02X %02X %02X %02X %02X", 
+                i, i+7,
+                manufacturer_data[i], manufacturer_data[i+1], manufacturer_data[i+2], manufacturer_data[i+3],
+                manufacturer_data[i+4], manufacturer_data[i+5], manufacturer_data[i+6], manufacturer_data[i+7]);
+    }
 }
 
 static void adv_work_handler(struct k_work *work) {
