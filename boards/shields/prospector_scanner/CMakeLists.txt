@@ -11,7 +11,7 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # Essential scanner sources
   zephyr_library_sources(src/scanner_display.c)
   zephyr_library_sources(src/scanner_battery_widget.c)  # Battery widget for split keyboard display
-  zephyr_library_sources(src/connection_status_widget.c)  # YADS-style connection status widget
+  # zephyr_library_sources(src/connection_status_widget.c)  # YADS-style connection status widget - temporarily disabled
   zephyr_library_sources(src/brightness_control.c)  # Re-enabled with PWM control
   # zephyr_library_sources(src/display_rotate_init.c)  # Merged into scanner_display.c
 endif()

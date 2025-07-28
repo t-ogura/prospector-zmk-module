@@ -11,18 +11,17 @@
 #include <zephyr/logging/log.h>
 #include <zmk/status_scanner.h>
 #include "scanner_battery_widget.h"
-#include "connection_status_widget.h"
+// #include "connection_status_widget.h" // Temporarily disabled for debugging
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
 // Global UI objects for dynamic updates
-static lv_obj_t *title_label = NULL;
 static lv_obj_t *status_label = NULL;
 static lv_obj_t *info_label = NULL;
 static struct zmk_widget_scanner_battery battery_widget;
-static struct zmk_widget_connection_status connection_widget;
+// static struct zmk_widget_connection_status connection_widget; // Temporarily disabled
 
 // Forward declaration
 static void trigger_scanner_start(void);
@@ -63,7 +62,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
+                    // zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Split keyboard: Central %d%%, Peripheral %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.peripheral_battery[0], kbd->data.active_layer);
@@ -76,7 +75,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
+                    // zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Central device: %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.active_layer);
@@ -89,7 +88,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
+                    // zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Standalone keyboard: %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.active_layer);
@@ -102,7 +101,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
+                    // zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Peripheral device: %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.active_layer);
@@ -161,18 +160,11 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     
-    // Main title (save reference for updates)
-    title_label = lv_label_create(screen);
-    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 10);
-    lv_label_set_text(title_label, "Prospector Scanner");
-    
-    // Status label (save reference for updates)
+    // Status label (save reference for updates) - moved higher without title
     status_label = lv_label_create(screen);
     lv_obj_set_style_text_color(status_label, lv_color_make(255, 255, 0), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, -60);
     lv_label_set_text(status_label, "Initializing...");
     
     // Battery widget in the center
@@ -180,9 +172,9 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 60);
     
-    // Connection status widget in top right
-    zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 35);
+    // Connection status widget in top right - temporarily disabled for debugging
+    // zmk_widget_connection_status_init(&connection_widget, screen);
+    // lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 35);
     
     // Info label (save reference for updates)
     info_label = lv_label_create(screen);
