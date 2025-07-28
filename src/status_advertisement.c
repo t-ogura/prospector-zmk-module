@@ -54,8 +54,8 @@ static bool default_adv_stopped = false;
 static uint32_t last_activity_time = 0;
 static bool is_active = false;
 
-// Latest layer state for accurate tracking
-static uint8_t latest_layer = 0;
+// Latest layer state for accurate tracking (unused currently)
+// static uint8_t latest_layer = 0;
 
 // Peripheral battery tracking for split keyboards
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -199,13 +199,19 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.active_layer = layer;
     
     // Profile and connection info using ZMK APIs
+#if IS_ENABLED(CONFIG_ZMK_BLE)
     manufacturer_data.profile_slot = zmk_ble_active_profile_index(); // 0-4 BLE profiles
+#else
+    manufacturer_data.profile_slot = 0; // No BLE support
+#endif
     
     // Connection count approximation - count active BLE connections + USB
     uint8_t connection_count = 0;
+#if IS_ENABLED(CONFIG_ZMK_BLE)
     if (zmk_ble_active_profile_is_connected()) {
         connection_count++;
     }
+#endif
 #if IS_ENABLED(CONFIG_ZMK_USB)
     if (zmk_usb_is_hid_ready()) {
         connection_count++;
@@ -227,12 +233,14 @@ static void build_manufacturer_payload(void) {
 #endif
     
     // BLE status flags
+#if IS_ENABLED(CONFIG_ZMK_BLE)
     if (zmk_ble_active_profile_is_connected()) {
         flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
     }
     if (!zmk_ble_active_profile_is_open()) {
         flags |= ZMK_STATUS_FLAG_BLE_BONDED;
     }
+#endif
     
     manufacturer_data.status_flags = flags;
     

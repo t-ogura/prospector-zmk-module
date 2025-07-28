@@ -18,7 +18,6 @@ static void update_connection_status(struct zmk_widget_connection_status *widget
     }
     
     // Get USB and BLE status from status_flags
-    bool usb_connected = kbd->data.status_flags & ZMK_STATUS_FLAG_USB_CONNECTED;
     bool usb_hid_ready = kbd->data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY;
     bool ble_connected = kbd->data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED;
     bool ble_bonded = kbd->data.status_flags & ZMK_STATUS_FLAG_BLE_BONDED;
@@ -85,7 +84,7 @@ int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widge
     // BLE profile number label
     widget->ble_profile_label = lv_label_create(widget->obj);
     lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, -5, -5);
-    lv_obj_set_style_text_font(widget->ble_profile_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(widget->ble_profile_label, &lv_font_montserrat_12, 0);
     
     // Initialize with default values
     lv_label_set_text(widget->transport_label, "#ff0000 USB#\\n#ffffff BLE#");
