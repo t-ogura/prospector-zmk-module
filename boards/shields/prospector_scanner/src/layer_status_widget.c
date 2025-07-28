@@ -22,13 +22,13 @@ static void update_layer_display(struct zmk_widget_layer_status *widget, struct 
     // Update each layer label (0-6)
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
         if (i == active_layer) {
-            // Active layer: bright white with larger font
+            // Active layer: bright white, fully opaque
             lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_white(), 0);
             lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_COVER, 0);
         } else {
-            // Inactive layers: dimmed gray
-            lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(80, 80, 80), 0);
-            lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_50, 0);
+            // Inactive layers: much darker gray, more transparent
+            lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(60, 60, 60), 0);
+            lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_30, 0);
         }
     }
     
@@ -51,7 +51,7 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
         widget->layer_labels[i] = lv_label_create(widget->obj);
         
-        // Set large font for visibility - using largest available font
+        // Set large font for visibility - YADS uses montserrat_40 but we'll use largest available
         lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_20, 0);
         
         // Set layer number text
