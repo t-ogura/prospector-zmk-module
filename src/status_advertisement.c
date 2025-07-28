@@ -271,8 +271,26 @@ static void start_custom_advertising(void) {
 }
 
 static void adv_work_handler(struct k_work *work) {
-    // Update and restart advertising
-    start_custom_advertising();
+    // Update manufacturer data
+    build_manufacturer_payload();
+    
+    // Try to update existing advertising data first
+    int err = bt_le_adv_update_data(adv_data_array, ARRAY_SIZE(adv_data_array), 
+                                    scan_rsp, ARRAY_SIZE(scan_rsp));
+    
+    if (err == 0) {
+        LOG_INF("✅ Advertising data updated successfully");
+    } else if (err == -EALREADY || err == -EINVAL) {
+        // Advertising not started yet, or needs restart - start fresh
+        LOG_INF("Advertising not active, starting fresh...");
+        start_custom_advertising();
+    } else {
+        LOG_ERR("❌ Failed to update advertising data: %d", err);
+        // Try to restart advertising as fallback
+        bt_le_adv_stop();
+        k_sleep(K_MSEC(100));
+        start_custom_advertising();
+    }
     
     // Schedule next update
     k_work_schedule(&adv_work, K_SECONDS(CONFIG_ZMK_STATUS_ADV_INTERVAL_MS / 1000));
@@ -284,6 +302,7 @@ static int init_prospector_status(const struct device *dev) {
     
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
     LOG_INF("Prospector: Peripheral device - advertising disabled to preserve split communication");
+    LOG_INF("⚠️  To test manufacturer data, use the RIGHT side (Central) firmware!");
     return 0;
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     LOG_INF("Prospector: Central device - will advertise status for both keyboard sides");
