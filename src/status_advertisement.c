@@ -54,7 +54,7 @@ ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_cha
 
 // Layer change event listener for immediate layer updates
 static int layer_state_listener(const zmk_event_t *eh) {
-    const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
+    const struct zmk_layer_state_changed *ev = as_layer_state_changed(eh);
     if (ev) {
         LOG_INF("🔄 Layer changed: layer=%d %s", ev->layer, ev->state ? "on" : "off");
         // Trigger immediate status update when layer changes
@@ -67,7 +67,7 @@ static int layer_state_listener(const zmk_event_t *eh) {
 }
 
 ZMK_LISTENER(prospector_layer_listener, layer_state_listener);
-ZMK_SUBSCRIPTION(prospector_layer_listener, zmk_layer_state_changed);
+ZMK_SUBSCRIPTION(prospector_layer_listener, layer_state_changed);
 
 
 // BLE Legacy Advertising 31-byte limit: Flags(3) + Manufacturer(2+N) <= 31
