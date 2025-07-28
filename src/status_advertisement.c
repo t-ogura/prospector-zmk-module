@@ -13,11 +13,14 @@
 #include <stdio.h>
 
 #include <zmk/battery.h>
-#include <zmk/keymap.h>
 #include <zmk/ble.h>
 #include <zmk/usb.h>
 #include <zmk/endpoints.h>
 #include <zmk/status_advertisement.h>
+
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
+#include <zmk/keymap.h>
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_CAPS_WORD)
 #include <zmk/behavior.h>
@@ -172,12 +175,18 @@ static void build_manufacturer_payload(void) {
     }
     manufacturer_data[5] = battery_level;
     
-    // Layer information - simple polling approach
+    // Layer information - split-aware approach
     uint8_t layer = 0;
     
-    // Use standard ZMK keymap API (polling every advertisement update)
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
+    // Central/Standalone: Use keymap API for layer detection
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15;
+#else
+    // Peripheral: No keymap available, always layer 0
+    // Layer information comes from Central side via split communication
+    layer = 0;
+#endif
     
     manufacturer_data[6] = layer; // active_layer
     
