@@ -325,8 +325,19 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
             char device_name[32];
             memcpy(device_name, buf_copy.data, MIN(len, sizeof(device_name) - 1));
             device_name[MIN(len, sizeof(device_name) - 1)] = '\0';
+            
+            // Debug: Log the exact received name and its type
+            const char *name_type = (ad_type == BT_DATA_NAME_COMPLETE) ? "COMPLETE" : "SHORTENED";
+            printk("*** PROSPECTOR SCANNER: Found %s device name (len=%d): '%s' ***\n", name_type, len, device_name);
+            
+            // If we received a shortened name that looks like "LalaPad", check if we can infer the full name
+            if (ad_type == BT_DATA_NAME_SHORTENED && strncmp(device_name, "LalaPad", 7) == 0) {
+                // This looks like a truncated "LalaPadmini" - use the full name
+                strcpy(device_name, "LalaPadmini");
+                printk("*** PROSPECTOR SCANNER: Expanded shortened name to: %s ***\n", device_name);
+            }
+            
             store_device_name(addr, device_name);
-            printk("*** PROSPECTOR SCANNER: Found device name: %s ***\n", device_name);
         }
         
         // Check for Prospector manufacturer data (26 bytes expected)
