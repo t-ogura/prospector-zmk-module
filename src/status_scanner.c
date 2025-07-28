@@ -421,7 +421,7 @@ int zmk_status_scanner_start(void) {
     }
     
     struct bt_le_scan_param scan_param = {
-        .type = BT_LE_SCAN_TYPE_PASSIVE,
+        .type = BT_LE_SCAN_TYPE_ACTIVE,  // Changed to ACTIVE to receive Scan Response packets
         .options = BT_LE_SCAN_OPT_NONE,
         .interval = BT_GAP_SCAN_FAST_INTERVAL,
         .window = BT_GAP_SCAN_FAST_WINDOW,
@@ -436,7 +436,7 @@ int zmk_status_scanner_start(void) {
     scanning = true;
     k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
     
-    LOG_INF("Status scanner started");
+    LOG_INF("Status scanner started in ACTIVE mode - will receive Scan Response packets");
     return 0;
 }
 
