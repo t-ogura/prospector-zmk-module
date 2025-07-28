@@ -131,10 +131,10 @@ static struct bt_data scan_rsp[] = {
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
 };
 
-// Custom advertising parameters with device name in advertisement packet
+// Custom advertising parameters (connectable only, name in scan response)
 static const struct bt_le_adv_param adv_params = {
     .id = BT_ID_DEFAULT,
-    .options = BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_USE_NAME,
+    .options = BT_LE_ADV_OPT_CONNECTABLE,
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
 };
@@ -313,22 +313,16 @@ static void start_custom_advertising(void) {
     // Update scan response data length
     scan_rsp[0].data_len = actual_name_len;
     
-    LOG_INF("Prospector: Starting advertising with USE_NAME flag");
-    LOG_INF("ADV packet: Flags + Name + Manufacturer Data (single packet)");
+    LOG_INF("Prospector: Starting separated adv/scan_rsp advertising");
+    LOG_INF("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
+    LOG_INF("SCAN_RSP: Name + Appearance = %d bytes", 2 + actual_name_len + 3);
     
-    // Calculate total advertisement size: Flags(3) + Name(2+len) + Manufacturer(2+26)
-    int name_len = strlen(CONFIG_BT_DEVICE_NAME);
-    int total_adv_size = 3 + 2 + name_len + 2 + sizeof(manufacturer_data);
-    LOG_INF("Advertisement size: Flags(3) + Name(%d) + Manufacturer(%d) = %d bytes", 
-            2 + name_len, 2 + sizeof(manufacturer_data), total_adv_size);
+    // This approach keeps manufacturer_data at full 26 bytes while device name in scan response
+    LOG_INF("✅ Advertisement stays within 31-byte limit: %d bytes", 3 + 2 + sizeof(manufacturer_data));
     
-    if (total_adv_size > 31) {
-        LOG_WRN("⚠️ Advertisement size %d exceeds 31-byte limit! May cause -E2BIG error", total_adv_size);
-    }
-    
-    // Start advertising with USE_NAME flag - scan response not needed for name
+    // Start advertising with separated adv_data and scan_rsp
     int err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array), 
-                              NULL, 0); // No scan response needed with USE_NAME
+                              scan_rsp, ARRAY_SIZE(scan_rsp));
     
     if (err == 0) {
         LOG_INF("✅ Advertising started successfully");
@@ -371,9 +365,9 @@ static void adv_work_handler(struct k_work *work) {
     // Update manufacturer data
     build_manufacturer_payload();
     
-    // Try to update existing advertising data first (no scan response with USE_NAME)
+    // Try to update existing advertising data first
     int err = bt_le_adv_update_data(adv_data_array, ARRAY_SIZE(adv_data_array), 
-                                    NULL, 0);
+                                    scan_rsp, ARRAY_SIZE(scan_rsp));
     
     if (err == 0) {
         LOG_INF("✅ Advertising data updated successfully");
