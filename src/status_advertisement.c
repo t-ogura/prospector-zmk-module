@@ -169,16 +169,30 @@ static void build_manufacturer_payload(void) {
     }
     manufacturer_data[5] = battery_level;
     
-    // Layer information
+    // Layer information with comprehensive debugging
     uint8_t layer = 0;
 #if IS_ENABLED(CONFIG_ZMK_KEYMAP)
     layer = zmk_keymap_highest_layer_active();
     if (layer > 15) layer = 15;
-    LOG_INF("🔍 Layer detection: zmk_keymap_highest_layer_active() = %d", layer);
+    
+    // Enhanced layer debugging
+    LOG_INF("🔍 LAYER DEBUG: zmk_keymap_highest_layer_active() = %d", layer);
+    LOG_INF("🔍 LAYER DEBUG: CONFIG_ZMK_KEYMAP is enabled");
+    
+    // Additional keymap state debugging  
+    for (int i = 0; i < 8; i++) {
+        bool layer_active = zmk_keymap_layer_active(i);
+        if (layer_active) {
+            LOG_INF("🔍 LAYER DEBUG: Layer %d is ACTIVE", i);
+        }
+    }
 #else
-    LOG_WRN("❌ CONFIG_ZMK_KEYMAP not enabled - layer will be 0");
+    LOG_ERR("❌ CRITICAL: CONFIG_ZMK_KEYMAP not enabled - layer will always be 0");
+    LOG_ERR("❌ This explains why rgbled layer changes don't work either!");
 #endif
     manufacturer_data[6] = layer; // active_layer
+    
+    LOG_INF("🔍 FINAL: Layer %d written to manufacturer_data[6]", layer);
     
     // Profile and connection info (placeholder for now)
     manufacturer_data[7] = 0; // profile_slot
