@@ -36,7 +36,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 // No additional includes needed - zmk_peripheral_battery_state_changed is in battery_state_changed.h
-#include <zmk/events/split_layer_state_changed.h>
 #endif
 
 static struct zmk_status_adv_data adv_data;
@@ -62,29 +61,6 @@ static int peripheral_battery_listener(const zmk_event_t *eh);
 
 ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
 ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_changed);
-
-// Split layer state tracking - CRITICAL for split keyboards!
-static int split_layer_listener(const zmk_event_t *eh) {
-    const struct zmk_split_layer_state_changed *ev = as_zmk_split_layer_state_changed(eh);
-    if (ev) {
-        LOG_INF("🔄 Split Layer %d changed: state=%d", ev->layer, ev->state);
-        
-        // Update latest layer state
-        if (ev->state && ev->layer <= 15) {
-            latest_layer = ev->layer;
-            
-            // Trigger immediate update
-            if (adv_started) {
-                k_work_cancel_delayable(&adv_work);
-                k_work_schedule(&adv_work, K_NO_WAIT);
-            }
-        }
-    }
-    return ZMK_EV_EVENT_BUBBLE;
-}
-
-ZMK_LISTENER(prospector_split_layer, split_layer_listener);
-ZMK_SUBSCRIPTION(prospector_split_layer, zmk_split_layer_state_changed);
 #endif
 
 // Activity-based update system: key presses trigger high-frequency updates
@@ -196,30 +172,21 @@ static void build_manufacturer_payload(void) {
     }
     manufacturer_data[5] = battery_level;
     
-    // Layer information - use tracked layer state for split keyboards
+    // Layer information - use keymap API with debug info in manufacturer data
     uint8_t layer = 0;
     
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    // For split keyboards, use the tracked layer from split_layer_state_changed events
-    layer = latest_layer;
-    LOG_INF("🔍 SPLIT LAYER: Using tracked layer %d from split events", layer);
-#else
-    // For non-split keyboards, use standard keymap API
-    #if IS_ENABLED(CONFIG_ZMK_KEYMAP)
-        layer = zmk_keymap_highest_layer_active();
-        if (layer > 15) layer = 15;
-        LOG_INF("🔍 STANDALONE LAYER: zmk_keymap_highest_layer_active() = %d", layer);
-    #else
-        LOG_WRN("❌ CONFIG_ZMK_KEYMAP not enabled - layer will be 0");
-    #endif
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP)
+    layer = zmk_keymap_highest_layer_active();
+    if (layer > 15) layer = 15;
 #endif
     
     manufacturer_data[6] = layer; // active_layer
     
-    // Debug info in manufacturer data for troubleshooting
-    manufacturer_data[23] = layer;  // Duplicate layer in reserved[0] for debug
-    manufacturer_data[24] = latest_layer;  // Latest tracked layer in reserved[1]
-    manufacturer_data[25] = 0x42;  // Debug marker in reserved[2]
+    // Embed debug info in reserved bytes for troubleshooting
+    // This allows us to see the actual values in BLE scanner apps
+    manufacturer_data[23] = layer;  // Current layer (debug copy)
+    manufacturer_data[24] = latest_layer;  // Latest tracked layer  
+    manufacturer_data[25] = 0x42;  // Debug marker
     
     // Profile and connection info (placeholder for now)
     manufacturer_data[7] = 0; // profile_slot
