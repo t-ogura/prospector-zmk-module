@@ -306,15 +306,28 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
             printk("*** PROSPECTOR SCANNER: Found device name: %s ***\n", device_name);
         }
         
-        // Check for Prospector manufacturer data
-        if (ad_type == BT_DATA_MANUFACTURER_DATA && len >= sizeof(struct zmk_status_adv_data)) {
-            const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf_copy.data;
+        // Check for Prospector manufacturer data (26 bytes expected)
+        if (ad_type == BT_DATA_MANUFACTURER_DATA) {
+            printk("*** SCANNER: Manufacturer data found - Length: %d, Expected: %d ***\n", 
+                   len, sizeof(struct zmk_status_adv_data));
             
-            // Check if this is Prospector data: FF FF AB CD
-            if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF && 
-                data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
-                prospector_data = data;
-                printk("*** PROSPECTOR SCANNER: Valid Prospector data found! Version=%d ***\n", data->version);
+            if (len >= sizeof(struct zmk_status_adv_data)) {
+                const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf_copy.data;
+                
+                // Check if this is Prospector data: FF FF AB CD
+                if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF && 
+                    data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
+                    prospector_data = data;
+                    printk("*** PROSPECTOR SCANNER: Valid Prospector data found! Version=%d, Battery=%d%% ***\n", 
+                           data->version, data->battery_level);
+                } else {
+                    printk("*** SCANNER: Wrong manufacturer signature: %02X%02X %02X%02X (expected FFFF ABCD) ***\n",
+                           data->manufacturer_id[0], data->manufacturer_id[1],
+                           data->service_uuid[0], data->service_uuid[1]);
+                }
+            } else {
+                printk("*** SCANNER: Manufacturer data too short (%d < %d bytes) ***\n", 
+                       len, sizeof(struct zmk_status_adv_data));
             }
         }
         
