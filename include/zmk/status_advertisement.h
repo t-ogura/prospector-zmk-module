@@ -39,9 +39,13 @@ struct zmk_status_adv_data {
 /**
  * @brief Status flags bit definitions
  */
-#define ZMK_STATUS_FLAG_CAPS_WORD    (1 << 0)
-#define ZMK_STATUS_FLAG_CHARGING     (1 << 1)
-#define ZMK_STATUS_FLAG_USB_CONNECTED (1 << 2)
+#define ZMK_STATUS_FLAG_CAPS_WORD        (1 << 0)
+#define ZMK_STATUS_FLAG_CHARGING         (1 << 1)
+#define ZMK_STATUS_FLAG_USB_CONNECTED    (1 << 2)
+#define ZMK_STATUS_FLAG_USB_HID_READY    (1 << 3)
+#define ZMK_STATUS_FLAG_BLE_CONNECTED    (1 << 4)
+#define ZMK_STATUS_FLAG_BLE_BONDED       (1 << 5)
+// Bits 6-7 reserved for modifier keys in future implementation
 
 /**
  * @brief Device role definitions for split keyboard support

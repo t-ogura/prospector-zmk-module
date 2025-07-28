@@ -11,6 +11,7 @@
 #include <zephyr/logging/log.h>
 #include <zmk/status_scanner.h>
 #include "scanner_battery_widget.h"
+#include "connection_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -21,6 +22,7 @@ static lv_obj_t *title_label = NULL;
 static lv_obj_t *status_label = NULL;
 static lv_obj_t *info_label = NULL;
 static struct zmk_widget_scanner_battery battery_widget;
+static struct zmk_widget_connection_status connection_widget;
 
 // Forward declaration
 static void trigger_scanner_start(void);
@@ -61,6 +63,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
+                    zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Split keyboard: Central %d%%, Peripheral %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.peripheral_battery[0], kbd->data.active_layer);
@@ -73,6 +76,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
+                    zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Central device: %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.active_layer);
@@ -85,6 +89,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
+                    zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Standalone keyboard: %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.active_layer);
@@ -97,6 +102,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     lv_label_set_text(info_label, info_buf);
                     
                     zmk_widget_scanner_battery_update(&battery_widget, kbd);
+                    zmk_widget_connection_status_update(&connection_widget, kbd);
                     
                     LOG_INF("Peripheral device: %d%%, Layer: %d", 
                             kbd->data.battery_level, kbd->data.active_layer);
@@ -173,6 +179,10 @@ lv_obj_t *zmk_display_status_screen() {
     zmk_widget_scanner_battery_init(&battery_widget, screen);
     lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 60);
+    
+    // Connection status widget in top right
+    zmk_widget_connection_status_init(&connection_widget, screen);
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 35);
     
     // Info label (save reference for updates)
     info_label = lv_label_create(screen);

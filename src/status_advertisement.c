@@ -198,17 +198,42 @@ static void build_manufacturer_payload(void) {
     
     manufacturer_data.active_layer = layer;
     
-    // Profile and connection info (placeholder for now)
-    manufacturer_data.profile_slot = 0; // TODO: Get actual BLE profile
-    manufacturer_data.connection_count = 1; // TODO: Get actual connection count
+    // Profile and connection info using ZMK APIs
+    manufacturer_data.profile_slot = zmk_ble_active_profile_index(); // 0-4 BLE profiles
     
-    // Status flags
+    // Connection count approximation - count active BLE connections + USB
+    uint8_t connection_count = 0;
+    if (zmk_ble_active_profile_is_connected()) {
+        connection_count++;
+    }
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    if (zmk_usb_is_hid_ready()) {
+        connection_count++;
+    }
+#endif
+    manufacturer_data.connection_count = connection_count;
+    
+    // Status flags - YADS compatible connection status
     uint8_t flags = 0;
+    
+    // USB status flags
 #if IS_ENABLED(CONFIG_ZMK_USB)
     if (zmk_usb_is_powered()) {
         flags |= ZMK_STATUS_FLAG_USB_CONNECTED;
     }
+    if (zmk_usb_is_hid_ready()) {
+        flags |= ZMK_STATUS_FLAG_USB_HID_READY;
+    }
 #endif
+    
+    // BLE status flags
+    if (zmk_ble_active_profile_is_connected()) {
+        flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
+    }
+    if (!zmk_ble_active_profile_is_open()) {
+        flags |= ZMK_STATUS_FLAG_BLE_BONDED;
+    }
+    
     manufacturer_data.status_flags = flags;
     
     // Device role and peripheral batteries
