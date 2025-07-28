@@ -303,15 +303,24 @@ static void start_custom_advertising(void) {
     const char *full_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
     int full_name_len = strlen(full_name);
     
+    // Debug: Show what name we're trying to send and compare with ZMK standard name
+    LOG_INF("📝 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME: '%s' (len=%d)", full_name, full_name_len);
+    LOG_INF("📝 CONFIG_BT_DEVICE_NAME: '%s' (len=%d)", CONFIG_BT_DEVICE_NAME, strlen(CONFIG_BT_DEVICE_NAME));
+    
     // Calculate available space: 31 - (name_header=2) - (appearance_header=1) - (appearance_data=2) = 26
     int max_name_len = sizeof(device_name_buffer) - 1;
     int actual_name_len = MIN(full_name_len, max_name_len);
+    
+    LOG_INF("📏 Name length: requested=%d, max_allowed=%d, actual=%d", 
+            full_name_len, max_name_len, actual_name_len);
     
     memcpy(device_name_buffer, full_name, actual_name_len);
     device_name_buffer[actual_name_len] = '\0';
     
     // Update scan response data length
     scan_rsp[0].data_len = actual_name_len;
+    
+    LOG_INF("📤 Scan response will send: '%s' (len=%d)", device_name_buffer, actual_name_len);
     
     LOG_INF("Prospector: Starting separated adv/scan_rsp advertising");
     LOG_INF("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
@@ -411,7 +420,7 @@ static int init_prospector_status(const struct device *dev) {
     
     // Start custom advertising after a delay
     adv_started = true;
-    k_work_schedule(&adv_work, K_SECONDS(5)); // Wait 5 seconds for ZMK to stabilize
+    k_work_schedule(&adv_work, K_SECONDS(1)); // Reduced delay to minimize "LalaPad" duration
     
     return 0;
 }
