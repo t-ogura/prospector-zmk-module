@@ -12,23 +12,24 @@
 #include <zmk/status_scanner.h>
 #include "scanner_battery_widget.h"
 #include "connection_status_widget.h"
+#include "layer_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
 // Global UI objects for dynamic updates
-static lv_obj_t *status_label = NULL;
-static lv_obj_t *info_label = NULL;
+static lv_obj_t *device_name_label = NULL;
 static struct zmk_widget_scanner_battery battery_widget;
 static struct zmk_widget_connection_status connection_widget;
+static struct zmk_widget_layer_status layer_widget;
 
 // Forward declaration
 static void trigger_scanner_start(void);
 
 // Scanner event callback for display updates
 static void update_display_from_scanner(struct zmk_status_scanner_event_data *event_data) {
-    if (!status_label || !info_label) {
+    if (!device_name_label) {
         return; // UI not ready yet
     }
     
@@ -38,73 +39,30 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
     
     if (active_count == 0) {
         // No keyboards found
-        lv_label_set_text(status_label, "Scanning...");
-        lv_label_set_text(info_label, "No keyboards found");
+        lv_label_set_text(device_name_label, "Scanning...");
         LOG_INF("Display updated: No keyboards");
     } else {
-        // Debug: show active count
-        char debug_buf[32];
-        snprintf(debug_buf, sizeof(debug_buf), "Found %d devices", active_count);
         // Find active keyboards and display their info  
         for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
             struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
             if (kbd && kbd->active) {
-                // Check if this is a split keyboard (Central with peripheral battery data)
+                // Update device name (large, prominent display)
+                lv_label_set_text(device_name_label, kbd->ble_name);
+                
+                // Update all widgets
+                zmk_widget_scanner_battery_update(&battery_widget, kbd);
+                zmk_widget_connection_status_update(&connection_widget, kbd);
+                zmk_widget_layer_status_update(&layer_widget, kbd);
+                
+                // Log keyboard status
                 if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && 
                     kbd->data.peripheral_battery[0] > 0) {
-                    // Split keyboard - Central contains both battery levels
-                    lv_label_set_text(status_label, kbd->ble_name);
-                    char info_buf[64];
-                    snprintf(info_buf, sizeof(info_buf), "Layer %d | R:%d%% L:%d%%", 
-                            kbd->data.active_layer, 
-                            kbd->data.battery_level,           // Central (Right)
-                            kbd->data.peripheral_battery[0]);  // Peripheral (Left)
-                    lv_label_set_text(info_label, info_buf);
-                    
-                    zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
-                    
-                    LOG_INF("Split keyboard: Central %d%%, Peripheral %d%%, Layer: %d", 
-                            kbd->data.battery_level, kbd->data.peripheral_battery[0], kbd->data.active_layer);
-                } else if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL) {
-                    // Central device without peripheral data
-                    lv_label_set_text(status_label, kbd->ble_name);
-                    char info_buf[64];
-                    snprintf(info_buf, sizeof(info_buf), "Layer %d: %d%%", 
-                            kbd->data.active_layer, kbd->data.battery_level);
-                    lv_label_set_text(info_label, info_buf);
-                    
-                    zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
-                    
-                    LOG_INF("Central device: %d%%, Layer: %d", 
-                            kbd->data.battery_level, kbd->data.active_layer);
-                } else if (kbd->data.device_role == ZMK_DEVICE_ROLE_STANDALONE) {
-                    // Standalone keyboard
-                    lv_label_set_text(status_label, kbd->ble_name);
-                    char info_buf[64];
-                    snprintf(info_buf, sizeof(info_buf), "Layer %d: %d%%", 
-                            kbd->data.active_layer, kbd->data.battery_level);
-                    lv_label_set_text(info_label, info_buf);
-                    
-                    zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
-                    
-                    LOG_INF("Standalone keyboard: %d%%, Layer: %d", 
-                            kbd->data.battery_level, kbd->data.active_layer);
+                    LOG_INF("Split keyboard: %s, Central %d%%, Left %d%%, Layer: %d", 
+                            kbd->ble_name, kbd->data.battery_level, 
+                            kbd->data.peripheral_battery[0], kbd->data.active_layer);
                 } else {
-                    // Peripheral device (shouldn't normally happen with new implementation)
-                    lv_label_set_text(status_label, debug_buf);
-                    char info_buf[64];
-                    snprintf(info_buf, sizeof(info_buf), "Peripheral L%d: %d%%", 
-                            kbd->data.active_layer, kbd->data.battery_level);
-                    lv_label_set_text(info_label, info_buf);
-                    
-                    zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                    zmk_widget_connection_status_update(&connection_widget, kbd);
-                    
-                    LOG_INF("Peripheral device: %d%%, Layer: %d", 
-                            kbd->data.battery_level, kbd->data.active_layer);
+                    LOG_INF("Keyboard: %s, Battery %d%%, Layer: %d", 
+                            kbd->ble_name, kbd->data.battery_level, kbd->data.active_layer);
                 }
                 break; // Only handle the first active keyboard for now
             }
@@ -160,28 +118,25 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     
-    // Status label (save reference for updates) - moved higher without title
-    status_label = lv_label_create(screen);
-    lv_obj_set_style_text_color(status_label, lv_color_make(255, 255, 0), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, -60);
-    lv_label_set_text(status_label, "Initializing...");
-    
-    // Battery widget in the center
-    zmk_widget_scanner_battery_init(&battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 60);
+    // Device name label at top (large, prominent)
+    device_name_label = lv_label_create(screen);
+    lv_obj_set_style_text_color(device_name_label, lv_color_make(255, 255, 0), 0);
+    lv_obj_set_style_text_font(device_name_label, &lv_font_montserrat_20, 0);
+    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 15);
+    lv_label_set_text(device_name_label, "Initializing...");
     
     // Connection status widget in top right
     zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 35);
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 15);
     
-    // Info label (save reference for updates)
-    info_label = lv_label_create(screen);
-    lv_obj_set_style_text_color(info_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(info_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(info_label, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_label_set_text(info_label, "Starting scanner...");
+    // Layer status widget in the center (horizontal layer display)
+    zmk_widget_layer_status_init(&layer_widget, screen);
+    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -10);
+    
+    // Battery widget at the bottom
+    zmk_widget_scanner_battery_init(&battery_widget, screen);
+    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
     
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
