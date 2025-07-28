@@ -222,8 +222,8 @@ static void build_manufacturer_payload(void) {
     // Copy peripheral battery levels (3 bytes at offset 12)
     memcpy(&manufacturer_data[12], peripheral_batteries, 3);
            
-#elif IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
-    // Skip advertising on peripheral to preserve split communication
+#elif IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    // Peripheral: Skip advertising to preserve split communication  
     return;
 #else
     manufacturer_data[10] = ZMK_DEVICE_ROLE_STANDALONE; // device_role
@@ -283,7 +283,7 @@ static int stop_default_advertising(const struct device *dev) {
 }
 
 static void start_custom_advertising(void) {
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     // CRITICAL FIX: Don't interfere with peripheral split communication
     LOG_DBG("Skipping advertising on peripheral device to preserve split communication");
     return;
@@ -373,7 +373,7 @@ static void adv_work_handler(struct k_work *work) {
 static int init_prospector_status(const struct device *dev) {
     k_work_init_delayable(&adv_work, adv_work_handler);
     
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_PERIPHERAL)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     LOG_INF("Prospector: Peripheral device - advertising disabled to preserve split communication");
     LOG_INF("⚠️  To test manufacturer data, use the RIGHT side (Central) firmware!");
     return 0;
