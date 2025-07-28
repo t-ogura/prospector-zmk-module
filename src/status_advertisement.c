@@ -32,6 +32,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/position_state_changed.h>
+#include <zmk/events/layer_state_changed.h>
 #include <zmk/event_manager.h>
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -62,6 +63,30 @@ static int peripheral_battery_listener(const zmk_event_t *eh);
 ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
 ZMK_SUBSCRIPTION(prospector_peripheral_battery, zmk_peripheral_battery_state_changed);
 #endif
+
+// Layer state tracking for immediate layer change detection
+static int layer_state_listener(const zmk_event_t *eh) {
+    const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
+    if (ev) {
+        LOG_INF("🔄 Layer %d changed: state=%d", ev->layer, ev->state);
+        
+        // Update latest layer when a layer becomes active
+        if (ev->state) {
+            latest_layer = ev->layer;
+            LOG_INF("🔍 Layer updated to: %d", latest_layer);
+        }
+        
+        // Trigger immediate advertisement update
+        if (adv_started) {
+            k_work_cancel_delayable(&adv_work);
+            k_work_schedule(&adv_work, K_NO_WAIT);
+        }
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(prospector_layer_listener, layer_state_listener);
+ZMK_SUBSCRIPTION(prospector_layer_listener, zmk_layer_state_changed);
 
 // Activity-based update system: key presses trigger high-frequency updates
 static int position_state_listener(const zmk_event_t *eh) {
@@ -172,13 +197,23 @@ static void build_manufacturer_payload(void) {
     }
     manufacturer_data[5] = battery_level;
     
-    // Layer information - use keymap API with debug info in manufacturer data
+    // Layer information - use both event-tracked and API approach for reliability
     uint8_t layer = 0;
     
+    // Try event-tracked layer first (most reliable for real-time updates)
+    if (latest_layer > 0) {
+        layer = latest_layer;
+        LOG_INF("🔍 Using event-tracked layer: %d", layer);
+    } else {
+        // Fallback to API query
 #if IS_ENABLED(CONFIG_ZMK_KEYMAP)
-    layer = zmk_keymap_highest_layer_active();
-    if (layer > 15) layer = 15;
+        layer = zmk_keymap_highest_layer_active();
+        if (layer > 15) layer = 15;
+        LOG_INF("🔍 Using API layer: zmk_keymap_highest_layer_active() = %d", layer);
+#else
+        LOG_WRN("❌ CONFIG_ZMK_KEYMAP not enabled - layer will be 0");
 #endif
+    }
     
     manufacturer_data[6] = layer; // active_layer
     
