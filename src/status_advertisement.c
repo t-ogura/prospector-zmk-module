@@ -69,12 +69,12 @@ static struct bt_data scan_rsp[] = {
 };
 
 // Custom advertising parameters (connectable only, no USE_NAME flag)
-static const struct bt_le_adv_param adv_params = BT_LE_ADV_PARAM(
-    BT_LE_ADV_OPT_CONNECTABLE,
-    BT_GAP_ADV_FAST_INT_MIN_2,
-    BT_GAP_ADV_FAST_INT_MAX_2,
-    NULL
-);
+static const struct bt_le_adv_param adv_params = {
+    .id = BT_ID_DEFAULT,
+    .options = BT_LE_ADV_OPT_CONNECTABLE,
+    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
+    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
+};
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 // Peripheral battery event listener for split keyboards
