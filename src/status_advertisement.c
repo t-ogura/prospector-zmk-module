@@ -339,26 +339,27 @@ static void start_custom_advertising(void) {
     
     LOG_INF("Manufacturer data (%d bytes): %02X%02X %02X%02X %02X %02X %02X %02X %02X %02X %02X", 
             sizeof(manufacturer_data),
-            manufacturer_data[0], manufacturer_data[1], 
-            manufacturer_data[2], manufacturer_data[3], 
-            manufacturer_data[4], manufacturer_data[5], manufacturer_data[6],
-            manufacturer_data[7], manufacturer_data[8], manufacturer_data[9], manufacturer_data[10]);
+            manufacturer_data.manufacturer_id[0], manufacturer_data.manufacturer_id[1], 
+            manufacturer_data.service_uuid[0], manufacturer_data.service_uuid[1], 
+            manufacturer_data.version, manufacturer_data.battery_level, manufacturer_data.active_layer,
+            manufacturer_data.profile_slot, manufacturer_data.connection_count, manufacturer_data.status_flags, manufacturer_data.device_role);
     
     // Log the complete data structure in hex for debugging
     LOG_INF("Complete manufacturer data (26 bytes):");
+    uint8_t *data_bytes = (uint8_t*)&manufacturer_data;
     for (int i = 0; i < sizeof(manufacturer_data); i += 8) {
         int remaining = sizeof(manufacturer_data) - i;
         if (remaining >= 8) {
             LOG_INF("  [%02d-%02d]: %02X %02X %02X %02X %02X %02X %02X %02X", 
                     i, i+7,
-                    manufacturer_data[i], manufacturer_data[i+1], manufacturer_data[i+2], manufacturer_data[i+3],
-                    manufacturer_data[i+4], manufacturer_data[i+5], manufacturer_data[i+6], manufacturer_data[i+7]);
+                    data_bytes[i], data_bytes[i+1], data_bytes[i+2], data_bytes[i+3],
+                    data_bytes[i+4], data_bytes[i+5], data_bytes[i+6], data_bytes[i+7]);
         } else {
             // Handle last incomplete chunk
             char hex_str[32] = {0};
             int pos = 0;
             for (int j = 0; j < remaining; j++) {
-                pos += snprintf(hex_str + pos, sizeof(hex_str) - pos, "%02X ", manufacturer_data[i + j]);
+                pos += snprintf(hex_str + pos, sizeof(hex_str) - pos, "%02X ", data_bytes[i + j]);
             }
             LOG_INF("  [%02d-%02d]: %s", i, i + remaining - 1, hex_str);
         }
