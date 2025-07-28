@@ -1532,6 +1532,16 @@ prospector-zmk-module/
    - Priority-based data transmission (critical vs. nice-to-have)
    - Battery-aware feature scaling
 
+7. **Enhanced Battery Status Visualization**
+   - Color-coded battery level indicators for instant recognition
+   - Battery bar and percentage with intuitive color scheme:
+     • 80%+ : Green (#00FF00) - Excellent battery level
+     • 60-79%: Light Green (#7FFF00) - Good battery level  
+     • 40-59%: Yellow (#FFFF00) - Moderate battery level
+     • <40%  : Red (#FF0000) - Low battery warning
+   - Consistent coloring across both regular and split keyboard displays
+   - Smooth color transitions and visual battery level indicators
+
 #### **🔮 Future Enhancement Ideas**:
 1. **Advanced Layer Visualization**
    - Layer-specific icons or symbols
@@ -1590,6 +1600,23 @@ struct keyboard_timeout_config {
     bool show_last_seen_timestamp;      // UI feature toggle
     bool auto_remove_disconnected;      // Clean up old entries
 };
+
+struct battery_visualization_config {
+    // Color-coded battery level thresholds and colors
+    struct {
+        uint8_t threshold;              // Battery percentage threshold
+        lv_color_t color;              // Associated color
+        const char* status_text;        // Status description  
+    } battery_levels[4] = {
+        {80, LV_COLOR_MAKE(0x00, 0xFF, 0x00), "Excellent"}, // Green
+        {60, LV_COLOR_MAKE(0x7F, 0xFF, 0x00), "Good"},      // Light Green  
+        {40, LV_COLOR_MAKE(0xFF, 0xFF, 0x00), "Moderate"},  // Yellow
+        {0,  LV_COLOR_MAKE(0xFF, 0x00, 0x00), "Low"}        // Red
+    };
+    bool show_battery_bar;              // Visual bar in addition to percentage
+    bool animate_transitions;           // Smooth color transitions
+    uint8_t low_battery_blink_threshold; // Blink warning below this level
+};
 ```
 
 #### **Keyboard-Side Advertisement Optimization**:
@@ -1609,10 +1636,12 @@ struct adv_power_config {
    - Disconnect timeout detection (scanner-side)
    - Battery-aware advertisement intervals (keyboard-side)
    - Progressive scan interval adjustment (scanner-side)
+   - **Color-coded battery status visualization** 🎨
 
 2. **Medium Priority** 🔋:
    - Display auto-dimming and sleep mode
    - Last seen timestamp display
+   - Battery bar visual indicators with smooth transitions
    - Advanced power profiling and optimization
 
 3. **Future Enhancement** 🚀:
