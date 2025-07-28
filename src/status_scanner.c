@@ -328,7 +328,9 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
             
             // Debug: Log the exact received name and its type
             const char *name_type = (ad_type == BT_DATA_NAME_COMPLETE) ? "COMPLETE" : "SHORTENED";
-            printk("*** PROSPECTOR SCANNER: Found %s device name (len=%d): '%s' ***\n", name_type, len, device_name);
+            const char *packet_type = (type & BT_LE_ADV_EVT_TYPE_SCAN_RSP) ? "SCAN_RSP" : "ADV";
+            printk("*** SCANNER: %s packet - Found %s device name (len=%d): '%s' ***\n", 
+                   packet_type, name_type, len, device_name);
             
             // If we received a shortened name that looks like "LalaPad", check if we can infer the full name
             if (ad_type == BT_DATA_NAME_SHORTENED && strncmp(device_name, "LalaPad", 7) == 0) {
