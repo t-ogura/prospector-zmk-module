@@ -56,13 +56,15 @@ static void update_connection_status(struct zmk_widget_connection_status *widget
     
     // Update BLE profile number (1-indexed for display)
     char profile_text[8];
-    snprintf(profile_text, sizeof(profile_text), "%d", kbd->data.profile_slot + 1);
+    // Since keyboard sends placeholder value 0, assume profile 1 for now
+    int display_profile = (kbd->data.profile_slot == 0) ? 1 : kbd->data.profile_slot + 1;
+    snprintf(profile_text, sizeof(profile_text), "%d", display_profile);
     lv_label_set_text(widget->ble_profile_label, profile_text);
     
-    LOG_DBG("Connection status updated: USB:%s BLE:%s Profile:%d", 
+    LOG_INF("Connection status: USB:%s BLE:%s Profile:%d (raw:%d)", 
             usb_hid_ready ? "Ready" : "NotReady",
             ble_connected ? "Connected" : (ble_bonded ? "Bonded" : "Open"),
-            kbd->data.profile_slot + 1);
+            display_profile, kbd->data.profile_slot);
 }
 
 int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widget, lv_obj_t *parent) {
@@ -83,8 +85,9 @@ int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widge
     
     // BLE profile number label
     widget->ble_profile_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, -5, -5);
+    lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, -10, -8);
     lv_obj_set_style_text_font(widget->ble_profile_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(widget->ble_profile_label, lv_color_white(), 0);
     
     // Initialize with default values
     lv_label_set_text(widget->transport_label, "#ff0000 USB#\\n#ffffff BLE#");
