@@ -266,7 +266,9 @@ static const char* get_device_name(const bt_addr_le_t *addr) {
             return temp_device_names[i].name;
         }
     }
-    return "Unknown";
+    // Fallback: if this is a Prospector device, return a reasonable name
+    // This occurs when manufacturer data is received before scan response
+    return "LalaPad";  // Default Prospector device name
 }
 
 static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,

@@ -19,14 +19,14 @@ static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool conne
     if (!bar || !num || !nc_bar || !nc_num) return;
     
     if (connected) {
-        // Show battery bar and percentage
-        lv_obj_fade_out(nc_bar, 150, 0);
-        lv_obj_fade_out(nc_num, 150, 0);
-        lv_obj_fade_in(bar, 150, 250);
-        lv_obj_fade_in(num, 150, 250);
+        // Show battery bar and percentage (no animation to prevent flickering)
+        lv_obj_set_style_opa(nc_bar, 0, 0);
+        lv_obj_set_style_opa(nc_num, 0, 0);
+        lv_obj_set_style_opa(bar, 255, 0);
+        lv_obj_set_style_opa(num, 255, 0);
         
-        // Update battery level
-        lv_bar_set_value(bar, level, LV_ANIM_ON);
+        // Update battery level without animation
+        lv_bar_set_value(bar, level, LV_ANIM_OFF);
         lv_label_set_text_fmt(num, "%d", level);
         
         // Set colors based on battery level
@@ -42,11 +42,11 @@ static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool conne
             lv_obj_set_style_text_color(num, lv_color_hex(0xFFFFFF), 0);
         }
     } else {
-        // Show disconnected state
-        lv_obj_fade_out(bar, 150, 0);
-        lv_obj_fade_out(num, 150, 0);
-        lv_obj_fade_in(nc_bar, 150, 250);
-        lv_obj_fade_in(nc_num, 150, 250);
+        // Show disconnected state (no animation)
+        lv_obj_set_style_opa(bar, 0, 0);
+        lv_obj_set_style_opa(num, 0, 0);
+        lv_obj_set_style_opa(nc_bar, 255, 0);
+        lv_obj_set_style_opa(nc_num, 255, 0);
     }
 }
 
@@ -132,43 +132,47 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
         return;
     }
     
-    LOG_INF("Updating scanner battery widget - device_role: %d, battery: %d%%, peripheral: %d%%", 
-            status->data.device_role, status->data.battery_level, status->data.peripheral_battery[0]);
+    LOG_INF("Battery widget update - Role:%d, Central:%d%%, Peripheral:[%d,%d,%d]", 
+            status->data.device_role, status->data.battery_level,
+            status->data.peripheral_battery[0], status->data.peripheral_battery[1], 
+            status->data.peripheral_battery[2]);
     
-    // Handle split keyboard display
-    if (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && 
-        status->data.peripheral_battery[0] > 0) {
+    // Handle split keyboard display - check if any peripheral is connected
+    bool has_peripheral = (status->data.peripheral_battery[0] > 0 || 
+                          status->data.peripheral_battery[1] > 0 || 
+                          status->data.peripheral_battery[2] > 0);
+    
+    if (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && has_peripheral) {
         // Split keyboard: show both Central and Peripheral batteries
         
         // Container 0: Peripheral (Left side) - Left display for Left keyboard
         lv_obj_t *peripheral_container = lv_obj_get_child(widget->obj, 0);
         if (peripheral_container) {
             set_battery_bar_value(peripheral_container, status->data.peripheral_battery[0], true);
-            LOG_INF("Updated Left container with Peripheral battery %d%%", status->data.peripheral_battery[0]);
+            LOG_INF("✅ Split mode: Left=%d%%, Right=%d%%", 
+               status->data.peripheral_battery[0], status->data.battery_level);
         }
         
         // Container 1: Central (Right side) - Right display for Right keyboard  
         lv_obj_t *central_container = lv_obj_get_child(widget->obj, 1);
         if (central_container) {
             set_battery_bar_value(central_container, status->data.battery_level, true);
-            LOG_INF("Updated Right container with Central battery %d%%", status->data.battery_level);
         }
     } else {
-        // Single device: use first container, clear second
-        int container_index = (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL || 
-                              status->data.device_role == ZMK_DEVICE_ROLE_STANDALONE) ? 0 : 1;
+        // Single device or Central without connected peripherals
+        LOG_INF("⚠️  Single mode: Central only %d%% (no peripheral connected)", 
+               status->data.battery_level);
         
-        lv_obj_t *main_container = lv_obj_get_child(widget->obj, container_index);
+        // Use first container for Central device
+        lv_obj_t *main_container = lv_obj_get_child(widget->obj, 0);
         if (main_container) {
             set_battery_bar_value(main_container, status->data.battery_level, true);
-            LOG_INF("Updated battery container %d with %d%%", container_index, status->data.battery_level);
         }
         
-        // Clear the other container for non-split devices
-        lv_obj_t *other_container = lv_obj_get_child(widget->obj, 1 - container_index);
+        // Clear the second container
+        lv_obj_t *other_container = lv_obj_get_child(widget->obj, 1);
         if (other_container) {
             set_battery_bar_value(other_container, 0, false);
-            LOG_INF("Cleared battery container %d", 1 - container_index);
         }
     }
 }
