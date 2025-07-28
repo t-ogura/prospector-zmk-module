@@ -323,7 +323,7 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
             
             // Debug: Log the exact received name and its type
             const char *name_type = (ad_type == BT_DATA_NAME_COMPLETE) ? "COMPLETE" : "SHORTENED";
-            const char *packet_type = (type & BT_LE_ADV_EVT_TYPE_SCAN_RSP) ? "SCAN_RSP" : "ADV";
+            const char *packet_type = (type & BT_HCI_LE_ADV_EVT_TYPE_SCAN_RSP) ? "SCAN_RSP" : "ADV";
             printk("*** SCANNER: %s packet - Found %s device name (len=%d): '%s' ***\n", 
                    packet_type, name_type, len, device_name);
             
