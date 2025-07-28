@@ -147,22 +147,20 @@ lv_obj_t *zmk_display_status_screen() {
 
 // Late initialization to start scanner after display is ready
 static void start_scanner_delayed(struct k_work *work) {
-    if (!status_label || !info_label) {
+    if (!device_name_label) {
         LOG_WRN("Display not ready yet, retrying scanner start...");
         k_work_schedule(k_work_delayable_from_work(work), K_SECONDS(1));
         return;
     }
     
     LOG_INF("Starting BLE scanner...");
-    lv_label_set_text(status_label, "Starting scanner...");
-    lv_label_set_text(info_label, "Initializing BLE...");
+    lv_label_set_text(device_name_label, "Starting scanner...");
     
     // Register callback first
     int ret = zmk_status_scanner_register_callback(update_display_from_scanner);
     if (ret < 0) {
         LOG_ERR("Failed to register scanner callback: %d", ret);
-        lv_label_set_text(status_label, "Scanner Error");
-        lv_label_set_text(info_label, "Callback failed");
+        lv_label_set_text(device_name_label, "Scanner Error");
         return;
     }
     
@@ -170,14 +168,12 @@ static void start_scanner_delayed(struct k_work *work) {
     ret = zmk_status_scanner_start();
     if (ret < 0) {
         LOG_ERR("Failed to start scanner: %d", ret);
-        lv_label_set_text(status_label, "Scanner Error");
-        lv_label_set_text(info_label, "Start failed");
+        lv_label_set_text(device_name_label, "Start Error");
         return;
     }
     
     LOG_INF("BLE scanner started successfully");
-    lv_label_set_text(status_label, "Scanning...");
-    lv_label_set_text(info_label, "Ready for keyboards");
+    lv_label_set_text(device_name_label, "Scanning...");
 }
 
 static K_WORK_DELAYABLE_DEFINE(scanner_start_work, start_scanner_delayed);
