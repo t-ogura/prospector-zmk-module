@@ -15,7 +15,7 @@ extern "C" {
 
 struct zmk_widget_modifier_status {
     lv_obj_t *obj;
-    lv_obj_t *mod_labels[4]; // C, S, A, G labels
+    lv_obj_t *label; // Single label for YADS-style display
 };
 
 int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, lv_obj_t *parent);

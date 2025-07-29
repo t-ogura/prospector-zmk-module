@@ -14,13 +14,13 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // Stylish pastel colors for each layer (0-6)
 static const lv_color_t layer_colors[MAX_LAYER_DISPLAY] = {
-    {.full = 0xFF9B9B},  // Layer 0: Soft Coral Pink
-    {.full = 0xFFD93D},  // Layer 1: Sunny Yellow  
-    {.full = 0x6BCF7F},  // Layer 2: Mint Green
-    {.full = 0x4D96FF},  // Layer 3: Sky Blue
-    {.full = 0xB19CD9},  // Layer 4: Lavender Purple
-    {.full = 0xFF6B9D},  // Layer 5: Rose Pink
-    {.full = 0xFF9F43}   // Layer 6: Peach Orange
+    {{.blue = 0x9B, .green = 0x9B, .red = 0xFF}},  // Layer 0: Soft Coral Pink
+    {{.blue = 0x3D, .green = 0xD9, .red = 0xFF}},  // Layer 1: Sunny Yellow  
+    {{.blue = 0x7F, .green = 0xCF, .red = 0x6B}},  // Layer 2: Mint Green
+    {{.blue = 0xFF, .green = 0x96, .red = 0x4D}},  // Layer 3: Sky Blue
+    {{.blue = 0xD9, .green = 0x9C, .red = 0xB1}},  // Layer 4: Lavender Purple
+    {{.blue = 0x9D, .green = 0x6B, .red = 0xFF}},  // Layer 5: Rose Pink
+    {{.blue = 0x43, .green = 0x9F, .red = 0xFF}}   // Layer 6: Peach Orange
 };
 
 static void update_layer_display(struct zmk_widget_layer_status *widget, struct zmk_keyboard_status *kbd) {

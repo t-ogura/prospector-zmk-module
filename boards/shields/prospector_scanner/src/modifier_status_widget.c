@@ -12,12 +12,12 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Simple modifier indicator characters (no NerdFont required)
-static const char *mod_chars[4] = {
-    "C",  // Control
-    "S",  // Shift  
-    "A",  // Alt
-    "G"   // GUI/Win/Cmd
+// YADS-style modifier symbols (fallback to simple characters if NerdFont unavailable)
+static const char *mod_symbols[4] = {
+    "Ctrl",  // Control - fallback for missing NerdFont 
+    "Shift", // Shift
+    "Alt",   // Alt
+    "Cmd"    // GUI/Win/Cmd
 };
 
 static void update_modifier_display(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd) {
@@ -26,56 +26,38 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     }
     
     uint8_t mod_flags = kbd->data.modifier_flags;
+    char text[64] = "";
+    int idx = 0;
     
-    // Check each modifier and update visibility/color
-    for (int i = 0; i < 4; i++) {
-        bool left_active = false;
-        bool right_active = false;
-        
-        switch (i) {
-            case 0: // Control
-                left_active = mod_flags & ZMK_MOD_FLAG_LCTL;
-                right_active = mod_flags & ZMK_MOD_FLAG_RCTL;
-                break;
-            case 1: // Shift
-                left_active = mod_flags & ZMK_MOD_FLAG_LSFT;
-                right_active = mod_flags & ZMK_MOD_FLAG_RSFT;
-                break;
-            case 2: // Alt
-                left_active = mod_flags & ZMK_MOD_FLAG_LALT;
-                right_active = mod_flags & ZMK_MOD_FLAG_RALT;
-                break;
-            case 3: // GUI
-                left_active = mod_flags & ZMK_MOD_FLAG_LGUI;
-                right_active = mod_flags & ZMK_MOD_FLAG_RGUI;
-                break;
-        }
-        
-        if (left_active || right_active) {
-            // Modifier is active - show with color
-            lv_obj_clear_flag(widget->mod_labels[i], LV_OBJ_FLAG_HIDDEN);
-            
-            if (left_active && right_active) {
-                // Both sides active - bright white
-                lv_obj_set_style_text_color(widget->mod_labels[i], lv_color_white(), 0);
-                lv_obj_set_style_text_opa(widget->mod_labels[i], LV_OPA_COVER, 0);
-            } else if (left_active) {
-                // Left only - cyan
-                lv_obj_set_style_text_color(widget->mod_labels[i], lv_color_make(0, 255, 255), 0);
-                lv_obj_set_style_text_opa(widget->mod_labels[i], LV_OPA_COVER, 0);
-            } else {
-                // Right only - magenta
-                lv_obj_set_style_text_color(widget->mod_labels[i], lv_color_make(255, 0, 255), 0);
-                lv_obj_set_style_text_opa(widget->mod_labels[i], LV_OPA_COVER, 0);
-            }
-        } else {
-            // Modifier inactive - hide or show dimmed
-            lv_obj_set_style_text_color(widget->mod_labels[i], lv_color_make(80, 80, 80), 0);
-            lv_obj_set_style_text_opa(widget->mod_labels[i], LV_OPA_30, 0);
-        }
+    // Collect active modifiers (YADS style - only show active ones)
+    const char *active_mods[4];
+    int active_count = 0;
+    
+    if (mod_flags & (ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL)) {
+        active_mods[active_count++] = mod_symbols[0]; // Control
+    }
+    if (mod_flags & (ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT)) {
+        active_mods[active_count++] = mod_symbols[1]; // Shift
+    }
+    if (mod_flags & (ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT)) {
+        active_mods[active_count++] = mod_symbols[2]; // Alt
+    }
+    if (mod_flags & (ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI)) {
+        active_mods[active_count++] = mod_symbols[3]; // GUI
     }
     
-    LOG_DBG("Modifier status updated: flags=0x%02X", mod_flags);
+    // Build display text (space-separated like YADS)
+    for (int i = 0; i < active_count; i++) {
+        if (i > 0) {
+            idx += snprintf(&text[idx], sizeof(text) - idx, " ");
+        }
+        idx += snprintf(&text[idx], sizeof(text) - idx, "%s", active_mods[i]);
+    }
+    
+    // Update single label with all active modifiers
+    lv_label_set_text(widget->label, idx ? text : "");
+    
+    LOG_DBG("Modifier status updated: flags=0x%02X, text='%s'", mod_flags, text);
 }
 
 int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, lv_obj_t *parent) {
@@ -83,34 +65,23 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
         return -1;
     }
     
-    // Create container widget for modifier display
+    // Create container widget for modifier display (YADS style)
     widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 120, 30); // Compact horizontal layout
+    lv_obj_set_size(widget->obj, 180, 30); // Wide enough for multiple modifiers
     lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(widget->obj, 0, 0);
     
-    // Create modifier labels (C S A G) in horizontal layout
-    for (int i = 0; i < 4; i++) {
-        widget->mod_labels[i] = lv_label_create(widget->obj);
-        
-        // Set font - using existing montserrat fonts
-        lv_obj_set_style_text_font(widget->mod_labels[i], &lv_font_montserrat_16, 0);
-        
-        // Set modifier character
-        lv_label_set_text(widget->mod_labels[i], mod_chars[i]);
-        
-        // Position horizontally with spacing
-        int spacing = 28; // Space between modifiers
-        int start_x = -42; // Start position to center the row
-        lv_obj_align(widget->mod_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), 0);
-        
-        // Initially all modifiers are dimmed
-        lv_obj_set_style_text_color(widget->mod_labels[i], lv_color_make(80, 80, 80), 0);
-        lv_obj_set_style_text_opa(widget->mod_labels[i], LV_OPA_30, 0);
-    }
+    // Create single label for displaying active modifiers (YADS style)
+    widget->label = lv_label_create(widget->obj);
+    lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(widget->label, ""); // Initially empty
     
-    LOG_INF("Modifier status widget initialized");
+    // Set font - use larger font like YADS
+    lv_obj_set_style_text_font(widget->label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
+    
+    LOG_INF("YADS-style modifier status widget initialized");
     return 0;
 }
 
