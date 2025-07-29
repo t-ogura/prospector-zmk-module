@@ -31,11 +31,7 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     char text[64] = "";
     int idx = 0;
     
-    // TROUBLESHOOTING: Only log when modifiers are detected to find phantom Ctrl
-    if (mod_flags != 0) {
-        LOG_ERR("🚨 SCANNER: Received non-zero modifier flags=0x%02X from keyboard", mod_flags);
-        LOG_ERR("🚨 SCANNER: Will display Ctrl symbol - this is the phantom issue!");
-    }
+    // Removed debug logging for performance
     
     // Collect active modifiers (YADS style - only show active ones)
     const char *active_mods[4];
@@ -43,20 +39,15 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     
     if (mod_flags & (ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL)) {
         active_mods[active_count++] = mod_symbols[0]; // Control
-        LOG_ERR("🚨 SCANNER: CTRL DETECTED - flags=0x%02X, LCTL=0x%02X, RCTL=0x%02X", 
-                mod_flags, ZMK_MOD_FLAG_LCTL, ZMK_MOD_FLAG_RCTL);
     }
     if (mod_flags & (ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT)) {
         active_mods[active_count++] = mod_symbols[1]; // Shift
-        LOG_INF("🔧 MODIFIER: Adding Shift to display");
     }
     if (mod_flags & (ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT)) {
         active_mods[active_count++] = mod_symbols[2]; // Alt
-        LOG_INF("🔧 MODIFIER: Adding Alt to display");
     }
     if (mod_flags & (ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI)) {
         active_mods[active_count++] = mod_symbols[3]; // GUI
-        LOG_INF("🔧 MODIFIER: Adding GUI to display");
     }
     
     // Build display text with proper spacing for NerdFont symbols
@@ -71,11 +62,7 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     // Update single label with all active modifiers
     lv_label_set_text(widget->label, idx ? text : "");
     
-    // Enhanced debug logging
-    LOG_INF("🔧 MODIFIER: Final display - flags=0x%02X, active_count=%d, text='%s'", 
-            mod_flags, active_count, text);
-    
-    // Note: Test display removed as requested - modifier detection is working
+    // Debug logging removed for performance
 }
 
 int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, lv_obj_t *parent) {
