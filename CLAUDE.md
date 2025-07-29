@@ -1329,6 +1329,12 @@ west build -s zmk/app -b seeeduino_xiao_ble -- -DSHIELD=prospector_scanner
 - **LVGL Graphics**: https://lvgl.io/
 - **GitHub Actions**: https://docs.github.com/en/actions
 
+### 📚 Project Documentation
+
+- **Font Options Guide**: [PROSPECTOR_FONT_OPTIONS_GUIDE.md](./PROSPECTOR_FONT_OPTIONS_GUIDE.md) - Comprehensive font reference for display customization
+- **Dongle Integration Guide**: [PROSPECTOR_DONGLE_INTEGRATION_GUIDE.md](./PROSPECTOR_DONGLE_INTEGRATION_GUIDE.md) - Universal dongle mode setup
+- **Japanese Dongle Guide**: [PROSPECTOR_DONGLE_INTEGRATION_GUIDE_JP.md](./PROSPECTOR_DONGLE_INTEGRATION_GUIDE_JP.md) - 日本語版ドングル統合ガイド
+
 ---
 
 ## 📈 Overall Project Timeline
