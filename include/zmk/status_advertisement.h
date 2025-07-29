@@ -33,7 +33,8 @@ struct zmk_status_adv_data {
     uint8_t peripheral_battery[3]; // Peripheral battery levels (up to 3 devices, 0 = N/A)
     char layer_name[4];            // Layer name (null-terminated, reduced from 6 to 4)
     uint8_t keyboard_id[4];        // Keyboard identifier
-    uint8_t reserved[3];           // Reserved for future use (reduced from 6 to 3)
+    uint8_t modifier_flags;        // Active modifier keys (Ctrl/Shift/Alt/GUI)
+    uint8_t reserved[2];           // Reserved for future use (reduced from 3 to 2)
 } __packed;  // Total: 26 bytes
 
 /**
@@ -45,7 +46,19 @@ struct zmk_status_adv_data {
 #define ZMK_STATUS_FLAG_USB_HID_READY    (1 << 3)
 #define ZMK_STATUS_FLAG_BLE_CONNECTED    (1 << 4)
 #define ZMK_STATUS_FLAG_BLE_BONDED       (1 << 5)
-// Bits 6-7 reserved for modifier keys in future implementation
+// Bits 6-7 reserved for future use
+
+/**
+ * @brief Modifier key flags bit definitions (for modifier_flags field)
+ */
+#define ZMK_MOD_FLAG_LCTL    (1 << 0)  // Left Control
+#define ZMK_MOD_FLAG_LSFT    (1 << 1)  // Left Shift
+#define ZMK_MOD_FLAG_LALT    (1 << 2)  // Left Alt
+#define ZMK_MOD_FLAG_LGUI    (1 << 3)  // Left GUI (Windows/Command)
+#define ZMK_MOD_FLAG_RCTL    (1 << 4)  // Right Control
+#define ZMK_MOD_FLAG_RSFT    (1 << 5)  // Right Shift
+#define ZMK_MOD_FLAG_RALT    (1 << 6)  // Right Alt
+#define ZMK_MOD_FLAG_RGUI    (1 << 7)  // Right GUI (Windows/Command)
 
 /**
  * @brief Device role definitions for split keyboard support

@@ -16,6 +16,7 @@
 #include <zmk/ble.h>
 #include <zmk/usb.h>
 #include <zmk/endpoints.h>
+#include <zmk/hid.h>
 #include <zmk/status_advertisement.h>
 
 // keymap API is available on Central or Standalone (non-Split) builds only
@@ -262,8 +263,31 @@ static void build_manufacturer_payload(void) {
     }
     memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
     
-    // Reserved bytes (3 bytes) for future expansion
-    memset(manufacturer_data.reserved, 0, 3);
+    // Modifier keys status
+    uint8_t modifier_flags = 0;
+    
+#if IS_ENABLED(CONFIG_ZMK_HID_KEYBOARD_REPORT_SIZE) && CONFIG_ZMK_HID_KEYBOARD_REPORT_SIZE > 0
+    // Get current keyboard report for modifier status
+    struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
+    if (report) {
+        uint8_t mods = report->body.modifiers;
+        
+        // Map HID modifiers to our advertisement flags
+        if (mods & 0x01) modifier_flags |= ZMK_MOD_FLAG_LCTL;  // MOD_LCTL
+        if (mods & 0x02) modifier_flags |= ZMK_MOD_FLAG_LSFT;  // MOD_LSFT
+        if (mods & 0x04) modifier_flags |= ZMK_MOD_FLAG_LALT;  // MOD_LALT
+        if (mods & 0x08) modifier_flags |= ZMK_MOD_FLAG_LGUI;  // MOD_LGUI
+        if (mods & 0x10) modifier_flags |= ZMK_MOD_FLAG_RCTL;  // MOD_RCTL
+        if (mods & 0x20) modifier_flags |= ZMK_MOD_FLAG_RSFT;  // MOD_RSFT
+        if (mods & 0x40) modifier_flags |= ZMK_MOD_FLAG_RALT;  // MOD_RALT
+        if (mods & 0x80) modifier_flags |= ZMK_MOD_FLAG_RGUI;  // MOD_RGUI
+    }
+#endif
+    
+    manufacturer_data.modifier_flags = modifier_flags;
+    
+    // Reserved bytes (2 bytes) for future expansion  
+    memset(manufacturer_data.reserved, 0, 2);
     
     const char *role_str = 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)

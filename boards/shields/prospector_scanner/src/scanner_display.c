@@ -13,6 +13,7 @@
 #include "scanner_battery_widget.h"
 #include "connection_status_widget.h"
 #include "layer_status_widget.h"
+#include "modifier_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -23,6 +24,7 @@ static lv_obj_t *device_name_label = NULL;
 static struct zmk_widget_scanner_battery battery_widget;
 static struct zmk_widget_connection_status connection_widget;
 static struct zmk_widget_layer_status layer_widget;
+static struct zmk_widget_modifier_status modifier_widget;
 
 // Forward declaration
 static void trigger_scanner_start(void);
@@ -53,6 +55,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_scanner_battery_update(&battery_widget, kbd);
                 zmk_widget_connection_status_update(&connection_widget, kbd);
                 zmk_widget_layer_status_update(&layer_widget, kbd);
+                zmk_widget_modifier_status_update(&modifier_widget, kbd);
                 
                 // Log keyboard status
                 if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && 
@@ -131,7 +134,11 @@ lv_obj_t *zmk_display_status_screen() {
     
     // Layer status widget in the center (horizontal layer display)
     zmk_widget_layer_status_init(&layer_widget, screen);
-    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -10);
+    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -20);
+    
+    // Modifier status widget between layer and battery
+    zmk_widget_modifier_status_init(&modifier_widget, screen);
+    lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 20);
     
     // Battery widget at the bottom
     zmk_widget_scanner_battery_init(&battery_widget, screen);
