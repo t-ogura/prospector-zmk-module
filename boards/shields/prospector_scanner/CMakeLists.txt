@@ -21,4 +21,5 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   
   # NerdFont for modifier symbols (from YADS project - MIT License)
   zephyr_library_sources(src/fonts/NerdFonts_Regular_20.c)
+  zephyr_library_sources(src/fonts/NerdFonts_Regular_40.c)
 endif()

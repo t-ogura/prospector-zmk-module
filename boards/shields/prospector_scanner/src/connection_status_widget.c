@@ -81,9 +81,9 @@ int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widge
     lv_obj_align(widget->transport_label, LV_ALIGN_TOP_RIGHT, -5, 5);
     lv_obj_set_style_text_font(widget->transport_label, &lv_font_montserrat_12, 0);
     
-    // BLE profile number label
+    // BLE profile number label (positioned closer to BLE text)
     widget->ble_profile_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, -10, -8);
+    lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, -2, -8); // Closer spacing
     lv_obj_set_style_text_font(widget->ble_profile_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->ble_profile_label, lv_color_white(), 0);
     

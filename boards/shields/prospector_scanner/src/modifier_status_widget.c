@@ -90,8 +90,8 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
     lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(widget->label, ""); // Initially empty
     
-    // Set font - use YADS NerdFont for proper symbol display
-    lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_20, 0);
+    // Set font - use larger 40px YADS NerdFont for better visibility
+    lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_40, 0);
     lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
     
     LOG_INF("YADS-style modifier status widget initialized");
