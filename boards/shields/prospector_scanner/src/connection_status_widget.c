@@ -72,7 +72,7 @@ int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widge
     
     // Create container widget sized for connection status display
     widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 80, 60); // Compact size for circular display
+    lv_obj_set_size(widget->obj, 90, 60); // Wider to accommodate BLE profile number
     lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);
     
@@ -83,7 +83,7 @@ int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widge
     
     // BLE profile number label (positioned very close to BLE text)
     widget->ble_profile_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, 8, -8); // Much closer - positive offset
+    lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, -15, -8); // Inside screen bounds
     lv_obj_set_style_text_font(widget->ble_profile_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->ble_profile_label, lv_color_white(), 0);
     
