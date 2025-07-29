@@ -1538,6 +1538,20 @@ prospector-zmk-module/
    - Priority-based data transmission (critical vs. nice-to-have)
    - Battery-aware feature scaling
 
+8. **Smart Activity-Based Advertisement Control**
+   - Ultra-low frequency (0.1Hz / 10s interval) during idle state
+   - Automatic advertisement pause after 2 minutes of inactivity
+   - Instant high-frequency mode (10Hz / 100ms) on key press
+   - Smooth transition between power states
+   - Significant battery life extension through intelligent broadcasting
+
+9. **Scanner Auto-Disconnect & Standby Mode**
+   - Monitor last received timestamp for each keyboard
+   - Auto-disconnect after 2 minutes without data reception
+   - Transition to standby display mode (power saving)
+   - Maintain quick reconnection capability
+   - Clear visual indication of standby vs active state
+
 7. **Enhanced Battery Status Visualization**
    - Color-coded battery level indicators for instant recognition
    - Battery bar and percentage with intuitive color scheme:
@@ -1635,6 +1649,25 @@ struct adv_power_config {
     bool sleep_mode_pause;              // Stop advertisements in sleep
     uint8_t priority_data_mask;         // Which data is critical
 };
+
+// Smart activity-based advertisement control
+struct activity_based_adv_config {
+    uint32_t active_interval_ms;        // 100ms (10Hz) during typing
+    uint32_t idle_interval_ms;          // 10000ms (0.1Hz) when idle
+    uint32_t idle_timeout_ms;           // 120000ms (2min) before idle mode
+    uint32_t stop_timeout_ms;           // 120000ms (2min) before stopping
+    bool instant_wake_on_keypress;      // Immediate high-freq on activity
+    uint8_t transition_smoothing;       // Gradual interval changes
+};
+
+// Scanner standby mode configuration  
+struct scanner_standby_config {
+    uint32_t disconnect_timeout_ms;     // 120000ms (2min) no data timeout
+    uint32_t reconnect_scan_interval;   // Fast scanning for reconnection
+    bool show_standby_animation;        // Visual feedback in standby
+    bool dim_display_in_standby;        // Power saving display mode
+    const char* standby_message;        // "Waiting for keyboards..."
+};
 ```
 
 #### **Implementation Priority**:
@@ -1645,6 +1678,8 @@ struct adv_power_config {
    - **Color-coded battery status visualization** 🎨
 
 2. **Medium Priority** 🔋:
+   - **Smart activity-based advertisement control** 🎯
+   - **Scanner auto-disconnect and standby mode** 🔌
    - Display auto-dimming and sleep mode
    - Last seen timestamp display
    - Battery bar visual indicators with smooth transitions
