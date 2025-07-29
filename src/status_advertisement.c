@@ -284,13 +284,7 @@ static void build_manufacturer_payload(void) {
         // Enhanced debug logging 
         LOG_INF("🔧 KEYBOARD: Mapped modifier flags=0x%02X (from HID: 0x%02X)", modifier_flags, mods);
         
-        // Force test modifier for debugging
-        static int debug_counter = 0;
-        debug_counter++;
-        if (debug_counter % 20 == 0) { // Every 20 updates (about 10 seconds)
-            LOG_INF("🔧 KEYBOARD: Forcing test modifier for debugging");
-            modifier_flags |= ZMK_MOD_FLAG_LCTL; // Force Control flag for testing
-        }
+        // Note: Test modifier removed as requested - real key detection is working
     } else {
         LOG_WRN("🔧 KEYBOARD: Failed to get HID keyboard report for modifier detection");
     }

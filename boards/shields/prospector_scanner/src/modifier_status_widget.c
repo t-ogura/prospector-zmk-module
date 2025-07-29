@@ -12,12 +12,12 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// YADS-style modifier symbols using NerdFont icons
+// Modifier symbols - using LVGL symbols (LV_SYMBOL_*)
 static const char *mod_symbols[4] = {
-    "󰘴",  // Control (U+F0634)
-    "󰘶",  // Shift (U+F0636)
-    "󰘵",  // Alt (U+F0635)
-    "󰘳"   // GUI/Win/Cmd (U+F0633)
+    LV_SYMBOL_SETTINGS,  // Control - gear icon
+    LV_SYMBOL_UP,        // Shift - up arrow  
+    LV_SYMBOL_LEFT,      // Alt - left arrow
+    LV_SYMBOL_HOME       // GUI/Win/Cmd - home icon
 };
 
 static void update_modifier_display(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd) {
@@ -69,16 +69,7 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     LOG_INF("🔧 MODIFIER: Final display - flags=0x%02X, active_count=%d, text='%s'", 
             mod_flags, active_count, text);
     
-    // Debug: Force a test display if no modifiers are detected (without k_sleep)
-    if (mod_flags == 0) {
-        static int test_counter = 0;
-        test_counter++;
-        if (test_counter % 20 == 0) { // Every 20 updates (about 10 seconds at 500ms)
-            LOG_INF("🔧 MODIFIER: No modifiers detected, showing test display");
-            lv_label_set_text(widget->label, "TEST");
-            // Note: Test display will be cleared on next update cycle
-        }
-    }
+    // Note: Test display removed as requested - modifier detection is working
 }
 
 int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, lv_obj_t *parent) {
