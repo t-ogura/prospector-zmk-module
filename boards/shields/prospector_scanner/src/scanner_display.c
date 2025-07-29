@@ -14,6 +14,7 @@
 #include "connection_status_widget.h"
 #include "layer_status_widget.h"
 #include "modifier_status_widget.h"
+#include "scanner_power_mgmt.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -29,11 +30,20 @@ static struct zmk_widget_modifier_status modifier_widget;
 // Forward declaration
 static void trigger_scanner_start(void);
 
+// Touch event handler to wake up display
+static void touch_event_cb(lv_event_t *e) {
+    // Any touch interaction wakes the display
+    scanner_power_mgmt_activity();
+}
+
 // Scanner event callback for display updates
 static void update_display_from_scanner(struct zmk_status_scanner_event_data *event_data) {
     if (!device_name_label) {
         return; // UI not ready yet
     }
+    
+    // Any scanner activity should wake the display
+    scanner_power_mgmt_activity();
     
     LOG_INF("Scanner event received: %d for keyboard %d", event_data->event, event_data->keyboard_index);
     
@@ -122,6 +132,9 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_t *screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
+    
+    // Add touch event handler to wake display
+    lv_obj_add_event_cb(screen, touch_event_cb, LV_EVENT_PRESSED, NULL);
     
     // Device name label at top (larger font for better readability)
     device_name_label = lv_label_create(screen);

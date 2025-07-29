@@ -33,16 +33,16 @@ static void update_layer_display(struct zmk_widget_layer_status *widget, struct 
     
     uint8_t active_layer = kbd->data.active_layer;
     
-    // Update each layer label (0-6) with unique pastel colors
+    // Update each layer label (0-6) with colors
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
         if (i == active_layer) {
             // Active layer: bright pastel color, fully opaque
             lv_obj_set_style_text_color(widget->layer_labels[i], get_layer_color(i), 0);
             lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_COVER, 0);
         } else {
-            // Inactive layers: same pastel color but very dim
-            lv_obj_set_style_text_color(widget->layer_labels[i], get_layer_color(i), 0);
-            lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_20, 0);
+            // Inactive layers: consistent gray color
+            lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(80, 80, 80), 0);
+            lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_50, 0);
         }
     }
     
@@ -86,9 +86,9 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
         int start_x = -85; // Start position to center the row
         lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), 5); // Below title
         
-        // Initialize with pastel colors (initially dimmed)
-        lv_obj_set_style_text_color(widget->layer_labels[i], get_layer_color(i), 0);
-        lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_20, 0);
+        // Initialize with gray color (initially dimmed)
+        lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(80, 80, 80), 0);
+        lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_50, 0);
     }
     
     // Layer 0 is active by default with full brightness
