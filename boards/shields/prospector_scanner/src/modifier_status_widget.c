@@ -69,15 +69,14 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     LOG_INF("🔧 MODIFIER: Final display - flags=0x%02X, active_count=%d, text='%s'", 
             mod_flags, active_count, text);
     
-    // Debug: Force a test display if no modifiers are detected
+    // Debug: Force a test display if no modifiers are detected (without k_sleep)
     if (mod_flags == 0) {
         static int test_counter = 0;
         test_counter++;
         if (test_counter % 20 == 0) { // Every 20 updates (about 10 seconds at 500ms)
             LOG_INF("🔧 MODIFIER: No modifiers detected, showing test display");
             lv_label_set_text(widget->label, "TEST");
-            k_sleep(K_MSEC(100));
-            lv_label_set_text(widget->label, "");
+            // Note: Test display will be cleared on next update cycle
         }
     }
 }
