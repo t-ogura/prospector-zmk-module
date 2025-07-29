@@ -82,8 +82,8 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
     lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(widget->label, ""); // Initially empty
     
-    // Set font - use smaller 32px NerdFont to reduce character overlap
-    lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_32, 0);
+    // Set font - use 40px NerdFont (only 20px and 40px sizes available)
+    lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_40, 0);
     lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
     
     // Add letter spacing to prevent NerdFont symbol overlap
