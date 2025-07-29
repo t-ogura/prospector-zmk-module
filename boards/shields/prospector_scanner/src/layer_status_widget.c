@@ -12,16 +12,19 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Stylish pastel colors for each layer (0-6)
-static const lv_color_t layer_colors[MAX_LAYER_DISPLAY] = {
-    {{.blue = 0x9B, .green = 0x9B, .red = 0xFF}},  // Layer 0: Soft Coral Pink
-    {{.blue = 0x3D, .green = 0xD9, .red = 0xFF}},  // Layer 1: Sunny Yellow  
-    {{.blue = 0x7F, .green = 0xCF, .red = 0x6B}},  // Layer 2: Mint Green
-    {{.blue = 0xFF, .green = 0x96, .red = 0x4D}},  // Layer 3: Sky Blue
-    {{.blue = 0xD9, .green = 0x9C, .red = 0xB1}},  // Layer 4: Lavender Purple
-    {{.blue = 0x9D, .green = 0x6B, .red = 0xFF}},  // Layer 5: Rose Pink
-    {{.blue = 0x43, .green = 0x9F, .red = 0xFF}}   // Layer 6: Peach Orange
-};
+// Stylish pastel colors for each layer (0-6) - using lv_color_make()
+static lv_color_t get_layer_color(int layer) {
+    switch (layer) {
+        case 0: return lv_color_make(0xFF, 0x9B, 0x9B);  // Layer 0: Soft Coral Pink
+        case 1: return lv_color_make(0xFF, 0xD9, 0x3D);  // Layer 1: Sunny Yellow  
+        case 2: return lv_color_make(0x6B, 0xCF, 0x7F);  // Layer 2: Mint Green
+        case 3: return lv_color_make(0x4D, 0x96, 0xFF);  // Layer 3: Sky Blue
+        case 4: return lv_color_make(0xB1, 0x9C, 0xD9);  // Layer 4: Lavender Purple
+        case 5: return lv_color_make(0xFF, 0x6B, 0x9D);  // Layer 5: Rose Pink
+        case 6: return lv_color_make(0xFF, 0x9F, 0x43);  // Layer 6: Peach Orange
+        default: return lv_color_white();
+    }
+}
 
 static void update_layer_display(struct zmk_widget_layer_status *widget, struct zmk_keyboard_status *kbd) {
     if (!widget || !kbd) {
@@ -34,17 +37,16 @@ static void update_layer_display(struct zmk_widget_layer_status *widget, struct 
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
         if (i == active_layer) {
             // Active layer: bright pastel color, fully opaque
-            lv_obj_set_style_text_color(widget->layer_labels[i], layer_colors[i], 0);
+            lv_obj_set_style_text_color(widget->layer_labels[i], get_layer_color(i), 0);
             lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_COVER, 0);
         } else {
             // Inactive layers: same pastel color but very dim
-            lv_obj_set_style_text_color(widget->layer_labels[i], layer_colors[i], 0);
+            lv_obj_set_style_text_color(widget->layer_labels[i], get_layer_color(i), 0);
             lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_20, 0);
         }
     }
     
-    LOG_DBG("Layer display updated: active layer %d with color 0x%06X", 
-            active_layer, layer_colors[active_layer].full);
+    LOG_DBG("Layer display updated: active layer %d", active_layer);
 }
 
 int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_t *parent) {
@@ -85,12 +87,12 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
         lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), 5); // Below title
         
         // Initialize with pastel colors (initially dimmed)
-        lv_obj_set_style_text_color(widget->layer_labels[i], layer_colors[i], 0);
+        lv_obj_set_style_text_color(widget->layer_labels[i], get_layer_color(i), 0);
         lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_20, 0);
     }
     
     // Layer 0 is active by default with full brightness
-    lv_obj_set_style_text_color(widget->layer_labels[0], layer_colors[0], 0);
+    lv_obj_set_style_text_color(widget->layer_labels[0], get_layer_color(0), 0);
     lv_obj_set_style_text_opa(widget->layer_labels[0], LV_OPA_COVER, 0);
     
     LOG_INF("Stylish layer status widget initialized with %d pastel-colored layers", MAX_LAYER_DISPLAY);
