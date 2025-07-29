@@ -23,7 +23,6 @@ static struct zmk_keyboard_status keyboards[ZMK_STATUS_SCANNER_MAX_KEYBOARDS];
 static zmk_status_scanner_callback_t event_callback = NULL;
 static bool scanning = false;
 static struct k_work_delayable timeout_work;
-static uint32_t current_scan_interval_ms = 500;  // Default 500ms
 
 // Timeout for considering a keyboard as lost (in milliseconds)
 #define KEYBOARD_TIMEOUT_MS 10000
@@ -502,26 +501,6 @@ int zmk_status_scanner_get_primary_keyboard(void) {
     }
     
     return primary;
-}
-
-// Set scan interval dynamically for power management
-int zmk_status_scanner_set_scan_interval(uint32_t interval_ms) {
-    if (interval_ms < 100 || interval_ms > 10000) {
-        LOG_ERR("Invalid scan interval: %u ms (valid range: 100-10000)", interval_ms);
-        return -EINVAL;
-    }
-    
-    current_scan_interval_ms = interval_ms;
-    LOG_INF("Scan interval updated to %u ms", interval_ms);
-    
-    // If currently scanning, restart with new interval
-    if (scanning) {
-        zmk_status_scanner_stop();
-        k_msleep(50);  // Brief delay
-        zmk_status_scanner_start();
-    }
-    
-    return 0;
 }
 
 // Initialize on system startup - use later priority to ensure BT is ready

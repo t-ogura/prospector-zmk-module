@@ -16,9 +16,7 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   zephyr_library_sources(src/connection_status_widget.c)  # YADS-style connection status widget
   zephyr_library_sources(src/layer_status_widget.c)  # YADS-style large layer display widget
   zephyr_library_sources(src/modifier_status_widget.c)  # Modifier key status widget (C S A G)
-  zephyr_library_sources(src/brightness_control.c)  # Re-enabled with PWM control
-  zephyr_library_sources(src/scanner_power_mgmt.c)  # Power management for battery life
-  zephyr_library_sources(src/display_brightness.c)  # Display brightness control
+  zephyr_library_sources(src/brightness_control.c)  # Auto-brightness with ambient light sensor
   # zephyr_library_sources(src/display_rotate_init.c)  # Merged into scanner_display.c
   
   # NerdFont for modifier symbols (from YADS project - MIT License)

@@ -104,14 +104,6 @@ int zmk_status_scanner_get_active_count(void);
  */
 int zmk_status_scanner_get_primary_keyboard(void);
 
-/**
- * @brief Set scan interval for power management
- * 
- * @param interval_ms Scan interval in milliseconds (100-10000)
- * @return 0 on success, negative error code on failure
- */
-int zmk_status_scanner_set_scan_interval(uint32_t interval_ms);
-
 #ifdef __cplusplus
 }
 #endif
