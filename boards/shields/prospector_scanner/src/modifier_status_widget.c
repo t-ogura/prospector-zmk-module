@@ -55,10 +55,11 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
         LOG_INF("🔧 MODIFIER: Adding GUI to display");
     }
     
-    // Build display text (space-separated like YADS)
+    // Build display text with proper spacing for NerdFont symbols
     for (int i = 0; i < active_count; i++) {
         if (i > 0) {
-            idx += snprintf(&text[idx], sizeof(text) - idx, " ");
+            // Use double space to prevent overlap with NerdFont symbols
+            idx += snprintf(&text[idx], sizeof(text) - idx, "  ");
         }
         idx += snprintf(&text[idx], sizeof(text) - idx, "%s", active_mods[i]);
     }
