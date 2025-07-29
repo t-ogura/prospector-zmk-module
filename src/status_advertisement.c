@@ -47,8 +47,8 @@ static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static bool default_adv_stopped = false;
 
-// Adaptive update intervals based on activity - faster for layer detection
-#define ACTIVE_UPDATE_INTERVAL_MS    500   // 2Hz when active (key presses)
+// Adaptive update intervals based on activity - faster for responsiveness
+#define ACTIVE_UPDATE_INTERVAL_MS    200   // 5Hz when active (key presses) - increased responsiveness
 #define IDLE_UPDATE_INTERVAL_MS     1000   // 1Hz when idle (faster for layer detection)
 #define ACTIVITY_TIMEOUT_MS        10000   // 10 seconds to consider idle
 
