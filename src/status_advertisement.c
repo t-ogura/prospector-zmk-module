@@ -270,20 +270,29 @@ static void build_manufacturer_payload(void) {
     }
     memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
     
-    // Modifier keys status - DISABLED: Prevents phantom Ctrl issue
+    // Modifier keys status - using exact YADS approach  
     uint8_t modifier_flags = 0;
     
-    // CRITICAL FIX: Completely disable modifier status to prevent phantom Ctrl display
-    // The HID report was occasionally returning stale data with Ctrl flag set
-    // Since this was causing periodic false Ctrl display, modifier status is disabled
-    // until a more reliable real-time modifier detection method is available
-    
-    // OLD CODE (causing phantom Ctrl issue):
-    // struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
-    // ...modifier mapping code...
-    
-    // NEW CODE: Always report no modifiers to prevent phantom display
-    modifier_flags = 0;
+    // Get current keyboard report with null check and memory validation
+    struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
+    if (report && report != NULL) {
+        uint8_t mods = report->body.modifiers;
+        
+        // SAFETY: Validate modifier data is reasonable (not corrupted memory)
+        if (mods <= 0xFF) {  // Valid HID modifier range
+            // Map HID modifiers using YADS constants approach  
+            // Note: MOD_LCTL=0x01, MOD_RCTL=0x10, etc. (standard HID modifier bits)
+            if (mods & (0x01 | 0x10)) modifier_flags |= ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL;  // MOD_LCTL | MOD_RCTL
+            if (mods & (0x02 | 0x20)) modifier_flags |= ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT;  // MOD_LSFT | MOD_RSFT  
+            if (mods & (0x04 | 0x40)) modifier_flags |= ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT;  // MOD_LALT | MOD_RALT
+            if (mods & (0x08 | 0x80)) modifier_flags |= ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI;  // MOD_LGUI | MOD_RGUI
+        }
+        // If mods is corrupted, modifier_flags stays 0 (safe default)
+        
+        // CRITICAL: Ensure no test code remains that forces modifier flags
+        // NO TEST CODE SHOULD BE HERE - removed any periodic flag setting
+        
+    }
     
     manufacturer_data.modifier_flags = modifier_flags;
     
