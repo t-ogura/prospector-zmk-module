@@ -34,36 +34,51 @@ This document provides a comprehensive guide to available fonts for the Prospect
 
 **Characteristics**: Clean, modern, excellent readability, professional appearance
 
-#### Standard Sizes
+#### ⚠️ **CRITICAL: ZMK Default Fonts Only**
+
+**ZMK enables ONLY the following fonts by default:**
 ```c
-// Small sizes (8-14px) - Good for labels and small text
-&lv_font_montserrat_8    // Tiny labels
-&lv_font_montserrat_10   // Very small text
-&lv_font_montserrat_12   // Small labels (currently used)
-&lv_font_montserrat_14   // Slightly larger labels
+&lv_font_montserrat_14   // ✅ DEFAULT - 14px only font available in ZMK
+```
 
-// Medium sizes (16-24px) - Good for main content
-&lv_font_montserrat_16   // Standard text
-&lv_font_montserrat_18   // Comfortable reading
-&lv_font_montserrat_20   // Prominent text (currently used)
-&lv_font_montserrat_22   // Large clear text
-&lv_font_montserrat_24   // Extra large text
+#### 🚫 **NOT Available in ZMK (Without Manual Configuration)**
+```c
+// These fonts exist in LVGL but are DISABLED in ZMK:
+&lv_font_montserrat_8    // ❌ Disabled by default
+&lv_font_montserrat_10   // ❌ Disabled by default  
+&lv_font_montserrat_12   // ❌ Disabled by default
+&lv_font_montserrat_16   // ❌ Disabled by default
+&lv_font_montserrat_18   // ❌ Disabled by default
+&lv_font_montserrat_20   // ❌ Disabled by default
+&lv_font_montserrat_22   // ❌ Disabled by default
+&lv_font_montserrat_24   // ❌ Disabled by default
+&lv_font_montserrat_26   // ❌ Disabled by default
+&lv_font_montserrat_28   // ❌ Disabled by default
+&lv_font_montserrat_30   // ❌ Disabled by default
+&lv_font_montserrat_32   // ❌ Disabled by default
+&lv_font_montserrat_34   // ❌ Disabled by default
+&lv_font_montserrat_36   // ❌ Disabled by default
+&lv_font_montserrat_38   // ❌ Disabled by default
+&lv_font_montserrat_40   // ❌ Disabled by default
+&lv_font_montserrat_42   // ❌ Disabled by default
+&lv_font_montserrat_44   // ❌ Disabled by default
+&lv_font_montserrat_46   // ❌ Disabled by default
+&lv_font_montserrat_48   // ❌ Disabled by default
+```
 
-// Large sizes (26-36px) - Good for headers
-&lv_font_montserrat_26   // Small headers
-&lv_font_montserrat_28   // Medium headers
-&lv_font_montserrat_30   // Large headers
-&lv_font_montserrat_32   // Extra large headers
-&lv_font_montserrat_34   // Huge headers
-&lv_font_montserrat_36   // Giant headers
+#### 🔧 **How to Enable Additional Fonts**
 
-// Extra large sizes (38-48px) - Good for single numbers/icons
-&lv_font_montserrat_38   // Display size
-&lv_font_montserrat_40   // Large display
-&lv_font_montserrat_42   // Extra large display
-&lv_font_montserrat_44   // Huge display
-&lv_font_montserrat_46   // Giant display
-&lv_font_montserrat_48   // Maximum size
+To use larger fonts, add these to your scanner configuration:
+```conf
+# In config/prospector_scanner.conf
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_16=y  
+CONFIG_LV_FONT_MONTSERRAT_18=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_22=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_32=y
 ```
 
 #### Style Variants (Must be enabled separately)
