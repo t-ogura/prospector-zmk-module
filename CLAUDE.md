@@ -1665,6 +1665,13 @@ struct adv_power_config {
     - Adjust horizontal positioning and container width
     - Ensure full device name visibility without overlap with connection status
 
+11. **Layer Display Color Consistency**
+    - Unify inactive layer numbers with consistent gray color
+    - Current: each inactive layer retains its pastel color (dimmed)
+    - Proposed: all inactive layers use same neutral gray (#808080) for visual consistency
+    - Maintain pastel colors only for active layer selection
+    - Improve visual hierarchy and reduce color distraction when not selected
+
 ---
 
 ## 🎉 MAJOR BREAKTHROUGH: Dongle Mode Success (2025-01-24)
