@@ -9,15 +9,16 @@
 #include <zmk/status_advertisement.h>
 #include <zmk/status_scanner.h>
 #include "modifier_status_widget.h"
+#include "fonts.h"  // NerdFont declarations
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Modifier symbols - using LVGL symbols (LV_SYMBOL_*)
+// Modifier symbols - using YADS NerdFont icons (MIT License)
 static const char *mod_symbols[4] = {
-    LV_SYMBOL_SETTINGS,  // Control - gear icon
-    LV_SYMBOL_UP,        // Shift - up arrow  
-    LV_SYMBOL_LEFT,      // Alt - left arrow
-    LV_SYMBOL_HOME       // GUI/Win/Cmd - home icon
+    "󰘴",  // Control (U+F0634) - exactly like YADS
+    "󰘶",  // Shift (U+F0636)
+    "󰘵",  // Alt (U+F0635)  
+    "󰘳"   // GUI/Win/Cmd (U+F0633)
 };
 
 static void update_modifier_display(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd) {
@@ -89,8 +90,8 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
     lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(widget->label, ""); // Initially empty
     
-    // Set font - use default font for NerdFont symbols (YADS uses custom NerdFont but we'll use default for now)
-    lv_obj_set_style_text_font(widget->label, &lv_font_montserrat_20, 0);
+    // Set font - use YADS NerdFont for proper symbol display
+    lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_20, 0);
     lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
     
     LOG_INF("YADS-style modifier status widget initialized");
