@@ -64,7 +64,7 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     // Create stylish "Layer" title label (larger font)
     widget->layer_title = lv_label_create(widget->obj);
     lv_label_set_text(widget->layer_title, "Layer");
-    lv_obj_set_style_text_font(widget->layer_title, &lv_font_montserrat_16, 0); // Larger title
+    lv_obj_set_style_text_font(widget->layer_title, &lv_font_montserrat_14, 0); // Slightly larger title
     lv_obj_set_style_text_color(widget->layer_title, lv_color_make(160, 160, 160), 0); // Soft gray
     lv_obj_set_style_text_opa(widget->layer_title, LV_OPA_70, 0);
     lv_obj_align(widget->layer_title, LV_ALIGN_TOP_MID, 0, -5); // Above the numbers
@@ -73,8 +73,8 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
         widget->layer_labels[i] = lv_label_create(widget->obj);
         
-        // Set larger font for better visibility
-        lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_24, 0);
+        // Set larger font for better visibility  
+        lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_22, 0);
         
         // Set layer number text
         char layer_text[2];
