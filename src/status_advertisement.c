@@ -263,16 +263,18 @@ static void build_manufacturer_payload(void) {
     }
     memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
     
-    // Modifier keys status
+    // Modifier keys status - using YADS approach
     uint8_t modifier_flags = 0;
     
-#if IS_ENABLED(CONFIG_ZMK_HID_KEYBOARD_REPORT_SIZE) && CONFIG_ZMK_HID_KEYBOARD_REPORT_SIZE > 0
-    // Get current keyboard report for modifier status
+    // Get current keyboard report for modifier status (similar to YADS mod_status.c)
     struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
     if (report) {
         uint8_t mods = report->body.modifiers;
         
-        // Map HID modifiers to our advertisement flags
+        // Debug: Always log HID modifiers, even if zero
+        LOG_INF("🔧 KEYBOARD: HID modifiers raw=0x%02X", mods);
+        
+        // Map HID modifiers to our advertisement flags (matching YADS constants)
         if (mods & 0x01) modifier_flags |= ZMK_MOD_FLAG_LCTL;  // MOD_LCTL
         if (mods & 0x02) modifier_flags |= ZMK_MOD_FLAG_LSFT;  // MOD_LSFT
         if (mods & 0x04) modifier_flags |= ZMK_MOD_FLAG_LALT;  // MOD_LALT
@@ -281,8 +283,20 @@ static void build_manufacturer_payload(void) {
         if (mods & 0x20) modifier_flags |= ZMK_MOD_FLAG_RSFT;  // MOD_RSFT
         if (mods & 0x40) modifier_flags |= ZMK_MOD_FLAG_RALT;  // MOD_RALT
         if (mods & 0x80) modifier_flags |= ZMK_MOD_FLAG_RGUI;  // MOD_RGUI
+        
+        // Enhanced debug logging 
+        LOG_INF("🔧 KEYBOARD: Mapped modifier flags=0x%02X (from HID: 0x%02X)", modifier_flags, mods);
+        
+        // Force test modifier for debugging
+        static int debug_counter = 0;
+        debug_counter++;
+        if (debug_counter % 50 == 0) { // Every 50 updates (about 25 seconds)
+            LOG_INF("🔧 KEYBOARD: Forcing test modifier for debugging");
+            modifier_flags |= ZMK_MOD_FLAG_LCTL; // Force Control flag for testing
+        }
+    } else {
+        LOG_WRN("🔧 KEYBOARD: Failed to get HID keyboard report for modifier detection");
     }
-#endif
     
     manufacturer_data.modifier_flags = modifier_flags;
     

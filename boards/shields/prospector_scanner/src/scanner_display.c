@@ -57,15 +57,17 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_layer_status_update(&layer_widget, kbd);
                 zmk_widget_modifier_status_update(&modifier_widget, kbd);
                 
-                // Log keyboard status
+                // Enhanced debug logging including modifier flags
+                LOG_INF("🔧 SCANNER: Raw keyboard data - modifier_flags=0x%02X", kbd->data.modifier_flags);
+                
                 if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && 
                     kbd->data.peripheral_battery[0] > 0) {
-                    LOG_INF("Split keyboard: %s, Central %d%%, Left %d%%, Layer: %d", 
+                    LOG_INF("Split keyboard: %s, Central %d%%, Left %d%%, Layer: %d, Mods: 0x%02X", 
                             kbd->ble_name, kbd->data.battery_level, 
-                            kbd->data.peripheral_battery[0], kbd->data.active_layer);
+                            kbd->data.peripheral_battery[0], kbd->data.active_layer, kbd->data.modifier_flags);
                 } else {
-                    LOG_INF("Keyboard: %s, Battery %d%%, Layer: %d", 
-                            kbd->ble_name, kbd->data.battery_level, kbd->data.active_layer);
+                    LOG_INF("Keyboard: %s, Battery %d%%, Layer: %d, Mods: 0x%02X", 
+                            kbd->ble_name, kbd->data.battery_level, kbd->data.active_layer, kbd->data.modifier_flags);
                 }
                 break; // Only handle the first active keyboard for now
             }

@@ -22,6 +22,7 @@ static const char *mod_symbols[4] = {
 
 static void update_modifier_display(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd) {
     if (!widget || !kbd) {
+        LOG_WRN("MODIFIER: Widget or keyboard data is NULL");
         return;
     }
     
@@ -29,21 +30,28 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     char text[64] = "";
     int idx = 0;
     
+    // Debug: Always log modifier flags, even if zero
+    LOG_INF("🔧 MODIFIER DEBUG: Raw flags=0x%02X", mod_flags);
+    
     // Collect active modifiers (YADS style - only show active ones)
     const char *active_mods[4];
     int active_count = 0;
     
     if (mod_flags & (ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL)) {
         active_mods[active_count++] = mod_symbols[0]; // Control
+        LOG_INF("🔧 MODIFIER: Adding Control to display");
     }
     if (mod_flags & (ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT)) {
         active_mods[active_count++] = mod_symbols[1]; // Shift
+        LOG_INF("🔧 MODIFIER: Adding Shift to display");
     }
     if (mod_flags & (ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT)) {
         active_mods[active_count++] = mod_symbols[2]; // Alt
+        LOG_INF("🔧 MODIFIER: Adding Alt to display");
     }
     if (mod_flags & (ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI)) {
         active_mods[active_count++] = mod_symbols[3]; // GUI
+        LOG_INF("🔧 MODIFIER: Adding GUI to display");
     }
     
     // Build display text (space-separated like YADS)
@@ -57,7 +65,21 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     // Update single label with all active modifiers
     lv_label_set_text(widget->label, idx ? text : "");
     
-    LOG_DBG("Modifier status updated: flags=0x%02X, text='%s'", mod_flags, text);
+    // Enhanced debug logging
+    LOG_INF("🔧 MODIFIER: Final display - flags=0x%02X, active_count=%d, text='%s'", 
+            mod_flags, active_count, text);
+    
+    // Debug: Force a test display if no modifiers are detected
+    if (mod_flags == 0) {
+        static int test_counter = 0;
+        test_counter++;
+        if (test_counter % 20 == 0) { // Every 20 updates (about 10 seconds at 500ms)
+            LOG_INF("🔧 MODIFIER: No modifiers detected, showing test display");
+            lv_label_set_text(widget->label, "TEST");
+            k_sleep(K_MSEC(100));
+            lv_label_set_text(widget->label, "");
+        }
+    }
 }
 
 int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, lv_obj_t *parent) {
