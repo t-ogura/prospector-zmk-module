@@ -44,6 +44,41 @@ config ZMK_STATUS_ADV_KEYBOARD_NAME
       Name to identify this keyboard in status advertisements.
       Limited to 8 characters including null terminator.
 
+config ZMK_STATUS_ADV_ACTIVITY_BASED
+    bool "Enable activity-based advertisement intervals"
+    default y
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Enable dynamic advertisement intervals based on keyboard activity.
+      High frequency during key presses, low frequency during idle periods.
+
+config ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS
+    int "Active advertisement interval in milliseconds"
+    range 100 1000
+    default 200
+    depends on ZMK_STATUS_ADV_ACTIVITY_BASED
+    help
+      Advertisement interval when keyboard is active (keys being pressed).
+      200ms = 5Hz for responsive status updates.
+
+config ZMK_STATUS_ADV_IDLE_INTERVAL_MS
+    int "Idle advertisement interval in milliseconds" 
+    range 500 5000
+    default 1000
+    depends on ZMK_STATUS_ADV_ACTIVITY_BASED
+    help
+      Advertisement interval when keyboard is idle.
+      1000ms = 1Hz for battery conservation.
+
+config ZMK_STATUS_ADV_ACTIVITY_TIMEOUT_MS
+    int "Activity timeout in milliseconds"
+    range 1000 30000
+    default 2000
+    depends on ZMK_STATUS_ADV_ACTIVITY_BASED
+    help
+      Time to wait before switching from active to idle mode.
+      2000ms = 2 seconds for responsive but power-efficient transitions.
+
 config PROSPECTOR_MODE_SCANNER
     bool "Enable Prospector Scanner Mode"
     default n

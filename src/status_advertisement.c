@@ -47,10 +47,17 @@ static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static bool default_adv_stopped = false;
 
-// Adaptive update intervals based on activity - faster for responsiveness
-#define ACTIVE_UPDATE_INTERVAL_MS    200   // 5Hz when active (key presses) - increased responsiveness
-#define IDLE_UPDATE_INTERVAL_MS     1000   // 1Hz when idle (faster for layer detection)
-#define ACTIVITY_TIMEOUT_MS        10000   // 10 seconds to consider idle
+// Adaptive update intervals based on activity - using Kconfig values for flexibility
+#if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
+#define ACTIVE_UPDATE_INTERVAL_MS   CONFIG_ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS    // Configurable active interval
+#define IDLE_UPDATE_INTERVAL_MS     CONFIG_ZMK_STATUS_ADV_IDLE_INTERVAL_MS      // Configurable idle interval  
+#define ACTIVITY_TIMEOUT_MS         CONFIG_ZMK_STATUS_ADV_ACTIVITY_TIMEOUT_MS   // Configurable timeout
+#else
+// Fallback to legacy fixed interval if activity-based is disabled
+#define ACTIVE_UPDATE_INTERVAL_MS   CONFIG_ZMK_STATUS_ADV_INTERVAL_MS
+#define IDLE_UPDATE_INTERVAL_MS     CONFIG_ZMK_STATUS_ADV_INTERVAL_MS
+#define ACTIVITY_TIMEOUT_MS         10000   // 10 seconds default
+#endif
 
 static uint32_t last_activity_time = 0;
 static bool is_active = false;
