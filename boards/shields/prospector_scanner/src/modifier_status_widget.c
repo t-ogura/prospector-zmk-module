@@ -50,11 +50,11 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
         active_mods[active_count++] = mod_symbols[3]; // GUI
     }
     
-    // Build display text with proper spacing for NerdFont symbols
+    // Build display text with extra spacing to prevent NerdFont overlap
     for (int i = 0; i < active_count; i++) {
         if (i > 0) {
-            // Use double space to prevent overlap with NerdFont symbols
-            idx += snprintf(&text[idx], sizeof(text) - idx, "  ");
+            // Use quad space to completely separate NerdFont symbols and prevent vertical lines
+            idx += snprintf(&text[idx], sizeof(text) - idx, "    ");
         }
         idx += snprintf(&text[idx], sizeof(text) - idx, "%s", active_mods[i]);
     }
@@ -82,9 +82,12 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
     lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(widget->label, ""); // Initially empty
     
-    // Set font - use larger 40px YADS NerdFont for better visibility
-    lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_40, 0);
+    // Set font - use smaller 32px NerdFont to reduce character overlap
+    lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_32, 0);
     lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
+    
+    // Add letter spacing to prevent NerdFont symbol overlap
+    lv_obj_set_style_text_letter_space(widget->label, 5, 0);  // 5px between characters
     
     LOG_INF("YADS-style modifier status widget initialized");
     return 0;
