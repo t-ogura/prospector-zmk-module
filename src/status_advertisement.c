@@ -263,10 +263,10 @@ static void build_manufacturer_payload(void) {
     }
     memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
     
-    // Modifier keys status - using YADS approach
+    // Modifier keys status - using exact YADS approach
     uint8_t modifier_flags = 0;
     
-    // Get current keyboard report for modifier status (similar to YADS mod_status.c)
+    // Get current keyboard report for modifier status (exactly like YADS mod_status.c)
     struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
     if (report) {
         uint8_t mods = report->body.modifiers;
@@ -274,15 +274,12 @@ static void build_manufacturer_payload(void) {
         // Debug: Always log HID modifiers, even if zero
         LOG_INF("🔧 KEYBOARD: HID modifiers raw=0x%02X", mods);
         
-        // Map HID modifiers to our advertisement flags (matching YADS constants)
-        if (mods & 0x01) modifier_flags |= ZMK_MOD_FLAG_LCTL;  // MOD_LCTL
-        if (mods & 0x02) modifier_flags |= ZMK_MOD_FLAG_LSFT;  // MOD_LSFT
-        if (mods & 0x04) modifier_flags |= ZMK_MOD_FLAG_LALT;  // MOD_LALT
-        if (mods & 0x08) modifier_flags |= ZMK_MOD_FLAG_LGUI;  // MOD_LGUI
-        if (mods & 0x10) modifier_flags |= ZMK_MOD_FLAG_RCTL;  // MOD_RCTL
-        if (mods & 0x20) modifier_flags |= ZMK_MOD_FLAG_RSFT;  // MOD_RSFT
-        if (mods & 0x40) modifier_flags |= ZMK_MOD_FLAG_RALT;  // MOD_RALT
-        if (mods & 0x80) modifier_flags |= ZMK_MOD_FLAG_RGUI;  // MOD_RGUI
+        // Map HID modifiers using YADS constants approach
+        // Note: MOD_LCTL=0x01, MOD_RCTL=0x10, etc. (standard HID modifier bits)
+        if (mods & (0x01 | 0x10)) modifier_flags |= ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL;  // MOD_LCTL | MOD_RCTL
+        if (mods & (0x02 | 0x20)) modifier_flags |= ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT;  // MOD_LSFT | MOD_RSFT  
+        if (mods & (0x04 | 0x40)) modifier_flags |= ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT;  // MOD_LALT | MOD_RALT
+        if (mods & (0x08 | 0x80)) modifier_flags |= ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI;  // MOD_LGUI | MOD_RGUI
         
         // Enhanced debug logging 
         LOG_INF("🔧 KEYBOARD: Mapped modifier flags=0x%02X (from HID: 0x%02X)", modifier_flags, mods);
@@ -290,7 +287,7 @@ static void build_manufacturer_payload(void) {
         // Force test modifier for debugging
         static int debug_counter = 0;
         debug_counter++;
-        if (debug_counter % 50 == 0) { // Every 50 updates (about 25 seconds)
+        if (debug_counter % 20 == 0) { // Every 20 updates (about 10 seconds)
             LOG_INF("🔧 KEYBOARD: Forcing test modifier for debugging");
             modifier_flags |= ZMK_MOD_FLAG_LCTL; // Force Control flag for testing
         }

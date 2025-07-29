@@ -12,12 +12,12 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// YADS-style modifier symbols (fallback to simple characters if NerdFont unavailable)
+// YADS-style modifier symbols using NerdFont icons
 static const char *mod_symbols[4] = {
-    "Ctrl",  // Control - fallback for missing NerdFont 
-    "Shift", // Shift
-    "Alt",   // Alt
-    "Cmd"    // GUI/Win/Cmd
+    "󰘴",  // Control (U+F0634)
+    "󰘶",  // Shift (U+F0636)
+    "󰘵",  // Alt (U+F0635)
+    "󰘳"   // GUI/Win/Cmd (U+F0633)
 };
 
 static void update_modifier_display(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd) {
@@ -99,7 +99,7 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
     lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(widget->label, ""); // Initially empty
     
-    // Set font - use larger font like YADS
+    // Set font - use default font for NerdFont symbols (YADS uses custom NerdFont but we'll use default for now)
     lv_obj_set_style_text_font(widget->label, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
     
