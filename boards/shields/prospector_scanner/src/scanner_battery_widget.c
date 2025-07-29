@@ -29,17 +29,31 @@ static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool conne
         lv_bar_set_value(bar, level, LV_ANIM_OFF);
         lv_label_set_text_fmt(num, "%d", level);
         
-        // Set colors based on battery level
-        if (level < 20) {
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0xD3900F), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xE8AC11), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0x6E4E07), LV_PART_MAIN);
-            lv_obj_set_style_text_color(num, lv_color_hex(0xFFB802), 0);
+        // Color-coded battery level visualization (requested feature)
+        if (level >= 80) {
+            // 80%+ Green
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x00CC66), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0x00FF66), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x003311), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0x00FF66), 0);
+        } else if (level >= 60) {
+            // 60-79% Light Green
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x66CC00), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0x99FF33), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x223300), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0x99FF33), 0);
+        } else if (level >= 40) {
+            // 40-59% Yellow
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0xFFCC00), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFFDD33), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x332200), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0xFFDD33), 0);
         } else {
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0x202020), LV_PART_MAIN);
-            lv_obj_set_style_text_color(num, lv_color_hex(0xFFFFFF), 0);
+            // <40% Red
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0xFF3333), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFF6666), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x330000), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0xFF6666), 0);
         }
     } else {
         // Show disconnected state (no animation)
