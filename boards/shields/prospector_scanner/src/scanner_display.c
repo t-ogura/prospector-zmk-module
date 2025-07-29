@@ -123,24 +123,24 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     
-    // Device name label at top (larger font for better readability)
+    // Device name label at top (larger font for better readability) - moved down 10px
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0); // Retro pixel font style
-    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 15);
+    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25); // Was 15, now 25
     lv_label_set_text(device_name_label, "Initializing...");
     
-    // Connection status widget in top right
+    // Connection status widget in top right - moved down 30px
     zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 15);
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45); // Was 15, now 45
     
-    // Layer status widget in the center (horizontal layer display)
+    // Layer status widget in the center (horizontal layer display) - moved down 10px
     zmk_widget_layer_status_init(&layer_widget, screen);
-    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -20);
+    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -10); // Was -20, now -10
     
-    // Modifier status widget between layer and battery
+    // Modifier status widget between layer and battery - moved down 10px
     zmk_widget_modifier_status_init(&modifier_widget, screen);
-    lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 20);
+    lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30); // Was 20, now 30
     
     // Battery widget at the bottom
     zmk_widget_scanner_battery_init(&battery_widget, screen);
