@@ -273,25 +273,36 @@ static void build_manufacturer_payload(void) {
     // Modifier keys status - using exact YADS approach
     uint8_t modifier_flags = 0;
     
-    // Get current keyboard report for modifier status (exactly like YADS mod_status.c)
+    // TROUBLESHOOTING: Get current keyboard report for modifier status
     struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
     if (report) {
         uint8_t mods = report->body.modifiers;
         
-        // Debug: Always log HID modifiers, even if zero
-        LOG_INF("🔧 KEYBOARD: HID modifiers raw=0x%02X", mods);
+        // ENHANCED DEBUG: Only log when modifiers are non-zero to identify phantom Ctrl
+        if (mods != 0) {
+            LOG_ERR("🚨 PHANTOM MODIFIER DETECTED: HID raw=0x%02X at uptime=%d", mods, k_uptime_get_32());
+            LOG_ERR("🚨 Full HID report: usage_page=0x%02X, report_id=0x%02X", 
+                    report->body.usage_page, report->body.report_id);
+            
+            // Log all 6 key codes to see if there's phantom key activity
+            for (int i = 0; i < 6; i++) {
+                if (report->body.keys[i] != 0) {
+                    LOG_ERR("🚨 Active key[%d]=0x%02X", i, report->body.keys[i]);
+                }
+            }
+        }
         
-        // Map HID modifiers using YADS constants approach
+        // Map HID modifiers using YADS constants approach  
         // Note: MOD_LCTL=0x01, MOD_RCTL=0x10, etc. (standard HID modifier bits)
         if (mods & (0x01 | 0x10)) modifier_flags |= ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL;  // MOD_LCTL | MOD_RCTL
         if (mods & (0x02 | 0x20)) modifier_flags |= ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT;  // MOD_LSFT | MOD_RSFT  
         if (mods & (0x04 | 0x40)) modifier_flags |= ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT;  // MOD_LALT | MOD_RALT
         if (mods & (0x08 | 0x80)) modifier_flags |= ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI;  // MOD_LGUI | MOD_RGUI
         
-        // Enhanced debug logging 
-        LOG_INF("🔧 KEYBOARD: Mapped modifier flags=0x%02X (from HID: 0x%02X)", modifier_flags, mods);
-        
-        // Note: Test modifier removed as requested - real key detection is working
+        // Only log final result when there are actual modifiers
+        if (modifier_flags != 0) {
+            LOG_ERR("🚨 FINAL: modifier_flags=0x%02X -> will show Ctrl symbol", modifier_flags);
+        }
     } else {
         LOG_WRN("🔧 KEYBOARD: Failed to get HID keyboard report for modifier detection");
     }

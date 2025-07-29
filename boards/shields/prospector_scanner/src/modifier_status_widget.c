@@ -31,8 +31,11 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     char text[64] = "";
     int idx = 0;
     
-    // Debug: Always log modifier flags, even if zero
-    LOG_INF("🔧 MODIFIER DEBUG: Raw flags=0x%02X", mod_flags);
+    // TROUBLESHOOTING: Only log when modifiers are detected to find phantom Ctrl
+    if (mod_flags != 0) {
+        LOG_ERR("🚨 SCANNER: Received non-zero modifier flags=0x%02X from keyboard", mod_flags);
+        LOG_ERR("🚨 SCANNER: Will display Ctrl symbol - this is the phantom issue!");
+    }
     
     // Collect active modifiers (YADS style - only show active ones)
     const char *active_mods[4];
@@ -40,7 +43,8 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     
     if (mod_flags & (ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL)) {
         active_mods[active_count++] = mod_symbols[0]; // Control
-        LOG_INF("🔧 MODIFIER: Adding Control to display");
+        LOG_ERR("🚨 SCANNER: CTRL DETECTED - flags=0x%02X, LCTL=0x%02X, RCTL=0x%02X", 
+                mod_flags, ZMK_MOD_FLAG_LCTL, ZMK_MOD_FLAG_RCTL);
     }
     if (mod_flags & (ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT)) {
         active_mods[active_count++] = mod_symbols[1]; // Shift
