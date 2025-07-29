@@ -123,10 +123,10 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     
-    // Device name label at top (white dot-style font, larger size)
+    // Device name label at top (white dot-style font)
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0); // Larger dot-style font
+    lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_8, 0); // Dot-style font (8px available)
     lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 15);
     lv_label_set_text(device_name_label, "Initializing...");
     
