@@ -7,6 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
 #include <string.h>
@@ -98,6 +99,30 @@ static int position_state_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(prospector_position_listener, position_state_listener);
 ZMK_SUBSCRIPTION(prospector_position_listener, zmk_position_state_changed);
 
+// Callback for bt_conn_foreach to find active profile
+static void conn_cb(struct bt_conn *conn, void *user_data) {
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) == 0 &&
+        info.state == BT_CONN_CONNECTED) {
+        // Use the ID of the last found connected profile
+        *(uint8_t*)user_data = info.id;
+        LOG_INF("📡 Found active BLE connection: profile %d", info.id);
+    }
+}
+
+// Fetch active BLE profile using Zephyr native APIs
+static uint8_t fetch_active_profile_id(void) {
+    uint8_t profile = 0xFF;
+    
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    // Enumerate connected LE connections to find active profile
+    bt_conn_foreach(BT_CONN_TYPE_LE, conn_cb, &profile);
+#endif
+    
+    // Return 0 if no profile found, otherwise return the profile ID
+    return (profile == 0xFF ? 0 : profile);
+}
+
 // Helper function to determine current update interval
 static uint32_t get_current_update_interval(void) {
     uint32_t now = k_uptime_get_32();
@@ -108,19 +133,18 @@ static uint32_t get_current_update_interval(void) {
         LOG_INF("💤 Switching to idle mode - reducing update frequency");
     }
     
-    // Check connection states
+    // Check connection states using reliable APIs
     bool ble_connected = false;
     bool usb_connected = false;
     
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    // Check if we have any active BLE connections (with fallback)
-    #ifdef CONFIG_BT_MAX_PAIRED
-        ble_connected = zmk_ble_active_profile_is_connected();
-    #endif
+    // Check if we have any active BLE connections by checking profile
+    uint8_t active_profile = fetch_active_profile_id();
+    ble_connected = (active_profile != 0);
 #endif
 
 #if IS_ENABLED(CONFIG_ZMK_USB)
-    // Check if USB is connected and HID ready
+    // Check if USB is connected and HID ready (reliable API)
     usb_connected = zmk_usb_is_hid_ready();
 #endif
     
@@ -234,18 +258,9 @@ static void build_manufacturer_payload(void) {
     
     manufacturer_data.active_layer = layer;
     
-    // Profile and connection info using ZMK APIs  
-    // Get actual active BLE profile index (0-4)
-#if IS_ENABLED(CONFIG_ZMK_BLE)
-    // Try to get profile index, fallback to 0 if function unavailable
-    #ifdef CONFIG_BT_MAX_PAIRED
-        manufacturer_data.profile_slot = zmk_ble_active_profile_index();
-    #else
-        manufacturer_data.profile_slot = 0; // Fallback when profile management unavailable
-    #endif
-#else
-    manufacturer_data.profile_slot = 0; // Fallback when BLE not available
-#endif
+    // Profile and connection info using reliable Zephyr APIs  
+    // Get actual active BLE profile index (0-4) using connection enumeration
+    manufacturer_data.profile_slot = fetch_active_profile_id();
     LOG_INF("📡 Profile info: active_profile=%d", manufacturer_data.profile_slot);
     
     // Connection count approximation - count active BLE connections + USB
