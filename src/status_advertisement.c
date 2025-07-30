@@ -285,22 +285,14 @@ static void build_manufacturer_payload(void) {
     }
 #endif
     
-    // BLE status flags - use placeholder when BLE APIs unavailable
+    // BLE status flags - use Zephyr native APIs only
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    #ifdef CONFIG_BT_MAX_PAIRED
-        if (zmk_ble_active_profile_is_connected()) {
-            flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
-        }
-        // Check if profile is bonded (paired)
-        if (!zmk_ble_active_profile_is_open()) {
-            flags |= ZMK_STATUS_FLAG_BLE_BONDED;
-        }
-    #else
-        // Fallback: assume BLE available for advertising
-        flags |= ZMK_STATUS_FLAG_BLE_BONDED;
-    #endif
-#else
-    // No BLE support
+    // Check if any BLE connections exist using our profile detection
+    uint8_t active_profile = fetch_active_profile_id();
+    if (active_profile != 0) {
+        flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
+        flags |= ZMK_STATUS_FLAG_BLE_BONDED; // Assume bonded if connected
+    }
 #endif
     
     manufacturer_data.status_flags = flags;
