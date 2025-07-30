@@ -50,12 +50,8 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
         active_mods[active_count++] = mod_symbols[3]; // GUI
     }
     
-    // Build display text exactly like YADS - single space between symbols
+    // Build display text without spaces - use letter spacing instead
     for (int i = 0; i < active_count; i++) {
-        if (i > 0) {
-            // YADS uses single space between modifier symbols
-            idx += snprintf(&text[idx], sizeof(text) - idx, " ");
-        }
         idx += snprintf(&text[idx], sizeof(text) - idx, "%s", active_mods[i]);
     }
     
@@ -86,8 +82,9 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
     lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_40, 0);
     lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
     
-    // No letter spacing - YADS doesn't use it
-    // lv_obj_set_style_text_letter_space(widget->label, 5, 0);  // Removed - causes artifacts
+    // Set letter spacing to separate modifier symbols without using space character
+    // This avoids font fallback issues when space glyph is missing
+    lv_obj_set_style_text_letter_space(widget->label, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
     
     LOG_INF("YADS-style modifier status widget initialized");
     return 0;
