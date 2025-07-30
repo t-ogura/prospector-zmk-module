@@ -112,7 +112,7 @@ static uint32_t get_current_update_interval(void) {
     bool ble_connected = false;
     bool usb_connected = false;
     
-#if IS_ENABLED(CONFIG_ZMK_BLE)
+#if IS_ENABLED(CONFIG_ZMK_BLE) && defined(CONFIG_ZMK_BLE_PROFILE_COUNT)
     // Check if we have any active BLE connections
     ble_connected = zmk_ble_active_profile_is_connected();
 #endif
@@ -234,10 +234,10 @@ static void build_manufacturer_payload(void) {
     
     // Profile and connection info using ZMK APIs  
     // Get actual active BLE profile index (0-4)
-#if IS_ENABLED(CONFIG_ZMK_BLE)
+#if IS_ENABLED(CONFIG_ZMK_BLE) && defined(CONFIG_ZMK_BLE_PROFILE_COUNT)
     manufacturer_data.profile_slot = zmk_ble_active_profile_index();
 #else
-    manufacturer_data.profile_slot = 0; // Fallback when BLE not available
+    manufacturer_data.profile_slot = 0; // Fallback when BLE APIs not available
 #endif
     LOG_INF("📡 Profile info: active_profile=%d", manufacturer_data.profile_slot);
     
@@ -263,8 +263,8 @@ static void build_manufacturer_payload(void) {
     }
 #endif
     
-    // BLE status flags
-#if IS_ENABLED(CONFIG_ZMK_BLE)
+    // BLE status flags - use placeholder when BLE APIs unavailable
+#if IS_ENABLED(CONFIG_ZMK_BLE) && defined(CONFIG_ZMK_BLE_PROFILE_COUNT)
     if (zmk_ble_active_profile_is_connected()) {
         flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
     }
@@ -272,6 +272,9 @@ static void build_manufacturer_payload(void) {
     if (!zmk_ble_active_profile_is_open()) {
         flags |= ZMK_STATUS_FLAG_BLE_BONDED;
     }
+#else
+    // Fallback: assume BLE available for advertising
+    flags |= ZMK_STATUS_FLAG_BLE_BONDED;
 #endif
     
     manufacturer_data.status_flags = flags;
