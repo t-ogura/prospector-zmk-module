@@ -550,7 +550,10 @@ static int profile_change_listener(const zmk_event_t *eh) {
     if (ev) {
         LOG_INF("📡 BLE profile changed to: %d - updating advertisement", ev->index);
         // Trigger advertisement update with new profile info
-        k_work_submit(&update_work);
+        if (adv_started) {
+            k_work_cancel_delayable(&adv_work);
+            k_work_schedule(&adv_work, K_NO_WAIT);
+        }
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
