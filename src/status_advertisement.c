@@ -109,23 +109,31 @@ static uint32_t get_current_update_interval(void) {
         LOG_INF("💤 Switching to idle mode - reducing update frequency");
     }
     
-    // Use lower frequency when not actively connected to save power
+    // Check connection states
     bool ble_connected = false;
+    bool usb_connected = false;
+    
 #if IS_ENABLED(CONFIG_ZMK_BLE)
     // Check if we have any active BLE connections
     ble_connected = zmk_ble_active_profile_is_connected();
 #endif
+
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    // Check if USB is connected and HID ready
+    usb_connected = zmk_usb_is_hid_ready();
+#endif
     
     // Determine interval based on connection state and activity
     uint32_t interval;
-    if (!ble_connected) {
-        // Not connected - use idle rate regardless of activity (save power)
+    if (!ble_connected && !usb_connected) {
+        // Not connected at all - use idle rate regardless of activity (save power)
         interval = IDLE_UPDATE_INTERVAL_MS;
         LOG_DBG("Not connected - using idle interval: %dms", interval);
     } else {
-        // Connected - use activity-based intervals
+        // Connected (BLE or USB) - use activity-based intervals
         interval = is_active ? ACTIVE_UPDATE_INTERVAL_MS : IDLE_UPDATE_INTERVAL_MS;
-        LOG_DBG("Connected - update interval: %dms (%s mode)", interval, is_active ? "ACTIVE" : "IDLE");
+        LOG_DBG("Connected (%s) - update interval: %dms (%s mode)", 
+                ble_connected ? "BLE" : "USB", interval, is_active ? "ACTIVE" : "IDLE");
     }
     
     return interval;
@@ -253,11 +261,15 @@ static void build_manufacturer_payload(void) {
 #endif
     
     // BLE status flags
-    // TODO: Add actual BLE status detection when API is available
-    // For now, assume BLE is available if we're advertising
-    if (connection_count > 0) {
-        flags |= ZMK_STATUS_FLAG_BLE_CONNECTED; // Placeholder assumption
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    if (zmk_ble_active_profile_is_connected()) {
+        flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
     }
+    // Check if profile is bonded (paired)
+    if (!zmk_ble_active_profile_is_open()) {
+        flags |= ZMK_STATUS_FLAG_BLE_BONDED;
+    }
+#endif
     
     manufacturer_data.status_flags = flags;
     
