@@ -170,7 +170,7 @@ Bit 3/7: Left/Right GUI
 ```kconfig
 # Basic configuration
 CONFIG_ZMK_STATUS_ADVERTISEMENT=y
-CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME="YourBoard"  # ≤8 characters
+CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME="YourBoard"  # Keyboard identifier (any length)
 
 # Power management
 CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED=y
