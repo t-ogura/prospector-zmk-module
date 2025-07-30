@@ -109,8 +109,25 @@ static uint32_t get_current_update_interval(void) {
         LOG_INF("💤 Switching to idle mode - reducing update frequency");
     }
     
-    uint32_t interval = is_active ? ACTIVE_UPDATE_INTERVAL_MS : IDLE_UPDATE_INTERVAL_MS;
-    LOG_DBG("Update interval: %dms (%s mode)", interval, is_active ? "ACTIVE" : "IDLE");
+    // Use lower frequency when not actively connected to save power
+    bool ble_connected = false;
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    // Check if we have any active BLE connections
+    ble_connected = zmk_ble_active_profile_is_connected();
+#endif
+    
+    // Determine interval based on connection state and activity
+    uint32_t interval;
+    if (!ble_connected) {
+        // Not connected - use idle rate regardless of activity (save power)
+        interval = IDLE_UPDATE_INTERVAL_MS;
+        LOG_DBG("Not connected - using idle interval: %dms", interval);
+    } else {
+        // Connected - use activity-based intervals
+        interval = is_active ? ACTIVE_UPDATE_INTERVAL_MS : IDLE_UPDATE_INTERVAL_MS;
+        LOG_DBG("Connected - update interval: %dms (%s mode)", interval, is_active ? "ACTIVE" : "IDLE");
+    }
+    
     return interval;
 }
 
@@ -143,10 +160,11 @@ static struct bt_data scan_rsp[] = {
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
 };
 
-// Custom advertising parameters (connectable only, name in scan response)
+// Custom advertising parameters (non-connectable scannable for status broadcast)
+// Using non-connectable to avoid interference with ZMK's connection management
 static const struct bt_le_adv_param adv_params = {
     .id = BT_ID_DEFAULT,
-    .options = BT_LE_ADV_OPT_CONNECTABLE,
+    .options = BT_LE_ADV_OPT_SCANNABLE, // Non-connectable but scannable for device name
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
 };
@@ -434,15 +452,15 @@ static void adv_work_handler(struct k_work *work) {
     
     if (err == 0) {
         LOG_INF("✅ Advertising data updated successfully");
-    } else if (err == -EALREADY || err == -EINVAL) {
-        // Advertising not started yet, or needs restart - start fresh
-        LOG_INF("Advertising not active, starting fresh...");
-        start_custom_advertising();
     } else {
-        LOG_ERR("❌ Failed to update advertising data: %d", err);
-        // Try to restart advertising as fallback
+        // Any error - restart advertising to ensure continuous broadcast
+        LOG_INF("Advertising update failed (%d), restarting...", err);
+        
+        // Stop any existing advertising
         bt_le_adv_stop();
-        k_sleep(K_MSEC(100));
+        k_sleep(K_MSEC(50));
+        
+        // Always try to restart advertising regardless of connection state
         start_custom_advertising();
     }
     
