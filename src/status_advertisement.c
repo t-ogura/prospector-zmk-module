@@ -547,21 +547,8 @@ int zmk_status_advertisement_stop(void) {
     return 0;
 }
 
-#if IS_ENABLED(CONFIG_ZMK_BLE)
-// Profile change event listener to update advertisement data (only when BLE available)
-static int profile_change_listener(const zmk_event_t *eh) {
-    LOG_INF("📡 BLE profile changed - updating advertisement");
-    // Trigger advertisement update with new profile info
-    if (adv_started) {
-        k_work_cancel_delayable(&adv_work);
-        k_work_schedule(&adv_work, K_NO_WAIT);
-    }
-    return ZMK_EV_EVENT_BUBBLE;
-}
-
-ZMK_LISTENER(prospector_profile_listener, profile_change_listener);
-ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
-#endif
+// Note: Profile changes are detected through periodic updates (200ms/1000ms intervals)
+// This provides sufficient responsiveness without needing complex event listeners
 
 // Initialize early to stop default advertising before ZMK starts it
 SYS_INIT(stop_default_advertising, APPLICATION, 90);
