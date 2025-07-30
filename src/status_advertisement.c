@@ -103,7 +103,7 @@ ZMK_SUBSCRIPTION(prospector_position_listener, zmk_position_state_changed);
 static void conn_cb(struct bt_conn *conn, void *user_data) {
     struct bt_conn_info info;
     if (bt_conn_get_info(conn, &info) == 0 &&
-        info.state == BT_CONN_CONNECTED) {
+        info.state == BT_CONN_STATE_CONNECTED) {
         // Use the ID of the last found connected profile
         *(uint8_t*)user_data = info.id;
         LOG_INF("📡 Found active BLE connection: profile %d", info.id);
