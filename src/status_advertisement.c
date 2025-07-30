@@ -17,6 +17,7 @@
 #include <zmk/usb.h>
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
+#include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/status_advertisement.h>
 
 // keymap API is available on Central or Standalone (non-Split) builds only
@@ -207,9 +208,9 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.active_layer = layer;
     
     // Profile and connection info using ZMK APIs  
-    // Use a reasonable default profile assumption
-    // Most keyboards default to profile 0, but display as profile 1
-    manufacturer_data.profile_slot = 0; // Profile 0 (displayed as 1 on scanner)
+    // Get actual active BLE profile index (0-4)
+    manufacturer_data.profile_slot = zmk_ble_active_profile_index();
+    LOG_INF("📡 Profile info: active_profile=%d", manufacturer_data.profile_slot);
     
     // Connection count approximation - count active BLE connections + USB
     uint8_t connection_count = 1; // Assume at least one connection (BLE advertising implies connection capability)
@@ -512,6 +513,20 @@ int zmk_status_advertisement_stop(void) {
     }
     return 0;
 }
+
+// Profile change event listener to update advertisement data
+static int profile_change_listener(const zmk_event_t *eh) {
+    const struct zmk_ble_active_profile_changed *ev = as_zmk_ble_active_profile_changed(eh);
+    if (ev) {
+        LOG_INF("📡 BLE profile changed to: %d - updating advertisement", ev->index);
+        // Trigger advertisement update with new profile info
+        k_work_submit(&update_work);
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(prospector_profile_listener, profile_change_listener);
+ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
 
 // Initialize early to stop default advertising before ZMK starts it
 SYS_INIT(stop_default_advertising, APPLICATION, 90);
