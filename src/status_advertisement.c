@@ -17,7 +17,6 @@
 #include <zmk/usb.h>
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
-#include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/status_advertisement.h>
 
 // keymap API is available on Central or Standalone (non-Split) builds only
@@ -235,7 +234,11 @@ static void build_manufacturer_payload(void) {
     
     // Profile and connection info using ZMK APIs  
     // Get actual active BLE profile index (0-4)
+#if IS_ENABLED(CONFIG_ZMK_BLE)
     manufacturer_data.profile_slot = zmk_ble_active_profile_index();
+#else
+    manufacturer_data.profile_slot = 0; // Fallback when BLE not available
+#endif
     LOG_INF("📡 Profile info: active_profile=%d", manufacturer_data.profile_slot);
     
     // Connection count approximation - count active BLE connections + USB
@@ -544,22 +547,21 @@ int zmk_status_advertisement_stop(void) {
     return 0;
 }
 
-// Profile change event listener to update advertisement data
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+// Profile change event listener to update advertisement data (only when BLE available)
 static int profile_change_listener(const zmk_event_t *eh) {
-    const struct zmk_ble_active_profile_changed *ev = as_zmk_ble_active_profile_changed(eh);
-    if (ev) {
-        LOG_INF("📡 BLE profile changed to: %d - updating advertisement", ev->index);
-        // Trigger advertisement update with new profile info
-        if (adv_started) {
-            k_work_cancel_delayable(&adv_work);
-            k_work_schedule(&adv_work, K_NO_WAIT);
-        }
+    LOG_INF("📡 BLE profile changed - updating advertisement");
+    // Trigger advertisement update with new profile info
+    if (adv_started) {
+        k_work_cancel_delayable(&adv_work);
+        k_work_schedule(&adv_work, K_NO_WAIT);
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
 
 ZMK_LISTENER(prospector_profile_listener, profile_change_listener);
 ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
+#endif
 
 // Initialize early to stop default advertising before ZMK starts it
 SYS_INIT(stop_default_advertising, APPLICATION, 90);
