@@ -110,15 +110,17 @@ static int profile_changed_listener(const zmk_event_t *eh) {
     return ZMK_EV_EVENT_BUBBLE;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
 ZMK_LISTENER(prospector_profile_listener, profile_changed_listener);
 ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
+#endif
 
 // Use ZMK's correct API for profile detection
 static uint8_t get_active_profile_slot(void) {
-#if IS_ENABLED(CONFIG_ZMK_BLE)
+#if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
     return zmk_ble_active_profile_index();
 #else
-    return 0;
+    return 0;  // Peripheral or non-BLE device
 #endif
 }
 
@@ -136,7 +138,7 @@ static uint32_t get_current_update_interval(void) {
     bool ble_connected = false;
     bool usb_connected = false;
     
-#if IS_ENABLED(CONFIG_ZMK_BLE)
+#if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
     // Use ZMK BLE API to check connection status
     ble_connected = zmk_ble_active_profile_is_connected();
 #endif
@@ -282,8 +284,8 @@ static void build_manufacturer_payload(void) {
     }
 #endif
     
-    // BLE status flags - use ZMK BLE APIs
-#if IS_ENABLED(CONFIG_ZMK_BLE)
+    // BLE status flags - use ZMK BLE APIs (only on central or non-split)
+#if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
     if (zmk_ble_active_profile_is_connected()) {
         flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
     }
