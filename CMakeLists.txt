@@ -26,15 +26,21 @@ else()
     # Fallback to traditional approach
     zephyr_include_directories(include)
     zephyr_include_directories(${APPLICATION_SOURCE_DIR}/include)
-    zephyr_library()
     
     # Add status advertisement support
     if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+            # CRITICAL: Create a proper zephyr library for status advertisement
+            zephyr_library_named(prospector_status_adv)
             zephyr_library_sources(src/status_advertisement.c)
+            
+            # CRITICAL: Link against ZMK BLE subsystem
+            # This ensures zmk_ble_active_profile_index and related symbols are available
+            zephyr_library_link_libraries(zmk)
     endif()
     
     # Add scanner mode support
     if(CONFIG_PROSPECTOR_MODE_SCANNER)
+            zephyr_library_named(prospector_scanner)
             zephyr_library_sources(src/status_scanner.c)
     endif()
 endif()
@@ -46,6 +52,9 @@ if(CONFIG_SHIELD_PROSPECTOR_ADAPTER OR CONFIG_SHIELD_PROSPECTOR_SCANNER)
 endif()
 
 if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
+        # Create a separate library for adapter shield functionality
+        zephyr_library_named(prospector_adapter)
+        
         if(CONFIG_DT_HAS_ZMK_BEHAVIOR_CAPS_WORD_ENABLED)
                 zephyr_library_sources(src/events/caps_word_state_changed.c)
                 set_source_files_properties(
