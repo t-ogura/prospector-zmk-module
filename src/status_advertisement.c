@@ -178,26 +178,25 @@ _Static_assert(sizeof(struct zmk_status_adv_data) == MAX_MANUF_PAYLOAD,
 
 static struct zmk_status_adv_data manufacturer_data; // Use structured data directly
 
-// Advertisement packet: Include essential PC recognition data from ZMK standard
+// Advertisement packet: Flags + Manufacturer Data ONLY (for 31-byte limit)  
 static struct bt_data adv_data_array[] = {
-    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03),  // Keyboard appearance (from ZMK)
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA_BYTES(BT_DATA_UUID16_SOME, 0x12, 0x18),     // HID Service UUID (from ZMK)
-};
-
-// Scan response: Name + Manufacturer Data (31-byte limit allows both)
-static char device_name_buffer[4]; // Shorter name: "Lala" for space
-
-static struct bt_data scan_rsp[] = {
-    BT_DATA(BT_DATA_NAME_COMPLETE, device_name_buffer, 0), // Length set dynamically
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t*)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
-// Custom advertising parameters (non-connectable scannable for status broadcast)
-// Using non-connectable to avoid interference with ZMK's connection management
+// Scan response: Name + Appearance (sent separately)
+// Note: Scan response also has 31-byte limit, so we may need to truncate long names
+static char device_name_buffer[24]; // Reserve space for name (31 - header bytes)
+
+static struct bt_data scan_rsp[] = {
+    BT_DATA(BT_DATA_NAME_COMPLETE, device_name_buffer, 0), // Length set dynamically
+    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
+};
+
+// Custom advertising parameters (connectable only, name in scan response)
 static const struct bt_le_adv_param adv_params = {
     .id = BT_ID_DEFAULT,
-    .options = BT_LE_ADV_OPT_SCANNABLE, // Non-connectable but scannable for device name
+    .options = BT_LE_ADV_OPT_CONNECTABLE,
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
 };
@@ -406,18 +405,26 @@ static void start_custom_advertising(void) {
     
     build_manufacturer_payload();
     
-    // Simple device name: "Lala" (4 chars to fit with manufacturer data)
-    strcpy(device_name_buffer, "Lala");
-    scan_rsp[0].data_len = 4;
+    // Prepare device name for scan response (respecting 31-byte limit)
+    const char *full_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
+    int full_name_len = strlen(full_name);
     
-    LOG_INF("📤 Scan response will send: '%s' (len=%d)", device_name_buffer, 4);
+    // Calculate available space: 31 - (name_header=2) - (appearance_header=1) - (appearance_data=2) = 26
+    int max_name_len = sizeof(device_name_buffer) - 1;
+    int actual_name_len = MIN(full_name_len, max_name_len);
+    
+    memcpy(device_name_buffer, full_name, actual_name_len);
+    device_name_buffer[actual_name_len] = '\0';
+    
+    // Update scan response data length
+    scan_rsp[0].data_len = actual_name_len;
     
     LOG_INF("Prospector: Starting separated adv/scan_rsp advertising");
-    LOG_INF("ADV packet: Appearance + Flags + HID UUID = %d bytes", 3 + 3 + 5);
-    LOG_INF("SCAN_RSP: Name + Manufacturer Data = %d bytes", 2 + 4 + 2 + sizeof(manufacturer_data));
+    LOG_INF("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
+    LOG_INF("SCAN_RSP: Name + Appearance = %d bytes", 2 + actual_name_len + 3);
     
-    // PC recognition data in advertisement, manufacturer data in scan response
-    LOG_INF("✅ Both packets within 31-byte limit: ADV=%d, SCAN_RSP=%d", 11, 2 + 4 + 2 + 26);
+    // This approach keeps manufacturer_data at full 26 bytes while device name in scan response
+    LOG_INF("✅ Advertisement stays within 31-byte limit: %d bytes", 3 + 2 + sizeof(manufacturer_data));
     
     // Start advertising with separated adv_data and scan_rsp
     int err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array), 
