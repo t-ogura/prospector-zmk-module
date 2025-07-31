@@ -67,9 +67,9 @@ static bool is_active = false;
 // Latest layer state for accurate tracking (unused currently)
 // static uint8_t latest_layer = 0;
 
-// Peripheral battery tracking for split keyboards
+// Peripheral battery tracking for split keyboards (reduced from 3 to 2 devices)
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-static uint8_t peripheral_batteries[3] = {0, 0, 0}; // Up to 3 peripheral devices
+static uint8_t peripheral_batteries[2] = {0, 0}; // Up to 2 peripheral devices (reduced for space)
 static int peripheral_battery_listener(const zmk_event_t *eh);
 
 ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
@@ -170,17 +170,21 @@ static uint32_t get_current_update_interval(void) {
 #define MAX_ADV_DATA_LEN     31
 #define FLAGS_LEN           3   // 1 length + 1 type + 1 data  
 #define MANUF_OVERHEAD      2   // 1 length + 1 type
-#define MAX_MANUF_PAYLOAD   (MAX_ADV_DATA_LEN - FLAGS_LEN - MANUF_OVERHEAD) // = 26
+#define ESSENTIAL_ADV_LEN   (3 + 3 + 5)  // Appearance + Flags + UUID16 = 11 bytes
+#define MAX_MANUF_PAYLOAD   (MAX_ADV_DATA_LEN - ESSENTIAL_ADV_LEN - MANUF_OVERHEAD) // = 18 bytes
 
-// Ensure our structure matches the expected 26-byte payload
+// Ensure our structure matches the expected 18-byte payload (reduced from 26)
 _Static_assert(sizeof(struct zmk_status_adv_data) == MAX_MANUF_PAYLOAD, 
-               "zmk_status_adv_data must be exactly 26 bytes");
+               "zmk_status_adv_data must be exactly 18 bytes");
 
 static struct zmk_status_adv_data manufacturer_data; // Use structured data directly
 
-// Advertisement packet: Flags + Manufacturer Data ONLY (for 31-byte limit)  
+// Advertisement packet: Essential BLE info + Manufacturer Data (within 31-byte limit)
 static struct bt_data adv_data_array[] = {
+    // CRITICAL: Include ZMK's essential advertisement data for PC recognition
+    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03),  // Keyboard appearance (from ZMK)
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+    BT_DATA_BYTES(BT_DATA_UUID16_SOME, 0x12, 0x18),     // HID Service UUID (from ZMK)
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t*)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
@@ -208,7 +212,7 @@ static int peripheral_battery_listener(const zmk_event_t *eh) {
     const struct zmk_peripheral_battery_state_changed *ev = as_zmk_peripheral_battery_state_changed(eh);
     if (ev) {
         LOG_DBG("Peripheral %d battery: %d%%", ev->source, ev->state_of_charge);
-        if (ev->source < 3) {
+        if (ev->source < 2) { // Changed from 3 to 2 (array size reduced)
             peripheral_batteries[ev->source] = ev->state_of_charge;
         }
         // Trigger immediate status update when peripheral battery changes
@@ -301,8 +305,8 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.device_role = ZMK_DEVICE_ROLE_CENTRAL;
     manufacturer_data.device_index = 0; // Central is always index 0
     
-    // Copy peripheral battery levels
-    memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 3);
+    // Copy peripheral battery levels (reduced from 3 to 2)
+    memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 2);
            
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     // Peripheral: Skip advertising to preserve split communication  
@@ -310,19 +314,16 @@ static void build_manufacturer_payload(void) {
 #else
     manufacturer_data.device_role = ZMK_DEVICE_ROLE_STANDALONE;
     manufacturer_data.device_index = 0;
-    memset(manufacturer_data.peripheral_battery, 0, 3);
+    memset(manufacturer_data.peripheral_battery, 0, 2); // Changed from 3 to 2
 #endif
     
-    // Compact layer name (4 bytes) - reduced from 6
-    snprintf(manufacturer_data.layer_name, sizeof(manufacturer_data.layer_name), "L%d", layer);
-    
-    // Keyboard ID (4 bytes)
+    // Keyboard ID (2 bytes) - reduced from 4 to 2 bytes
     const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
-    uint32_t id_hash = 0;
+    uint16_t id_hash = 0; // Changed from uint32_t to uint16_t for 2 bytes
     for (int i = 0; keyboard_name[i] && i < 8; i++) {
         id_hash = id_hash * 31 + keyboard_name[i];
     }
-    memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
+    memcpy(manufacturer_data.keyboard_id, &id_hash, 2); // Changed from 4 to 2 bytes
     
     // Modifier keys status - using exact YADS approach  
     uint8_t modifier_flags = 0;
@@ -363,9 +364,9 @@ static void build_manufacturer_payload(void) {
 #endif
     
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    LOG_INF("Prospector %s: Central %d%%, Peripheral [%d,%d,%d], Layer %d", 
+    LOG_INF("Prospector %s: Central %d%%, Peripheral [%d,%d], Layer %d", 
             role_str, battery_level, 
-            peripheral_batteries[0], peripheral_batteries[1], peripheral_batteries[2],
+            peripheral_batteries[0], peripheral_batteries[1],
             layer);
 #else
     LOG_INF("Prospector %s: Battery %d%%, Layer %d", 

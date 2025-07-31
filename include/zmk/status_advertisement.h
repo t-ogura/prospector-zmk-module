@@ -14,10 +14,10 @@ extern "C" {
 #endif
 
 /**
- * @brief Status advertisement data structure
+ * @brief Status advertisement data structure (REDUCED for 31-byte BLE limit)
  * 
  * This structure defines the data format for ZMK status advertisements.
- * BLE Legacy Advertising limit: Flags(3) + Manufacturer Data header(2) + Payload(26) = 31 bytes
+ * BLE Legacy Advertising limit: Appearance(3) + Flags(3) + UUID16(5) + Manufacturer Data header(2) + Payload(18) = 31 bytes
  */
 struct zmk_status_adv_data {
     uint8_t manufacturer_id[2];    // 0xFF, 0xFF (Company ID: 0xFFFF = Reserved)
@@ -29,13 +29,11 @@ struct zmk_status_adv_data {
     uint8_t connection_count;      // Number of connected devices 0-5
     uint8_t status_flags;          // Status flags (bit field)
     uint8_t device_role;           // Device role (CENTRAL/PERIPHERAL/STANDALONE)
-    uint8_t device_index;          // Device index for split keyboards
-    uint8_t peripheral_battery[3]; // Peripheral battery levels (up to 3 devices, 0 = N/A)
-    char layer_name[4];            // Layer name (null-terminated, reduced from 6 to 4)
-    uint8_t keyboard_id[4];        // Keyboard identifier
+    uint8_t peripheral_battery[2]; // Peripheral battery levels (reduced to 2 devices, 0 = N/A)
+    uint8_t keyboard_id[2];        // Keyboard identifier (reduced from 4 to 2)
     uint8_t modifier_flags;        // Active modifier keys (Ctrl/Shift/Alt/GUI)
-    uint8_t reserved[2];           // Reserved for future use (reduced from 3 to 2)
-} __packed;  // Total: 26 bytes
+    uint8_t reserved[2];           // Reserved for future use
+} __packed;  // Total: 18 bytes (REDUCED from 26)
 
 /**
  * @brief Status flags bit definitions
