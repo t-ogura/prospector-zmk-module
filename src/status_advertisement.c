@@ -373,20 +373,13 @@ static void build_manufacturer_payload(void) {
 #endif
 }
 
-// Stop default advertising early in boot process
+// DISABLED: Non-intrusive approach - preserve ZMK's default advertising
+// ZMK's standard BLE advertising handles device discovery and connectivity
+// Prospector adds manufacturer data as supplemental information only
 static int stop_default_advertising(const struct device *dev) {
-    if (default_adv_stopped) {
-        return 0;
-    }
-    
-    LOG_INF("Prospector: Stopping default ZMK advertising");
-    int err = bt_le_adv_stop();
-    if (err && err != -EALREADY) {
-        LOG_ERR("bt_le_adv_stop failed: %d", err);
-    } else {
-        LOG_INF("Default advertising stopped");
-        default_adv_stopped = true;
-    }
+    // DO NOT STOP: Preserve keyboard's normal BLE connectivity
+    LOG_INF("Prospector: Preserving ZMK default advertising for normal connectivity");
+    default_adv_stopped = false;  // Never mark as stopped
     return 0;
 }
 
@@ -397,11 +390,12 @@ static void start_custom_advertising(void) {
     return;
 #endif
 
-    if (!default_adv_stopped) {
-        LOG_INF("Default advertising not stopped yet, trying again");
-        stop_default_advertising(NULL);
-        k_sleep(K_MSEC(50)); // Wait for stop to complete
-    }
+    // PRESERVE default advertising - non-intrusive approach
+    // if (!default_adv_stopped) {
+    //     LOG_INF("Default advertising not stopped yet, trying again");
+    //     stop_default_advertising(NULL);
+    //     k_sleep(K_MSEC(50)); // Wait for stop to complete
+    // }
     
     build_manufacturer_payload();
     
@@ -518,8 +512,8 @@ static int init_prospector_status(const struct device *dev) {
     LOG_INF("Prospector: Standalone device - advertising enabled");
 #endif
     
-    // Stop ZMK advertising early
-    stop_default_advertising(NULL);
+    // PRESERVE ZMK advertising for normal connectivity
+    // stop_default_advertising(NULL);  // DISABLED: Non-intrusive approach
     
     // Initialize activity tracking
     last_activity_time = k_uptime_get_32();
