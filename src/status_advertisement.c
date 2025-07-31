@@ -38,6 +38,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/position_state_changed.h>
+#include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/event_manager.h>
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -99,28 +100,26 @@ static int position_state_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(prospector_position_listener, position_state_listener);
 ZMK_SUBSCRIPTION(prospector_position_listener, zmk_position_state_changed);
 
-// Callback for bt_conn_foreach to find active profile
-static void conn_cb(struct bt_conn *conn, void *user_data) {
-    struct bt_conn_info info;
-    if (bt_conn_get_info(conn, &info) == 0 &&
-        info.state == BT_CONN_STATE_CONNECTED) {
-        // Use the ID of the last found connected profile
-        *(uint8_t*)user_data = info.id;
-        LOG_INF("📡 Found active BLE connection: profile %d", info.id);
+// Profile change listener for immediate advertisement updates
+static int profile_changed_listener(const zmk_event_t *eh) {
+    LOG_INF("📡 BLE profile changed - updating advertisement");
+    if (adv_started) {
+        k_work_cancel_delayable(&adv_work);
+        k_work_schedule(&adv_work, K_NO_WAIT);
     }
+    return ZMK_EV_EVENT_BUBBLE;
 }
 
-// Fetch active BLE profile using Zephyr native APIs
-static uint8_t fetch_active_profile_id(void) {
-    uint8_t profile = 0xFF;
-    
+ZMK_LISTENER(prospector_profile_listener, profile_changed_listener);
+ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
+
+// Use ZMK's correct API for profile detection
+static uint8_t get_active_profile_slot(void) {
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    // Enumerate connected LE connections to find active profile
-    bt_conn_foreach(BT_CONN_TYPE_LE, conn_cb, &profile);
+    return zmk_ble_active_profile_index();
+#else
+    return 0;
 #endif
-    
-    // Return 0 if no profile found, otherwise return the profile ID
-    return (profile == 0xFF ? 0 : profile);
 }
 
 // Helper function to determine current update interval
@@ -138,9 +137,8 @@ static uint32_t get_current_update_interval(void) {
     bool usb_connected = false;
     
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    // Check if we have any active BLE connections by checking profile
-    uint8_t active_profile = fetch_active_profile_id();
-    ble_connected = (active_profile != 0);
+    // Use ZMK BLE API to check connection status
+    ble_connected = zmk_ble_active_profile_is_connected();
 #endif
 
 #if IS_ENABLED(CONFIG_ZMK_USB)
@@ -258,10 +256,9 @@ static void build_manufacturer_payload(void) {
     
     manufacturer_data.active_layer = layer;
     
-    // Profile and connection info using reliable Zephyr APIs  
-    // Get actual active BLE profile index (0-4) using connection enumeration
-    manufacturer_data.profile_slot = fetch_active_profile_id();
-    LOG_INF("📡 Profile info: active_profile=%d", manufacturer_data.profile_slot);
+    // Profile slot (0-4) as selected in ZMK's settings
+    manufacturer_data.profile_slot = get_active_profile_slot();
+    LOG_INF("📡 Active profile slot: %d", manufacturer_data.profile_slot);
     
     // Connection count approximation - count active BLE connections + USB
     uint8_t connection_count = 1; // Assume at least one connection (BLE advertising implies connection capability)
@@ -285,13 +282,13 @@ static void build_manufacturer_payload(void) {
     }
 #endif
     
-    // BLE status flags - use Zephyr native APIs only
+    // BLE status flags - use ZMK BLE APIs
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    // Check if any BLE connections exist using our profile detection
-    uint8_t active_profile = fetch_active_profile_id();
-    if (active_profile != 0) {
+    if (zmk_ble_active_profile_is_connected()) {
         flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
-        flags |= ZMK_STATUS_FLAG_BLE_BONDED; // Assume bonded if connected
+    }
+    if (!zmk_ble_active_profile_is_open()) {
+        flags |= ZMK_STATUS_FLAG_BLE_BONDED;
     }
 #endif
     
