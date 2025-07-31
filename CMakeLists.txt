@@ -1,8 +1,43 @@
 cmake_minimum_required(VERSION 3.20.0)
 
-zephyr_include_directories(include)
-zephyr_include_directories(${APPLICATION_SOURCE_DIR}/include)
-zephyr_library()
+# Check if zmk_library is available
+if(COMMAND zmk_library)
+    # Modern ZMK approach using zmk_library
+    if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+        zmk_library(
+            NAME prospector_status_adv
+            SRCS src/status_advertisement.c
+            DEPS
+                ble         # zmk_ble_active_profile_index(), etc.
+                usb         # zmk_usb_is_hid_ready(), etc.
+                battery     # zmk_battery_state_of_charge()
+                hid         # zmk_hid_get_keyboard_report()
+                endpoints
+        )
+    endif()
+    
+    if(CONFIG_PROSPECTOR_MODE_SCANNER)
+        zmk_library(
+            NAME prospector_scanner
+            SRCS src/status_scanner.c
+        )
+    endif()
+else()
+    # Fallback to traditional approach
+    zephyr_include_directories(include)
+    zephyr_include_directories(${APPLICATION_SOURCE_DIR}/include)
+    zephyr_library()
+    
+    # Add status advertisement support
+    if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
+            zephyr_library_sources(src/status_advertisement.c)
+    endif()
+    
+    # Add scanner mode support
+    if(CONFIG_PROSPECTOR_MODE_SCANNER)
+            zephyr_library_sources(src/status_scanner.c)
+    endif()
+endif()
 
 # Add display and LVGL support once for any shield that needs it
 if(CONFIG_SHIELD_PROSPECTOR_ADAPTER OR CONFIG_SHIELD_PROSPECTOR_SCANNER)
@@ -22,17 +57,6 @@ if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
 
         zephyr_library_sources(src/events/split_central_status_changed.c)
         zephyr_library_sources(src/split/bluetooth/central_status_changed_observer.c)
-endif()
-
-# Add status advertisement support
-if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
-        zephyr_library_sources(src/status_advertisement.c)
-        # Don't manually link libraries - ZMK's app will include them
-endif()
-
-# Add scanner mode support
-if(CONFIG_PROSPECTOR_MODE_SCANNER)
-        zephyr_library_sources(src/status_scanner.c)
 endif()
 
 # Scanner shield sources are handled by boards/shields/prospector_scanner/CMakeLists.txt
