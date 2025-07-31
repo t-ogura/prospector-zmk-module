@@ -373,13 +373,21 @@ static void build_manufacturer_payload(void) {
 #endif
 }
 
-// DISABLED: Non-intrusive approach - preserve ZMK's default advertising
-// ZMK's standard BLE advertising handles device discovery and connectivity
-// Prospector adds manufacturer data as supplemental information only
+// RESTORE WORKING APPROACH: Complete advertising replacement
+// This was the ONLY approach that worked with LED + Split communication
 static int stop_default_advertising(const struct device *dev) {
-    // DO NOT STOP: Preserve keyboard's normal BLE connectivity
-    LOG_INF("Prospector: Preserving ZMK default advertising for normal connectivity");
-    default_adv_stopped = false;  // Never mark as stopped
+    if (default_adv_stopped) {
+        return 0;
+    }
+    
+    LOG_INF("Prospector: Stopping default ZMK advertising (WORKING APPROACH)");
+    int err = bt_le_adv_stop();
+    if (err && err != -EALREADY) {
+        LOG_ERR("bt_le_adv_stop failed: %d", err);
+    } else {
+        LOG_INF("Default advertising stopped - this approach worked before");
+        default_adv_stopped = true;
+    }
     return 0;
 }
 
@@ -390,12 +398,11 @@ static void start_custom_advertising(void) {
     return;
 #endif
 
-    // PRESERVE default advertising - non-intrusive approach
-    // if (!default_adv_stopped) {
-    //     LOG_INF("Default advertising not stopped yet, trying again");
-    //     stop_default_advertising(NULL);
-    //     k_sleep(K_MSEC(50)); // Wait for stop to complete
-    // }
+    if (!default_adv_stopped) {
+        LOG_INF("Default advertising not stopped yet, trying again");
+        stop_default_advertising(NULL);
+        k_sleep(K_MSEC(50)); // Wait for stop to complete
+    }
     
     build_manufacturer_payload();
     
@@ -512,17 +519,17 @@ static int init_prospector_status(const struct device *dev) {
     LOG_INF("Prospector: Standalone device - advertising enabled");
 #endif
     
-    // PRESERVE ZMK advertising for normal connectivity
-    // stop_default_advertising(NULL);  // DISABLED: Non-intrusive approach
+    // RESTORE WORKING APPROACH: Stop ZMK advertising early
+    stop_default_advertising(NULL);
     
     // Initialize activity tracking
     last_activity_time = k_uptime_get_32();
     is_active = true; // Start in active mode
     
-    // TEMPORARILY DISABLE all custom advertising to test basic functionality
-    // adv_started = true;
-    // k_work_schedule(&adv_work, K_SECONDS(1)); // DISABLED for troubleshooting
-    LOG_INF("Prospector: Custom advertising DISABLED for troubleshooting");
+    // Start custom advertising - RESTORE WORKING TIMING
+    adv_started = true;
+    k_work_schedule(&adv_work, K_SECONDS(1)); // Original working timing
+    LOG_INF("Prospector: Started custom advertising with original working timing");
     
     return 0;
 }
@@ -565,8 +572,10 @@ int zmk_status_advertisement_stop(void) {
 // Note: Profile changes are detected through periodic updates (200ms/1000ms intervals)
 // This provides sufficient responsiveness without needing complex event listeners
 
-// TEMPORARILY DISABLE all Prospector initialization for troubleshooting
-// SYS_INIT(stop_default_advertising, APPLICATION, 90);  // DISABLED
-// SYS_INIT(init_prospector_status, APPLICATION, 95);    // DISABLED
+// Initialize early to stop default advertising before ZMK starts it
+SYS_INIT(stop_default_advertising, APPLICATION, 90);
+
+// Initialize Prospector system after ZMK BLE is ready
+SYS_INIT(init_prospector_status, APPLICATION, 95);
 
 #endif // CONFIG_ZMK_STATUS_ADVERTISEMENT
