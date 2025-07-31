@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.20.0)
+
 zephyr_include_directories(include)
 zephyr_include_directories(${APPLICATION_SOURCE_DIR}/include)
 zephyr_library()
@@ -25,8 +27,7 @@ endif()
 # Add status advertisement support
 if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
         zephyr_library_sources(src/status_advertisement.c)
-        # Link ZMK BLE library for profile APIs
-        zephyr_library_link_libraries(zmk__ble)
+        # Don't manually link libraries - ZMK's app will include them
 endif()
 
 # Add scanner mode support
