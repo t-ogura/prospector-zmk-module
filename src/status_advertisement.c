@@ -519,9 +519,10 @@ static int init_prospector_status(const struct device *dev) {
     last_activity_time = k_uptime_get_32();
     is_active = true; // Start in active mode
     
-    // Start custom advertising after a delay
-    adv_started = true;
-    k_work_schedule(&adv_work, K_SECONDS(1)); // Reduced delay to minimize "LalaPad" duration
+    // TEMPORARILY DISABLE all custom advertising to test basic functionality
+    // adv_started = true;
+    // k_work_schedule(&adv_work, K_SECONDS(1)); // DISABLED for troubleshooting
+    LOG_INF("Prospector: Custom advertising DISABLED for troubleshooting");
     
     return 0;
 }
@@ -564,10 +565,8 @@ int zmk_status_advertisement_stop(void) {
 // Note: Profile changes are detected through periodic updates (200ms/1000ms intervals)
 // This provides sufficient responsiveness without needing complex event listeners
 
-// Initialize early to stop default advertising before ZMK starts it
-SYS_INIT(stop_default_advertising, APPLICATION, 90);
-
-// Initialize Prospector system after ZMK BLE is ready
-SYS_INIT(init_prospector_status, APPLICATION, 95);
+// TEMPORARILY DISABLE all Prospector initialization for troubleshooting
+// SYS_INIT(stop_default_advertising, APPLICATION, 90);  // DISABLED
+// SYS_INIT(init_prospector_status, APPLICATION, 95);    // DISABLED
 
 #endif // CONFIG_ZMK_STATUS_ADVERTISEMENT
