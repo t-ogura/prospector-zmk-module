@@ -25,6 +25,8 @@ endif()
 # Add status advertisement support
 if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
         zephyr_library_sources(src/status_advertisement.c)
+        # Link ZMK BLE library for profile APIs
+        zephyr_library_link_libraries(zmk_ble)
 endif()
 
 # Add scanner mode support
