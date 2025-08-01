@@ -88,26 +88,33 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_flex_flow(widget->obj, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // RSSI bar (small, 5-level indicator)
+    // RSSI bar (small, 5-level indicator) - fixed visibility
     widget->rssi_bar = lv_bar_create(widget->obj);
     lv_obj_set_size(widget->rssi_bar, 40, 8);
     lv_bar_set_range(widget->rssi_bar, 0, 5);
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x30, 0x30, 0x30), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_MAIN);  // Ensure background is visible
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0xFF, 0x00, 0x00), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);  // Ensure indicator is visible
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_INDICATOR);
 
-    // RSSI value label (dBm)
+    // RSSI value label (dBm) - fixed width to prevent flickering
     widget->rssi_label = lv_label_create(widget->obj);
-    lv_label_set_text(widget->rssi_label, "--dBm");
+    lv_label_set_text(widget->rssi_label, "-999dBm");  // Set widest possible text first
     lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xC0, 0xC0, 0xC0), 0);
+    lv_obj_set_width(widget->rssi_label, 50);  // Fixed width to prevent position changes
+    lv_label_set_text(widget->rssi_label, "--dBm");  // Reset to initial text
 
-    // Reception rate label (Hz)
+    // Reception rate label (Hz) - fixed width to prevent flickering
     widget->rate_label = lv_label_create(widget->obj);
-    lv_label_set_text(widget->rate_label, "--Hz");
+    lv_label_set_text(widget->rate_label, "99.9Hz");  // Set widest possible text first
     lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->rate_label, lv_color_make(0xC0, 0xC0, 0xC0), 0);
+    lv_obj_set_width(widget->rate_label, 45);  // Fixed width to prevent position changes
+    lv_label_set_text(widget->rate_label, "--Hz");  // Reset to initial text
 
     // Initialize timing
     widget->last_update_time = 0;
