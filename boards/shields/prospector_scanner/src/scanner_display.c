@@ -14,7 +14,7 @@
 #include "connection_status_widget.h"
 #include "layer_status_widget.h"
 #include "modifier_status_widget.h"
-#include "profile_status_widget.h"
+// Profile widget removed - connection status already handled by connection_status_widget
 #include "signal_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -27,7 +27,7 @@ static struct zmk_widget_scanner_battery battery_widget;
 static struct zmk_widget_connection_status connection_widget;
 static struct zmk_widget_layer_status layer_widget;
 static struct zmk_widget_modifier_status modifier_widget;
-static struct zmk_widget_profile_status profile_widget;
+// Profile widget removed - redundant with connection status widget
 static struct zmk_widget_signal_status signal_widget;
 
 // Forward declaration
@@ -147,9 +147,7 @@ lv_obj_t *zmk_display_status_screen() {
     zmk_widget_modifier_status_init(&modifier_widget, screen);
     lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30); // Was 20, now 30
     
-    // Profile status widget - compact, top-right corner
-    zmk_widget_profile_status_init(&profile_widget, screen);
-    lv_obj_align(zmk_widget_profile_status_obj(&profile_widget), LV_ALIGN_TOP_RIGHT, -5, 25);
+    // Profile widget removed - BLE profile already shown in connection status widget
     
     // Battery widget moved down 10px more as requested (was -40, now -30)
     zmk_widget_scanner_battery_init(&battery_widget, screen);
