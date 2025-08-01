@@ -14,7 +14,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static const struct device *pwm_dev;
 
-// PWM configuration for backlight control (Pin 6 = P0.43)
+// PWM configuration for backlight control (Pin 6 = P1.11)
 #define PWM_PERIOD_USEC 1000U  // 1ms period = 1kHz
 #define PWM_FLAGS 0
 
@@ -88,7 +88,7 @@ static void brightness_work_handler(struct k_work *work) {
 
 static int brightness_control_init(void) {
     // Initialize PWM device
-    pwm_dev = DEVICE_DT_GET(DT_NODELABEL(pwm0));
+    pwm_dev = DEVICE_DT_GET(DT_NODELABEL(pwm1));
     if (!device_is_ready(pwm_dev)) {
         LOG_ERR("PWM device not ready");
         return -ENODEV;
@@ -118,7 +118,7 @@ static int brightness_control_init(void) {
 
 static int brightness_control_init(void) {
     // Initialize PWM device
-    pwm_dev = DEVICE_DT_GET(DT_NODELABEL(pwm0));
+    pwm_dev = DEVICE_DT_GET(DT_NODELABEL(pwm1));
     if (!device_is_ready(pwm_dev)) {
         LOG_ERR("PWM device not ready");
         return -ENODEV;
