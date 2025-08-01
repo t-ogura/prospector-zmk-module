@@ -63,20 +63,22 @@ config ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS
 
 config ZMK_STATUS_ADV_IDLE_INTERVAL_MS
     int "Idle advertisement interval in milliseconds" 
-    range 500 5000
+    range 500 60000
     default 1000
     depends on ZMK_STATUS_ADV_ACTIVITY_BASED
     help
       Advertisement interval when keyboard is idle.
       1000ms = 1Hz for battery conservation.
+      Can be set up to 60000ms (1 minute) for maximum battery saving.
 
 config ZMK_STATUS_ADV_ACTIVITY_TIMEOUT_MS
     int "Activity timeout in milliseconds"
-    range 1000 30000
+    range 1000 300000
     default 2000
     depends on ZMK_STATUS_ADV_ACTIVITY_BASED
     help
       Time to wait before switching from active to idle mode.
+      Can be set up to 300000ms (5 minutes) for extended active periods.
       2000ms = 2 seconds for responsive but power-efficient transitions.
 
 config PROSPECTOR_MODE_SCANNER
