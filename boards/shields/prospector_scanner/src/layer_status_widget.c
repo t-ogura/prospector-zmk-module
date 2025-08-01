@@ -43,9 +43,9 @@ static void update_layer_display(struct zmk_widget_layer_status *widget, struct 
             lv_obj_set_style_text_color(widget->layer_labels[i], get_layer_color(i), 0);
             lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_COVER, 0);
         } else {
-            // Inactive layers: consistent gray color
-            lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(80, 80, 80), 0);
-            lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_50, 0);
+            // Inactive layers: much darker gray, barely visible but still readable
+            lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(40, 40, 40), 0);
+            lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_30, 0);
         }
     }
     
@@ -89,9 +89,9 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
         int start_x = -85; // Start position to center the row
         lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), 5); // Below title
         
-        // Initialize with gray color (initially dimmed)
-        lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(80, 80, 80), 0);
-        lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_50, 0);
+        // Initialize with much darker gray color (barely visible)
+        lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(40, 40, 40), 0);
+        lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_30, 0);
     }
     
     // Layer 0 is active by default with full brightness

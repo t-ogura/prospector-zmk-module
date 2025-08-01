@@ -31,9 +31,9 @@ static void set_brightness_pwm(uint8_t brightness_percent) {
     int ret = pwm_set(pwm_dev, 0, period_nsec, pulse_width_nsec, PWM_FLAGS);
     
     if (ret < 0) {
-        LOG_ERR("Failed to set PWM brightness: %d", ret);
+        LOG_ERR("❌ Failed to set PWM brightness: %d", ret);
     } else {
-        LOG_DBG("Backlight brightness set to %d%% (PWM: %d/%d nsec)", 
+        LOG_DBG("✅ Backlight PWM: %d%% (pulse: %d/%d nsec)", 
                 brightness_percent, pulse_width_nsec, period_nsec);
     }
 }
@@ -76,7 +76,7 @@ static void update_brightness(void) {
     
     // Apply brightness via PWM
     set_brightness_pwm(brightness);
-    LOG_INF("ALS: %d lux, Brightness set to: %d%%", light_level, brightness);
+    LOG_INF("💡 APDS9960: %d lux → %d%% brightness", light_level, brightness);
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -97,12 +97,13 @@ static int brightness_control_init(void) {
     // Initialize ALS device
     als_dev = DEVICE_DT_GET(DT_ALIAS(als));
     if (!device_is_ready(als_dev)) {
-        LOG_WRN("ALS device not ready, using fixed brightness");
+        LOG_ERR("❌ APDS9960 ambient light sensor NOT READY - hardware may be missing or not connected");
+        LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
     
-    LOG_INF("ALS device ready, starting automatic brightness control");
+    LOG_INF("✅ APDS9960 ambient light sensor READY - automatic brightness control enabled");
     
     // Initialize work queue
     k_work_init_delayable(&brightness_work, brightness_work_handler);
@@ -125,7 +126,7 @@ static int brightness_control_init(void) {
     
     // Set fixed brightness
     set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-    LOG_INF("Brightness control initialized with fixed brightness: %d%%", 
+    LOG_INF("🔆 Fixed brightness mode: %d%% (ambient light sensor disabled)", 
             CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
     return 0;
 }
