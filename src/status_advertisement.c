@@ -29,10 +29,10 @@
 #include <zmk/behavior.h>
 #endif
 
-#if IS_ENABLED(CONFIG_ZMK_WPM)
-#include <zmk/wpm.h>
-#include <zmk/events/wpm_state_changed.h>
-#endif
+// Custom WPM implementation to avoid ZMK WPM compatibility issues
+static uint32_t key_press_count = 0;
+static uint32_t wpm_start_time = 0;
+static uint8_t current_wpm = 0;
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -91,6 +91,27 @@ static int position_state_listener(const zmk_event_t *eh) {
         
         bool was_active = is_active;
         is_active = true;
+        
+        // Custom WPM calculation
+        key_press_count++;
+        if (wpm_start_time == 0) {
+            wpm_start_time = now;
+        }
+        
+        // Calculate WPM every 10 key presses (for performance)
+        if (key_press_count % 10 == 0) {
+            uint32_t elapsed_ms = now - wpm_start_time;
+            if (elapsed_ms > 10000) { // At least 10 seconds of data
+                // WPM = (characters / 5) / (time_in_minutes)
+                // Assume average 5 characters per word
+                uint32_t elapsed_minutes_x100 = (elapsed_ms * 100) / (60 * 1000); // minutes * 100 for precision
+                if (elapsed_minutes_x100 > 0) {
+                    current_wpm = (key_press_count * 100) / (5 * elapsed_minutes_x100);
+                    if (current_wpm > 255) current_wpm = 255; // Cap at 255
+                }
+                LOG_DBG("📊 WPM calculated: %d (keys: %d, time: %dms)", current_wpm, key_press_count, elapsed_ms);
+            }
+        }
         
         LOG_DBG("🔥 Key activity detected - switching to high frequency updates");
         
@@ -267,6 +288,16 @@ static void build_manufacturer_payload(void) {
     // Build 26-byte structured manufacturer data
     memset(&manufacturer_data, 0, sizeof(manufacturer_data));
     
+    // Check if WPM should be reset (no activity for 5 minutes)
+    uint32_t now = k_uptime_get_32();
+    if (wpm_start_time > 0 && (now - last_activity_time) > (5 * 60 * 1000)) {
+        // Reset WPM calculation after 5 minutes of inactivity
+        current_wpm = 0;
+        key_press_count = 0;
+        wpm_start_time = 0;
+        LOG_DBG("📊 WPM reset due to inactivity");
+    }
+    
     // Fixed header fields
     manufacturer_data.manufacturer_id[0] = 0xFF;
     manufacturer_data.manufacturer_id[1] = 0xFF;
@@ -392,18 +423,13 @@ static void build_manufacturer_payload(void) {
     
     manufacturer_data.modifier_flags = modifier_flags;
     
-    // WPM (Words Per Minute) data collection
-#if IS_ENABLED(CONFIG_ZMK_WPM) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
+    // WPM (Words Per Minute) data collection - custom implementation
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     // WPM only available on Central or non-Split devices
-    uint8_t wpm_value = zmk_wpm_get_state();
-    // Clamp to 0-255 range (should already be in range)
-    if (wpm_value > 255) {
-        wpm_value = 255;
-    }
-    manufacturer_data.wpm_value = wpm_value;
-    LOG_DBG("⚡ WPM: %d", wpm_value);
+    manufacturer_data.wpm_value = current_wpm;
+    LOG_DBG("⚡ Custom WPM: %d (key presses: %d)", current_wpm, key_press_count);
 #else
-    // Peripheral or WPM disabled: no WPM data
+    // Peripheral: no WPM data
     manufacturer_data.wpm_value = 0;
 #endif
     
