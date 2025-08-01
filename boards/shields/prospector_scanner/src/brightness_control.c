@@ -9,6 +9,7 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/logging/log.h>
+#include <math.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -48,35 +49,48 @@ static void update_brightness(void) {
         return;
     }
     
-    int ret = sensor_sample_fetch(als_dev);
+    int ret = sensor_sample_fetch_chan(als_dev, SENSOR_CHAN_ALL);
     if (ret < 0) {
         LOG_WRN("Failed to fetch ALS sample: %d", ret);
         return;
     }
     
     struct sensor_value als_val;
+    // Try to get ambient light value first
     ret = sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &als_val);
     if (ret < 0) {
-        LOG_WRN("Failed to get ALS value: %d", ret);
+        LOG_WRN("Failed to get ambient light value: %d", ret);
         return;
     }
     
     // Convert sensor value to brightness percentage
+    // APDS9960 returns raw ADC counts, not lux directly
+    // Typical range is 0-65535 for 16-bit ADC
     int32_t light_level = als_val.val1;
+    
+    // Log raw value for debugging
+    LOG_DBG("APDS9960 raw light value: %d (val2: %d)", als_val.val1, als_val.val2);
+    
     uint8_t brightness;
     
-    if (light_level < 10) {
-        brightness = 10;  // Minimum brightness
-    } else if (light_level > 1000) {
-        brightness = 100; // Maximum brightness
+    // APDS9960 typically returns raw ADC values (0-65535 for 16-bit)
+    // Let's map common ranges to brightness percentages
+    if (light_level < 100) {
+        brightness = 10;  // Minimum brightness for dark conditions
+    } else if (light_level > 10000) {
+        brightness = 100; // Maximum brightness for bright conditions
     } else {
-        // Linear mapping from 10-1000 lux to 10-100% brightness
-        brightness = 10 + ((light_level - 10) * 90) / 990;
+        // Logarithmic mapping for better perception
+        // Map 100-10000 to 10-100% brightness
+        float log_val = log10f((float)light_level);  // log10(100)=2, log10(10000)=4
+        brightness = 10 + (uint8_t)((log_val - 2.0f) * 45.0f);  // Map 2-4 to 0-90, add 10
+        if (brightness > 100) brightness = 100;
+        if (brightness < 10) brightness = 10;
     }
     
     // Apply brightness via PWM
     set_brightness_pwm(brightness);
-    LOG_INF("💡 APDS9960: %d lux → %d%% brightness", light_level, brightness);
+    LOG_INF("💡 APDS9960: %d raw → %d%% brightness", light_level, brightness);
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -104,6 +118,14 @@ static int brightness_control_init(void) {
     }
     
     LOG_INF("✅ APDS9960 ambient light sensor READY - automatic brightness control enabled");
+    
+    // Try to do an initial sensor read to verify it's working
+    if (sensor_sample_fetch_chan(als_dev, SENSOR_CHAN_ALL) == 0) {
+        struct sensor_value test_val;
+        if (sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &test_val) == 0) {
+            LOG_INF("📊 APDS9960 initial reading: %d (raw ADC value)", test_val.val1);
+        }
+    }
     
     // Initialize work queue
     k_work_init_delayable(&brightness_work, brightness_work_handler);
