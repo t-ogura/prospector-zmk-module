@@ -94,16 +94,16 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_flex_flow(widget->obj, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);  // Right-aligned content
 
-    // Signal info title/label (short abbreviation)
+    // Signal info title/label (short abbreviation) - moved left to avoid overlap
     lv_obj_t *signal_title = lv_label_create(widget->obj);
     lv_label_set_text(signal_title, "RX:");
     lv_obj_set_style_text_font(signal_title, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(signal_title, lv_color_make(0x80, 0x80, 0x80), 0);
-    lv_obj_set_width(signal_title, 20);  // Fixed width
+    lv_obj_set_width(signal_title, 25);  // Wider width for better spacing
 
     // RSSI bar (small, 5-level indicator) - moved more to the right, subtle gray colors
     widget->rssi_bar = lv_bar_create(widget->obj);
-    lv_obj_set_size(widget->rssi_bar, 30, 8);  // Smaller to avoid overlap with dBm text
+    lv_obj_set_size(widget->rssi_bar, 25, 8);  // Even smaller to avoid overlap with dBm text
     lv_bar_set_range(widget->rssi_bar, 0, 5);
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);
@@ -118,7 +118,7 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_label_set_text(widget->rssi_label, "-99dBm");  // Set reasonable width text first
     lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_obj_set_width(widget->rssi_label, 40);  // Fixed width to prevent position changes
+    lv_obj_set_width(widget->rssi_label, 45);  // Wider to prevent overlap with bar
     lv_label_set_text(widget->rssi_label, "--dBm");  // Reset to initial text
 
     // Reception rate label (Hz) - fixed width to prevent flickering

@@ -159,7 +159,7 @@ lv_obj_t *zmk_display_status_screen() {
     
     // WPM status widget - positioned above layer display, left-aligned
     zmk_widget_wpm_status_init(&wpm_widget, screen);
-    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_CENTER, -80, -40); // Above layers, left side
+    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_CENTER, -100, -50); // Above layers, left side (moved up 10px, left 20px)
     
     // Signal status widget (RSSI + reception rate) at the very bottom RIGHT (as requested)
     zmk_widget_signal_status_init(&signal_widget, screen);
