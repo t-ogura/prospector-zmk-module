@@ -149,9 +149,9 @@ lv_obj_t *zmk_display_status_screen() {
     
     // Profile widget removed - BLE profile already shown in connection status widget
     
-    // Battery widget moved down 10px more as requested (was -40, now -30)
+    // Battery widget moved down 20px more as requested (was -40, now -20)
     zmk_widget_scanner_battery_init(&battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
     
     // Signal status widget (RSSI + reception rate) at the very bottom

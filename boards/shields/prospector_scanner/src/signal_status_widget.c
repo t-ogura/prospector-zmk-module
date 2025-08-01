@@ -24,15 +24,16 @@ static uint8_t rssi_to_bars(int8_t rssi) {
     return 0;                   // No/poor signal
 }
 
-// Get color for RSSI bar based on strength
+// Get subtle gray color for RSSI bar (less distracting)
 static lv_color_t get_rssi_color(uint8_t bars) {
+    // All bars use subtle gray variations to avoid being distracting
     switch (bars) {
-        case 5: return lv_color_make(0x00, 0xFF, 0x00);  // Green - Excellent
-        case 4: return lv_color_make(0x7F, 0xFF, 0x00);  // Light Green - Good
-        case 3: return lv_color_make(0xFF, 0xFF, 0x00);  // Yellow - Fair
-        case 2: return lv_color_make(0xFF, 0x7F, 0x00);  // Orange - Weak
-        case 1: return lv_color_make(0xFF, 0x3F, 0x00);  // Red Orange - Very weak
-        default: return lv_color_make(0xFF, 0x00, 0x00); // Red - Poor/No signal
+        case 5: return lv_color_make(0xC0, 0xC0, 0xC0);  // Light Gray - Excellent
+        case 4: return lv_color_make(0xA0, 0xA0, 0xA0);  // Medium Light Gray - Good
+        case 3: return lv_color_make(0x80, 0x80, 0x80);  // Medium Gray - Fair
+        case 2: return lv_color_make(0x60, 0x60, 0x60);  // Dark Gray - Weak
+        case 1: return lv_color_make(0x40, 0x40, 0x40);  // Darker Gray - Very weak
+        default: return lv_color_make(0x20, 0x20, 0x20); // Very Dark Gray - Poor/No signal
     }
 }
 
@@ -41,8 +42,13 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
         return;
     }
 
-    // Calculate reception rate
+    // Rate limiting: Update at most once per second (1Hz)
     uint32_t now = k_uptime_get_32();
+    if (widget->last_update_time > 0 && (now - widget->last_update_time) < 1000) {
+        return; // Skip update if less than 1 second has passed
+    }
+
+    // Calculate reception rate
     if (widget->last_update_time > 0) {
         uint32_t delta_ms = now - widget->last_update_time;
         if (delta_ms > 0) {
@@ -86,34 +92,41 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_style_border_opa(widget->obj, 0, 0);  // No border
     lv_obj_set_style_pad_all(widget->obj, 0, 0);  // No padding
     lv_obj_set_flex_flow(widget->obj, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // RSSI bar (small, 5-level indicator) - fixed visibility
+    // Signal info title/label (short abbreviation)
+    lv_obj_t *signal_title = lv_label_create(widget->obj);
+    lv_label_set_text(signal_title, "RX:");
+    lv_obj_set_style_text_font(signal_title, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(signal_title, lv_color_make(0x80, 0x80, 0x80), 0);
+    lv_obj_set_width(signal_title, 20);  // Fixed width
+
+    // RSSI bar (small, 5-level indicator) - moved more to the right, subtle gray colors
     widget->rssi_bar = lv_bar_create(widget->obj);
-    lv_obj_set_size(widget->rssi_bar, 40, 8);
+    lv_obj_set_size(widget->rssi_bar, 35, 8);
     lv_bar_set_range(widget->rssi_bar, 0, 5);
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x30, 0x30, 0x30), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_MAIN);  // Ensure background is visible
-    lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0xFF, 0x00, 0x00), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);  // Default gray
     lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);  // Ensure indicator is visible
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_INDICATOR);
 
-    // RSSI value label (dBm) - fixed width to prevent flickering
+    // RSSI value label (dBm) - fixed width to prevent flickering, smaller font
     widget->rssi_label = lv_label_create(widget->obj);
-    lv_label_set_text(widget->rssi_label, "-999dBm");  // Set widest possible text first
-    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xC0, 0xC0, 0xC0), 0);
-    lv_obj_set_width(widget->rssi_label, 50);  // Fixed width to prevent position changes
+    lv_label_set_text(widget->rssi_label, "-99dBm");  // Set reasonable width text first
+    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_10, 0);  // Smaller font
+    lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
+    lv_obj_set_width(widget->rssi_label, 40);  // Fixed width to prevent position changes
     lv_label_set_text(widget->rssi_label, "--dBm");  // Reset to initial text
 
-    // Reception rate label (Hz) - fixed width to prevent flickering
+    // Reception rate label (Hz) - fixed width to prevent flickering, smaller font
     widget->rate_label = lv_label_create(widget->obj);
-    lv_label_set_text(widget->rate_label, "99.9Hz");  // Set widest possible text first
-    lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(widget->rate_label, lv_color_make(0xC0, 0xC0, 0xC0), 0);
-    lv_obj_set_width(widget->rate_label, 45);  // Fixed width to prevent position changes
+    lv_label_set_text(widget->rate_label, "9.9Hz");  // Set reasonable width text first (1Hz rate)
+    lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_10, 0);  // Smaller font
+    lv_obj_set_style_text_color(widget->rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
+    lv_obj_set_width(widget->rate_label, 35);  // Fixed width to prevent position changes
     lv_label_set_text(widget->rate_label, "--Hz");  // Reset to initial text
 
     // Initialize timing
