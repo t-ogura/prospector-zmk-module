@@ -34,7 +34,8 @@ struct zmk_status_adv_data {
     char layer_name[4];            // Layer name (null-terminated, reduced from 6 to 4)
     uint8_t keyboard_id[4];        // Keyboard identifier
     uint8_t modifier_flags;        // Active modifier keys (Ctrl/Shift/Alt/GUI)
-    uint8_t reserved[2];           // Reserved for future use (reduced from 3 to 2)
+    uint8_t wpm_value;             // Words per minute (0-255, 0 = inactive/unknown)
+    uint8_t reserved[1];           // Reserved for future use (reduced from 2 to 1)
 } __packed;  // Total: 26 bytes
 
 /**

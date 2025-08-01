@@ -16,6 +16,7 @@
 #include "modifier_status_widget.h"
 // Profile widget removed - connection status already handled by connection_status_widget
 #include "signal_status_widget.h"
+#include "wpm_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -29,6 +30,7 @@ static struct zmk_widget_layer_status layer_widget;
 static struct zmk_widget_modifier_status modifier_widget;
 // Profile widget removed - redundant with connection status widget
 static struct zmk_widget_signal_status signal_widget;
+static struct zmk_widget_wpm_status wpm_widget;
 
 // Forward declaration
 static void trigger_scanner_start(void);
@@ -61,6 +63,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_layer_status_update(&layer_widget, kbd);
                 zmk_widget_modifier_status_update(&modifier_widget, kbd);
                 zmk_widget_signal_status_update(&signal_widget, kbd->rssi);
+                zmk_widget_wpm_status_update(&wpm_widget, kbd);
                 
                 // Enhanced debug logging including modifier flags
                 LOG_INF("🔧 SCANNER: Raw keyboard data - modifier_flags=0x%02X", kbd->data.modifier_flags);
@@ -153,6 +156,10 @@ lv_obj_t *zmk_display_status_screen() {
     zmk_widget_scanner_battery_init(&battery_widget, screen);
     lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20); // Back to center
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
+    
+    // WPM status widget - YADS-style positioned next to modifiers
+    zmk_widget_wpm_status_init(&wpm_widget, screen);
+    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_CENTER_RIGHT, -10, 30); // Right of modifiers
     
     // Signal status widget (RSSI + reception rate) at the very bottom RIGHT (as requested)
     zmk_widget_signal_status_init(&signal_widget, screen);

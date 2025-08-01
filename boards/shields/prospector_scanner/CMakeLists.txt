@@ -18,6 +18,7 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   zephyr_library_sources(src/modifier_status_widget.c)  # Modifier key status widget (C S A G)
   # zephyr_library_sources(src/profile_status_widget.c)  # Removed - redundant with connection_status_widget
   zephyr_library_sources(src/signal_status_widget.c)  # RSSI + reception rate widget
+  zephyr_library_sources(src/wpm_status_widget.c)  # YADS-style WPM display widget
   zephyr_library_sources(src/brightness_control.c)  # Auto-brightness with ambient light sensor
   # zephyr_library_sources(src/display_rotate_init.c)  # Merged into scanner_display.c
   
