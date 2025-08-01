@@ -37,19 +37,19 @@
         input-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 
-    // PWM backlight configuration (Pin 6 = P0.04)
+    // PWM backlight configuration (Pin 6 = P1.11)
     pwmleds {
         compatible = "pwm-leds";
         disp_bl: pwm_led_1 {
-            pwms = <&pwm0 4 PWM_MSEC(1) PWM_POLARITY_NORMAL>;
+            pwms = <&pwm0 0 PWM_MSEC(1) PWM_POLARITY_NORMAL>;  // Channel 0 for P1.11
         };
     };
 
-    // Alternative: Simple GPIO backlight control (Pin 6 = P0.04)
+    // Alternative: Simple GPIO backlight control (Pin 6 = P1.11)
     backlight: backlight {
         compatible = "gpio-leds";
         bl_gpio: backlight_gpio {
-            gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+            gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;  // P1.11 for Pin 6
             label = "Display Backlight";
         };
     };
@@ -86,14 +86,29 @@
 
     pwm0_default: pwm0_default {
         group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;  // Pin 6 (D6) = P1.11 = Backlight PWM
             nordic,invert;
         };
     };
 
     pwm0_sleep: pwm0_sleep {
         group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 0, 4)>;
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;  // Pin 6 (D6) = P1.11 = Backlight PWM
+            low-power-enable;
+        };
+    };
+
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 5)>,  // Pin 4 (D4) = P0.05 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 4)>;  // Pin 5 (D5) = P0.04 = SCL
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 5)>,  // Pin 4 (D4) = P0.05 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 4)>;  // Pin 5 (D5) = P0.04 = SCL
             low-power-enable;
         };
     };
@@ -135,19 +150,22 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C configuration
+// I2C configuration with correct Prospector pinouts
 &i2c0 {
     status = "okay";
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
 
     apds9960: apds9960@39 {
         compatible = "avago,apds9960";
         status = "okay";
         reg = <0x39>;
-        int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  // Pin 2 (D2) = P0.02 = INT
     };
 };
 
-// PWM0 configuration for backlight (Pin 6 = P0.04)
+// PWM0 configuration for backlight (Pin 6 = P1.11)
 &pwm0 {
     status = "okay";
     pinctrl-0 = <&pwm0_default>;
