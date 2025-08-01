@@ -39,6 +39,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/events/ble_active_profile_changed.h>
+#include <zmk/events/layer_state_changed.h>
 #include <zmk/event_manager.h>
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -113,6 +114,25 @@ static int profile_changed_listener(const zmk_event_t *eh) {
 #if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
 ZMK_LISTENER(prospector_profile_listener, profile_changed_listener);
 ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
+#endif
+
+// Layer change listener for immediate advertisement updates
+static int layer_changed_listener(const zmk_event_t *eh) {
+    const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
+    if (ev && ev->state) { // Only on layer activation
+        LOG_INF("🔄 Layer changed to %d - triggering immediate advertisement update", ev->layer);
+        if (adv_started) {
+            k_work_cancel_delayable(&adv_work);
+            k_work_schedule(&adv_work, K_NO_WAIT);
+        }
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+// Layer events only available on Central or non-Split devices
+ZMK_LISTENER(prospector_layer_listener, layer_changed_listener);
+ZMK_SUBSCRIPTION(prospector_layer_listener, zmk_layer_state_changed);
 #endif
 
 // Use ZMK's correct API for profile detection
