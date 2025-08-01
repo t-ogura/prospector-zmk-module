@@ -99,17 +99,17 @@ static int position_state_listener(const zmk_event_t *eh) {
         }
         
         // Calculate WPM every 5 key presses for more responsive updates
-        if (key_press_count % 5 == 0) {
+        if (key_press_count % 5 == 0 || (key_press_count % 2 == 0 && key_press_count <= 10)) {
             uint32_t elapsed_ms = now - wpm_start_time;
-            if (elapsed_ms > 5000) { // At least 5 seconds of data for quicker response
-                // WPM = (characters / 5) / (time_in_minutes)
-                // Assume average 5 characters per word
-                uint32_t elapsed_minutes_x100 = (elapsed_ms * 100) / (60 * 1000); // minutes * 100 for precision
-                if (elapsed_minutes_x100 > 0) {
-                    current_wpm = (key_press_count * 100) / (5 * elapsed_minutes_x100);
+            if (elapsed_ms > 2000) { // At least 2 seconds of data for quicker response
+                // Corrected WPM calculation: Keys per minute
+                // WPM = (key_presses * 60_seconds) / elapsed_seconds
+                uint32_t elapsed_seconds = elapsed_ms / 1000;
+                if (elapsed_seconds > 0) {
+                    current_wpm = (key_press_count * 60) / elapsed_seconds;
                     if (current_wpm > 255) current_wpm = 255; // Cap at 255
                 }
-                LOG_DBG("📊 WPM calculated: %d (keys: %d, time: %dms)", current_wpm, key_press_count, elapsed_ms);
+                LOG_DBG("📊 WPM calculated: %d (keys: %d, elapsed: %ds)", current_wpm, key_press_count, elapsed_seconds);
             }
         }
         
@@ -285,10 +285,10 @@ static void build_manufacturer_payload(void) {
         } else {
             // Continuously recalculate WPM for real-time updates (including decrease)
             uint32_t elapsed_ms = now - wpm_start_time;
-            if (elapsed_ms > 5000) { // At least 5 seconds of data
-                uint32_t elapsed_minutes_x100 = (elapsed_ms * 100) / (60 * 1000);
-                if (elapsed_minutes_x100 > 0) {
-                    current_wpm = (key_press_count * 100) / (5 * elapsed_minutes_x100);
+            if (elapsed_ms > 2000) { // At least 2 seconds of data
+                uint32_t elapsed_seconds = elapsed_ms / 1000;
+                if (elapsed_seconds > 0) {
+                    current_wpm = (key_press_count * 60) / elapsed_seconds;
                     if (current_wpm > 255) current_wpm = 255;
                 }
             }
