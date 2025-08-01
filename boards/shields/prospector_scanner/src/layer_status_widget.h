@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define MAX_LAYER_DISPLAY 7  // Display layers 0-6
+#define MAX_LAYER_DISPLAY (CONFIG_PROSPECTOR_MAX_LAYERS + 1)  // Display layers 0 to CONFIG_PROSPECTOR_MAX_LAYERS
 
 struct zmk_widget_layer_status {
     lv_obj_t *obj;

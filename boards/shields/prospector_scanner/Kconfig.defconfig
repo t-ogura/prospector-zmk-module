@@ -78,4 +78,12 @@ config PROSPECTOR_FIXED_BRIGHTNESS
     help
       Fixed brightness level when ambient light sensor is not used
 
+config PROSPECTOR_MAX_LAYERS
+    int "Maximum number of layers to display"
+    default 6
+    range 4 10
+    help
+      Maximum number of layers to display on the scanner (0 to MAX_LAYERS).
+      Default is 6 (displays layers 0-5). Increase for keyboards with more layers.
+
 endif # SHIELD_PROSPECTOR_SCANNER

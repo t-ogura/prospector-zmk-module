@@ -29,7 +29,7 @@ static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool conne
         lv_bar_set_value(bar, level, LV_ANIM_OFF);
         lv_label_set_text_fmt(num, "%d", level);
         
-        // Color-coded battery level visualization (requested feature)
+        // 5-level color-coded battery visualization (enhanced scheme)
         if (level >= 80) {
             // 80%+ Green
             lv_obj_set_style_bg_color(bar, lv_color_hex(0x00CC66), LV_PART_INDICATOR);
@@ -48,8 +48,14 @@ static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool conne
             lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFFDD33), LV_PART_INDICATOR);
             lv_obj_set_style_bg_color(bar, lv_color_hex(0x332200), LV_PART_MAIN);
             lv_obj_set_style_text_color(num, lv_color_hex(0xFFDD33), 0);
+        } else if (level >= 20) {
+            // 20-39% Orange (new level)
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFF9933), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x331100), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0xFF9933), 0);
         } else {
-            // <40% Red
+            // <20% Red (critical level)
             lv_obj_set_style_bg_color(bar, lv_color_hex(0xFF3333), LV_PART_INDICATOR);
             lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFF6666), LV_PART_INDICATOR);
             lv_obj_set_style_bg_color(bar, lv_color_hex(0x330000), LV_PART_MAIN);
@@ -146,7 +152,7 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
         return;
     }
     
-    LOG_INF("Battery widget update - Role:%d, Central:%d%%, Peripheral:[%d,%d,%d]", 
+    LOG_DBG("Battery widget update - Role:%d, Central:%d%%, Peripheral:[%d,%d,%d]", 
             status->data.device_role, status->data.battery_level,
             status->data.peripheral_battery[0], status->data.peripheral_battery[1], 
             status->data.peripheral_battery[2]);

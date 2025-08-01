@@ -87,7 +87,7 @@ static int position_state_listener(const zmk_event_t *eh) {
         bool was_active = is_active;
         is_active = true;
         
-        LOG_INF("🔥 Key activity detected - switching to high frequency updates");
+        LOG_DBG("🔥 Key activity detected - switching to high frequency updates");
         
         // Immediately trigger update if switching from idle to active
         if (!was_active && adv_started) {
@@ -103,7 +103,7 @@ ZMK_SUBSCRIPTION(prospector_position_listener, zmk_position_state_changed);
 
 // Profile change listener for immediate advertisement updates
 static int profile_changed_listener(const zmk_event_t *eh) {
-    LOG_INF("📡 BLE profile changed - updating advertisement");
+    LOG_DBG("📡 BLE profile changed - updating advertisement");
     if (adv_started) {
         k_work_cancel_delayable(&adv_work);
         k_work_schedule(&adv_work, K_NO_WAIT);
@@ -120,7 +120,7 @@ ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
 static int layer_changed_listener(const zmk_event_t *eh) {
     const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
     if (ev && ev->state) { // Only on layer activation
-        LOG_INF("🔄 Layer changed to %d - triggering immediate advertisement update", ev->layer);
+        LOG_DBG("🔄 Layer changed to %d - triggering immediate advertisement update", ev->layer);
         if (adv_started) {
             k_work_cancel_delayable(&adv_work);
             k_work_schedule(&adv_work, K_NO_WAIT);
@@ -151,7 +151,7 @@ static uint32_t get_current_update_interval(void) {
     // Check if we should transition from active to idle
     if (is_active && (now - last_activity_time) > ACTIVITY_TIMEOUT_MS) {
         is_active = false;
-        LOG_INF("💤 Switching to idle mode - reducing update frequency");
+        LOG_DBG("💤 Switching to idle mode - reducing update frequency");
     }
     
     // Check connection states using reliable APIs
@@ -279,7 +279,7 @@ static void build_manufacturer_payload(void) {
     
     // Profile slot (0-4) as selected in ZMK's settings
     manufacturer_data.profile_slot = get_active_profile_slot();
-    LOG_INF("📡 Active profile slot: %d", manufacturer_data.profile_slot);
+    LOG_DBG("📡 Active profile slot: %d", manufacturer_data.profile_slot);
     
     // Connection count approximation - count active BLE connections + USB
     uint8_t connection_count = 1; // Assume at least one connection (BLE advertising implies connection capability)
@@ -382,12 +382,12 @@ static void build_manufacturer_payload(void) {
 #endif
     
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    LOG_INF("Prospector %s: Central %d%%, Peripheral [%d,%d,%d], Layer %d", 
+    LOG_DBG("Prospector %s: Central %d%%, Peripheral [%d,%d,%d], Layer %d", 
             role_str, battery_level, 
             peripheral_batteries[0], peripheral_batteries[1], peripheral_batteries[2],
             layer);
 #else
-    LOG_INF("Prospector %s: Battery %d%%, Layer %d", 
+    LOG_DBG("Prospector %s: Battery %d%%, Layer %d", 
             role_str, battery_level, layer);
 #endif
 }
@@ -418,7 +418,7 @@ static void start_custom_advertising(void) {
 #endif
 
     if (!default_adv_stopped) {
-        LOG_INF("Default advertising not stopped yet, trying again");
+        LOG_DBG("Default advertising not stopped yet, trying again");
         stop_default_advertising(NULL);
         k_sleep(K_MSEC(50)); // Wait for stop to complete
     }
@@ -439,9 +439,9 @@ static void start_custom_advertising(void) {
     // Update scan response data length
     scan_rsp[0].data_len = actual_name_len;
     
-    LOG_INF("Prospector: Starting separated adv/scan_rsp advertising");
-    LOG_INF("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
-    LOG_INF("SCAN_RSP: Name + Appearance = %d bytes", 2 + actual_name_len + 3);
+    LOG_DBG("Prospector: Starting separated adv/scan_rsp advertising");
+    LOG_DBG("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
+    LOG_DBG("SCAN_RSP: Name + Appearance = %d bytes", 2 + actual_name_len + 3);
     
     // This approach keeps manufacturer_data at full 26 bytes while device name in scan response
     LOG_INF("✅ Advertisement stays within 31-byte limit: %d bytes", 3 + 2 + sizeof(manufacturer_data));
