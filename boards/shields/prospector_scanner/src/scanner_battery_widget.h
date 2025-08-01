@@ -7,8 +7,7 @@
 struct zmk_widget_scanner_battery {
     sys_snode_t node;
     lv_obj_t *obj;
-    lv_obj_t *central_label;      // "Central" label
-    lv_obj_t *peripheral_label;   // "Peripheral" label
+    // Central/Peripheral labels removed for cleaner display
 };
 
 int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, lv_obj_t *parent);
