@@ -14,7 +14,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static const struct device *pwm_dev;
 
-// PWM configuration for backlight control (Pin 6 = P0.04)
+// PWM configuration for backlight control (Pin 6 = P0.43)
 #define PWM_PERIOD_USEC 1000U  // 1ms period = 1kHz
 #define PWM_FLAGS 0
 
