@@ -92,7 +92,7 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_style_border_opa(widget->obj, 0, 0);  // No border
     lv_obj_set_style_pad_all(widget->obj, 0, 0);  // No padding
     lv_obj_set_flex_flow(widget->obj, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);  // Right-aligned content
 
     // Signal info title/label (short abbreviation)
     lv_obj_t *signal_title = lv_label_create(widget->obj);
@@ -103,7 +103,7 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
 
     // RSSI bar (small, 5-level indicator) - moved more to the right, subtle gray colors
     widget->rssi_bar = lv_bar_create(widget->obj);
-    lv_obj_set_size(widget->rssi_bar, 35, 8);
+    lv_obj_set_size(widget->rssi_bar, 30, 8);  // Smaller to avoid overlap with dBm text
     lv_bar_set_range(widget->rssi_bar, 0, 5);
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);

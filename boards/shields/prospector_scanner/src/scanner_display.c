@@ -157,9 +157,9 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20); // Back to center
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
     
-    // WPM status widget - YADS-style positioned next to modifiers
+    // WPM status widget - positioned above layer display, left-aligned
     zmk_widget_wpm_status_init(&wpm_widget, screen);
-    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_CENTER, 80, 30); // Right of modifiers
+    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_CENTER, -80, -40); // Above layers, left side
     
     // Signal status widget (RSSI + reception rate) at the very bottom RIGHT (as requested)
     zmk_widget_signal_status_init(&signal_widget, screen);

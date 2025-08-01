@@ -28,14 +28,9 @@ void zmk_widget_wpm_status_update(struct zmk_widget_wpm_status *widget, struct z
     widget->last_wpm_value = wpm_value;
     
     // Update WPM display - YADS-style format
-    if (wpm_value > 0) {
-        lv_label_set_text_fmt(widget->wpm_label, "%d", wpm_value);
-        LOG_DBG("WPM widget updated: %d", wpm_value);
-    } else {
-        // Show "---" when WPM is 0 or unavailable
-        lv_label_set_text(widget->wpm_label, "---");
-        LOG_DBG("WPM widget updated: inactive");
-    }
+    // Always show numeric value (0 when inactive/unavailable)
+    lv_label_set_text_fmt(widget->wpm_label, "%d", wpm_value);
+    LOG_DBG("WPM widget updated: %d", wpm_value);
 }
 
 int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *parent) {
@@ -53,7 +48,7 @@ int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *p
     // Create WPM label - YADS-style numeric display
     widget->wpm_label = lv_label_create(widget->obj);
     lv_obj_align(widget->wpm_label, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(widget->wpm_label, "---");  // Initial inactive state
+    lv_label_set_text(widget->wpm_label, "0");  // Initial inactive state (0 instead of ---)
     
     // YADS-style typography
     lv_obj_set_style_text_font(widget->wpm_label, &lv_font_montserrat_16, 0);  // Medium size font
