@@ -48,9 +48,9 @@ int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *p
     lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);  // No border
     lv_obj_set_style_pad_all(widget->obj, 0, 0);  // No padding
     
-    // Create WPM title label (small font)
+    // Create WPM title label (small font) - moved down 3px
     widget->wpm_title_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->wpm_title_label, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_align(widget->wpm_title_label, LV_ALIGN_TOP_MID, 0, 3);
     lv_label_set_text(widget->wpm_title_label, "WPM");
     lv_obj_set_style_text_font(widget->wpm_title_label, &lv_font_unscii_8, 0);  // Small font
     lv_obj_set_style_text_color(widget->wpm_title_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);  // Gray text

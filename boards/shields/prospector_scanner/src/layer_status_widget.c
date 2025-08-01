@@ -64,10 +64,10 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(widget->obj, 0, 0);
     
-    // Create stylish "Layer" title label (larger font)
+    // Create stylish "Layer" title label (smaller font)
     widget->layer_title = lv_label_create(widget->obj);
     lv_label_set_text(widget->layer_title, "Layer");
-    lv_obj_set_style_text_font(widget->layer_title, &lv_font_montserrat_18, 0); // Larger title font (enabled via config)
+    lv_obj_set_style_text_font(widget->layer_title, &lv_font_montserrat_14, 0); // Smaller title font
     lv_obj_set_style_text_color(widget->layer_title, lv_color_make(160, 160, 160), 0); // Soft gray
     lv_obj_set_style_text_opa(widget->layer_title, LV_OPA_70, 0);
     lv_obj_align(widget->layer_title, LV_ALIGN_TOP_MID, 0, -5); // Above the numbers

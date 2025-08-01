@@ -133,6 +133,19 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     lv_obj_set_style_pad_bottom(widget->obj, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(widget->obj, 16, LV_PART_MAIN);
     
+    // Create Central/Peripheral labels above battery displays
+    widget->central_label = lv_label_create(widget->obj);
+    lv_label_set_text(widget->central_label, "Central");
+    lv_obj_set_style_text_font(widget->central_label, &lv_font_unscii_8, 0);  // Small font like WPM
+    lv_obj_set_style_text_color(widget->central_label, lv_color_white(), 0);  // White text
+    lv_obj_align(widget->central_label, LV_ALIGN_TOP_LEFT, 30, 0);  // Position above left battery
+    
+    widget->peripheral_label = lv_label_create(widget->obj);
+    lv_label_set_text(widget->peripheral_label, "Peripheral");
+    lv_obj_set_style_text_font(widget->peripheral_label, &lv_font_unscii_8, 0);  // Small font like WPM
+    lv_obj_set_style_text_color(widget->peripheral_label, lv_color_white(), 0);  // White text
+    lv_obj_align(widget->peripheral_label, LV_ALIGN_TOP_RIGHT, -30, 0);  // Position above right battery
+    
     // Create containers for Central and Peripheral devices
     // For now, create 2 containers (Central + 1 Peripheral)
     // This can be expanded later for more peripherals

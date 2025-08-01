@@ -98,10 +98,10 @@ static int position_state_listener(const zmk_event_t *eh) {
             wpm_start_time = now;
         }
         
-        // Calculate WPM every 10 key presses (for performance)
-        if (key_press_count % 10 == 0) {
+        // Calculate WPM every 5 key presses for more responsive updates
+        if (key_press_count % 5 == 0) {
             uint32_t elapsed_ms = now - wpm_start_time;
-            if (elapsed_ms > 10000) { // At least 10 seconds of data
+            if (elapsed_ms > 5000) { // At least 5 seconds of data for quicker response
                 // WPM = (characters / 5) / (time_in_minutes)
                 // Assume average 5 characters per word
                 uint32_t elapsed_minutes_x100 = (elapsed_ms * 100) / (60 * 1000); // minutes * 100 for precision
@@ -273,14 +273,26 @@ static void build_manufacturer_payload(void) {
     // Build 26-byte structured manufacturer data
     memset(&manufacturer_data, 0, sizeof(manufacturer_data));
     
-    // Check if WPM should be reset (no activity for 5 minutes)
+    // Check if WPM should be reset (no activity for 3 minutes) or recalculated
     uint32_t now = k_uptime_get_32();
-    if (wpm_start_time > 0 && (now - last_activity_time) > (5 * 60 * 1000)) {
-        // Reset WPM calculation after 5 minutes of inactivity
-        current_wpm = 0;
-        key_press_count = 0;
-        wpm_start_time = 0;
-        LOG_DBG("📊 WPM reset due to inactivity");
+    if (wpm_start_time > 0) {
+        if ((now - last_activity_time) > (3 * 60 * 1000)) {
+            // Reset WPM calculation after 3 minutes of inactivity
+            current_wpm = 0;
+            key_press_count = 0;
+            wpm_start_time = 0;
+            LOG_DBG("📊 WPM reset due to inactivity");
+        } else {
+            // Continuously recalculate WPM for real-time updates (including decrease)
+            uint32_t elapsed_ms = now - wpm_start_time;
+            if (elapsed_ms > 5000) { // At least 5 seconds of data
+                uint32_t elapsed_minutes_x100 = (elapsed_ms * 100) / (60 * 1000);
+                if (elapsed_minutes_x100 > 0) {
+                    current_wpm = (key_press_count * 100) / (5 * elapsed_minutes_x100);
+                    if (current_wpm > 255) current_wpm = 255;
+                }
+            }
+        }
     }
     
     // Fixed header fields
