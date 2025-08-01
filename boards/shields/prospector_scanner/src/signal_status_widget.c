@@ -85,9 +85,9 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
         return -1;
     }
 
-    // Create container (20px height as requested)
+    // Create container (20px height as requested) - full width for better spacing
     widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, lv_pct(90), 20);
+    lv_obj_set_size(widget->obj, lv_pct(95), 20);
     lv_obj_set_style_bg_opa(widget->obj, 0, 0);  // Transparent background
     lv_obj_set_style_border_opa(widget->obj, 0, 0);  // No border
     lv_obj_set_style_pad_all(widget->obj, 0, 0);  // No padding
@@ -101,9 +101,9 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_style_text_color(signal_title, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_obj_set_width(signal_title, 25);  // Wider width for better spacing
 
-    // RSSI bar (small, 5-level indicator) - moved more to the right, subtle gray colors
+    // RSSI bar (small, 5-level indicator) - reduced size to avoid overlap
     widget->rssi_bar = lv_bar_create(widget->obj);
-    lv_obj_set_size(widget->rssi_bar, 25, 8);  // Even smaller to avoid overlap with dBm text
+    lv_obj_set_size(widget->rssi_bar, 20, 8);  // Smaller width to prevent overlap
     lv_bar_set_range(widget->rssi_bar, 0, 5);
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);
@@ -113,20 +113,20 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_INDICATOR);
 
-    // RSSI value label (dBm) - fixed width to prevent flickering
+    // RSSI value label (dBm) - wider width to prevent text wrapping
     widget->rssi_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->rssi_label, "-99dBm");  // Set reasonable width text first
     lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_obj_set_width(widget->rssi_label, 45);  // Wider to prevent overlap with bar
+    lv_obj_set_width(widget->rssi_label, 50);  // Wider to ensure no wrapping
     lv_label_set_text(widget->rssi_label, "--dBm");  // Reset to initial text
 
-    // Reception rate label (Hz) - fixed width to prevent flickering
+    // Reception rate label (Hz) - compact width for right alignment
     widget->rate_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->rate_label, "9.9Hz");  // Set reasonable width text first (1Hz rate)
     lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(widget->rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_obj_set_width(widget->rate_label, 35);  // Fixed width to prevent position changes
+    lv_obj_set_width(widget->rate_label, 40);  // Slightly wider for stability
     lv_label_set_text(widget->rate_label, "--Hz");  // Reset to initial text
 
     // Initialize timing
