@@ -102,11 +102,11 @@ static int position_state_listener(const zmk_event_t *eh) {
         if (key_press_count % 5 == 0 || (key_press_count % 2 == 0 && key_press_count <= 10)) {
             uint32_t elapsed_ms = now - wpm_start_time;
             if (elapsed_ms > 2000) { // At least 2 seconds of data for quicker response
-                // Corrected WPM calculation: Keys per minute
-                // WPM = (key_presses * 60_seconds) / elapsed_seconds
+                // Correct WPM calculation: Words per minute (5 chars = 1 word)
+                // WPM = (key_presses ÷ 5 chars/word * 60_seconds) / elapsed_seconds
                 uint32_t elapsed_seconds = elapsed_ms / 1000;
                 if (elapsed_seconds > 0) {
-                    current_wpm = (key_press_count * 60) / elapsed_seconds;
+                    current_wpm = (key_press_count * 60) / (elapsed_seconds * 5); // Divide by 5 for words
                     if (current_wpm > 255) current_wpm = 255; // Cap at 255
                 }
                 LOG_DBG("📊 WPM calculated: %d (keys: %d, elapsed: %ds)", current_wpm, key_press_count, elapsed_seconds);
@@ -288,7 +288,7 @@ static void build_manufacturer_payload(void) {
             if (elapsed_ms > 2000) { // At least 2 seconds of data
                 uint32_t elapsed_seconds = elapsed_ms / 1000;
                 if (elapsed_seconds > 0) {
-                    current_wpm = (key_press_count * 60) / elapsed_seconds;
+                    current_wpm = (key_press_count * 60) / (elapsed_seconds * 5); // Divide by 5 for words
                     if (current_wpm > 255) current_wpm = 255;
                 }
             }
