@@ -5,6 +5,7 @@
  */
 
 #include <lvgl.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zmk/status_scanner.h>
 #include "signal_status_widget.h"

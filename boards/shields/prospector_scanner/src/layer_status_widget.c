@@ -14,24 +14,19 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // Stylish pastel colors for layers - expandable array
 static lv_color_t get_layer_color(int layer) {
-    // Extended pastel color palette for up to 10 layers
-    static const lv_color_t layer_colors[] = {
-        {.full = lv_color_make(0xFF, 0x9B, 0x9B)},  // Layer 0: Soft Coral Pink
-        {.full = lv_color_make(0xFF, 0xD9, 0x3D)},  // Layer 1: Sunny Yellow  
-        {.full = lv_color_make(0x6B, 0xCF, 0x7F)},  // Layer 2: Mint Green
-        {.full = lv_color_make(0x4D, 0x96, 0xFF)},  // Layer 3: Sky Blue
-        {.full = lv_color_make(0xB1, 0x9C, 0xD9)},  // Layer 4: Lavender Purple
-        {.full = lv_color_make(0xFF, 0x6B, 0x9D)},  // Layer 5: Rose Pink
-        {.full = lv_color_make(0xFF, 0x9F, 0x43)},  // Layer 6: Peach Orange
-        {.full = lv_color_make(0x87, 0xCE, 0xEB)},  // Layer 7: Light Sky Blue
-        {.full = lv_color_make(0xF0, 0xE6, 0x8C)},  // Layer 8: Light Khaki
-        {.full = lv_color_make(0xDD, 0xA0, 0xDD)},  // Layer 9: Plum
-    };
-    
-    if (layer >= 0 && layer < (int)(sizeof(layer_colors) / sizeof(layer_colors[0]))) {
-        return layer_colors[layer];
+    switch (layer) {
+        case 0: return lv_color_make(0xFF, 0x9B, 0x9B);  // Layer 0: Soft Coral Pink
+        case 1: return lv_color_make(0xFF, 0xD9, 0x3D);  // Layer 1: Sunny Yellow  
+        case 2: return lv_color_make(0x6B, 0xCF, 0x7F);  // Layer 2: Mint Green
+        case 3: return lv_color_make(0x4D, 0x96, 0xFF);  // Layer 3: Sky Blue
+        case 4: return lv_color_make(0xB1, 0x9C, 0xD9);  // Layer 4: Lavender Purple
+        case 5: return lv_color_make(0xFF, 0x6B, 0x9D);  // Layer 5: Rose Pink
+        case 6: return lv_color_make(0xFF, 0x9F, 0x43);  // Layer 6: Peach Orange
+        case 7: return lv_color_make(0x87, 0xCE, 0xEB);  // Layer 7: Light Sky Blue
+        case 8: return lv_color_make(0xF0, 0xE6, 0x8C);  // Layer 8: Light Khaki
+        case 9: return lv_color_make(0xDD, 0xA0, 0xDD);  // Layer 9: Plum
+        default: return lv_color_white(); // Fallback for undefined layers
     }
-    return lv_color_white(); // Fallback for undefined layers
 }
 
 static void update_layer_display(struct zmk_widget_layer_status *widget, struct zmk_keyboard_status *kbd) {
