@@ -20,7 +20,8 @@ extern "C" {
  */
 struct zmk_widget_wpm_status {
     lv_obj_t *obj;
-    lv_obj_t *wpm_label;
+    lv_obj_t *wpm_title_label;    // "WPM" label (small font)
+    lv_obj_t *wpm_value_label;    // Number value (normal font)
     uint8_t last_wpm_value;
 };
 

@@ -27,9 +27,12 @@ void zmk_widget_wpm_status_update(struct zmk_widget_wpm_status *widget, struct z
     
     widget->last_wpm_value = wpm_value;
     
-    // Update WPM display - YADS-style format
-    // Always show numeric value (0 when inactive/unavailable)
-    lv_label_set_text_fmt(widget->wpm_label, "%d", wpm_value);
+    // Update WPM display with MAX!! for 255  
+    if (wpm_value >= 255) {
+        lv_label_set_text(widget->wpm_value_label, "MAX!!");
+    } else {
+        lv_label_set_text_fmt(widget->wpm_value_label, "%d", wpm_value);
+    }
     LOG_DBG("WPM widget updated: %d", wpm_value);
 }
 
@@ -38,27 +41,33 @@ int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *p
         return -1;
     }
     
-    // Create container widget - YADS-style compact design
+    // Create container widget - enhanced design with title + value
     widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 50, 25);  // Compact size for WPM display
+    lv_obj_set_size(widget->obj, 60, 35);  // Larger size for title + value
     lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);  // Transparent background
     lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);  // No border
     lv_obj_set_style_pad_all(widget->obj, 0, 0);  // No padding
     
-    // Create WPM label - YADS-style numeric display
-    widget->wpm_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->wpm_label, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(widget->wpm_label, "0");  // Initial inactive state (0 instead of ---)
+    // Create WPM title label (small font)
+    widget->wpm_title_label = lv_label_create(widget->obj);
+    lv_obj_align(widget->wpm_title_label, LV_ALIGN_TOP_MID, 0, 0);
+    lv_label_set_text(widget->wpm_title_label, "WPM");
+    lv_obj_set_style_text_font(widget->wpm_title_label, &lv_font_unscii_8, 0);  // Small font
+    lv_obj_set_style_text_color(widget->wpm_title_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);  // Gray text
+    lv_obj_set_style_text_align(widget->wpm_title_label, LV_TEXT_ALIGN_CENTER, 0);
     
-    // YADS-style typography
-    lv_obj_set_style_text_font(widget->wpm_label, &lv_font_montserrat_16, 0);  // Medium size font
-    lv_obj_set_style_text_color(widget->wpm_label, lv_color_make(0xFF, 0xFF, 0xFF), 0);  // White text
-    lv_obj_set_style_text_align(widget->wpm_label, LV_TEXT_ALIGN_CENTER, 0);
+    // Create WPM value label (normal font)
+    widget->wpm_value_label = lv_label_create(widget->obj);
+    lv_obj_align(widget->wpm_value_label, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_label_set_text(widget->wpm_value_label, "0");  // Initial inactive state
+    lv_obj_set_style_text_font(widget->wpm_value_label, &lv_font_montserrat_16, 0);  // Normal size font
+    lv_obj_set_style_text_color(widget->wpm_value_label, lv_color_make(0xFF, 0xFF, 0xFF), 0);  // White text
+    lv_obj_set_style_text_align(widget->wpm_value_label, LV_TEXT_ALIGN_CENTER, 0);
     
     // Initialize state
     widget->last_wpm_value = 0;
     
-    LOG_INF("YADS-style WPM status widget initialized");
+    LOG_INF("Enhanced WPM status widget initialized with title + value layout");
     return 0;
 }
 
