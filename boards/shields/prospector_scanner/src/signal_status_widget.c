@@ -97,7 +97,7 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     // Signal info title/label (short abbreviation)
     lv_obj_t *signal_title = lv_label_create(widget->obj);
     lv_label_set_text(signal_title, "RX:");
-    lv_obj_set_style_text_font(signal_title, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(signal_title, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(signal_title, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_obj_set_width(signal_title, 20);  // Fixed width
 
@@ -113,18 +113,18 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_INDICATOR);
 
-    // RSSI value label (dBm) - fixed width to prevent flickering, smaller font
+    // RSSI value label (dBm) - fixed width to prevent flickering
     widget->rssi_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->rssi_label, "-99dBm");  // Set reasonable width text first
-    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_10, 0);  // Smaller font
+    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
     lv_obj_set_width(widget->rssi_label, 40);  // Fixed width to prevent position changes
     lv_label_set_text(widget->rssi_label, "--dBm");  // Reset to initial text
 
-    // Reception rate label (Hz) - fixed width to prevent flickering, smaller font
+    // Reception rate label (Hz) - fixed width to prevent flickering
     widget->rate_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->rate_label, "9.9Hz");  // Set reasonable width text first (1Hz rate)
-    lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_10, 0);  // Smaller font
+    lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(widget->rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
     lv_obj_set_width(widget->rate_label, 35);  // Fixed width to prevent position changes
     lv_label_set_text(widget->rate_label, "--Hz");  // Reset to initial text
