@@ -60,9 +60,12 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
     // Update RSSI value label
     lv_label_set_text_fmt(widget->rssi_label, "%ddBm", rssi);
 
-    // Update reception rate label  
+    // Update reception rate label with manual formatting (float formatting issues in LVGL)
     if (widget->last_rate_hz > 0) {
-        lv_label_set_text_fmt(widget->rate_label, "%.1fHz", widget->last_rate_hz);
+        char rate_text[16];
+        int rate_int = (int)(widget->last_rate_hz * 10);  // Convert to tenths
+        snprintf(rate_text, sizeof(rate_text), "%d.%dHz", rate_int / 10, rate_int % 10);
+        lv_label_set_text(widget->rate_label, rate_text);
     } else {
         lv_label_set_text(widget->rate_label, "--Hz");
     }

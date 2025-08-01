@@ -43,8 +43,8 @@ static struct profile_status_state get_state(const zmk_event_t *_eh) {
 static void set_profile_display(struct zmk_widget_profile_status *widget, struct profile_status_state state) {
     char profile_text[32];
     
-    // Display active profile number (0-4)
-    snprintf(profile_text, sizeof(profile_text), "Profile: %d", state.active_profile_index);
+    // Display active profile number (0-4) - compact format
+    snprintf(profile_text, sizeof(profile_text), "P%d", state.active_profile_index);
     lv_label_set_text(widget->profile_label, profile_text);
     
     // Set connection status color
@@ -75,15 +75,16 @@ ZMK_SUBSCRIPTION(widget_profile_status, zmk_usb_conn_state_changed);
 
 int zmk_widget_profile_status_init(struct zmk_widget_profile_status *widget, lv_obj_t *parent) {
     widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 180, 40);
+    lv_obj_set_size(widget->obj, 30, 20);  // Much smaller for compact display
     lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(widget->obj, 0, 0);
     
     widget->profile_label = lv_label_create(widget->obj);
     lv_obj_align(widget->profile_label, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(widget->profile_label, "Profile: 0");
+    lv_label_set_text(widget->profile_label, "P0");
     lv_obj_set_style_text_color(widget->profile_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(widget->profile_label, &lv_font_montserrat_12, 0);  // Small font
     
     sys_slist_append(&widgets, &widget->node);
     widget_profile_status_init();

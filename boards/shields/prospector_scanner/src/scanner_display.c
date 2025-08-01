@@ -147,9 +147,9 @@ lv_obj_t *zmk_display_status_screen() {
     zmk_widget_modifier_status_init(&modifier_widget, screen);
     lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30); // Was 20, now 30
     
-    // Profile status widget (using ZMK Display Widget pattern) - in left side
+    // Profile status widget - compact, top-right corner
     zmk_widget_profile_status_init(&profile_widget, screen);
-    lv_obj_align(zmk_widget_profile_status_obj(&profile_widget), LV_ALIGN_LEFT_MID, 10, 60);
+    lv_obj_align(zmk_widget_profile_status_obj(&profile_widget), LV_ALIGN_TOP_RIGHT, -5, 25);
     
     // Battery widget moved up 10px to make room for signal widget
     zmk_widget_scanner_battery_init(&battery_widget, screen);
