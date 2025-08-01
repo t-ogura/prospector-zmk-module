@@ -8,34 +8,34 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/pwm.h>
+#include <zephyr/drivers/led.h>
 #include <zephyr/logging/log.h>
-#include <math.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-static const struct device *pwm_dev;
+// LED driver for backlight control (following original Prospector approach)
+static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
+#define DISP_BL DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl))
 
-// PWM configuration for backlight control (Pin 6 = P1.11)
-#define PWM_PERIOD_USEC 1000U  // 1ms period = 1kHz
-#define PWM_FLAGS 0
+// Sensor value range from original Prospector (0-100, not raw ADC)
+#define SENSOR_MIN      0       // Minimum sensor reading
+#define SENSOR_MAX      100     // Maximum sensor reading  
+#define PWM_MIN         10      // Minimum brightness (%) - keep display visible
+#define PWM_MAX         100     // Maximum brightness (%)
 
 static void set_brightness_pwm(uint8_t brightness_percent) {
-    if (!pwm_dev || !device_is_ready(pwm_dev)) {
-        LOG_ERR("PWM device not ready for brightness control");
+    if (!device_is_ready(pwm_leds_dev)) {
+        LOG_ERR("❌ PWM LEDs device not ready for brightness control");
         return;
     }
     
-    // Convert percentage to PWM duty cycle
-    uint32_t pulse_width_nsec = (PWM_PERIOD_USEC * 1000 * brightness_percent) / 100;
-    uint32_t period_nsec = PWM_PERIOD_USEC * 1000;
-    
-    int ret = pwm_set(pwm_dev, 0, period_nsec, pulse_width_nsec, PWM_FLAGS);
+    // Use LED API like original Prospector
+    int ret = led_set_brightness(pwm_leds_dev, DISP_BL, brightness_percent);
     
     if (ret < 0) {
-        LOG_ERR("❌ Failed to set PWM brightness: %d", ret);
+        LOG_ERR("❌ Failed to set LED brightness: %d", ret);
     } else {
-        LOG_DBG("✅ Backlight PWM: %d%% (pulse: %d/%d nsec)", 
-                brightness_percent, pulse_width_nsec, period_nsec);
+        LOG_DBG("✅ Backlight brightness: %d%%", brightness_percent);
     }
 }
 
@@ -49,7 +49,8 @@ static void update_brightness(void) {
         return;
     }
     
-    int ret = sensor_sample_fetch_chan(als_dev, SENSOR_CHAN_ALL);
+    // Use sensor_sample_fetch like original Prospector
+    int ret = sensor_sample_fetch(als_dev);
     if (ret < 0) {
         LOG_WRN("Failed to fetch ALS sample: %d", ret);
         return;
@@ -73,24 +74,21 @@ static void update_brightness(void) {
     
     uint8_t brightness;
     
-    // APDS9960 typically returns raw ADC values (0-65535 for 16-bit)
-    // Let's map common ranges to brightness percentages
-    if (light_level < 100) {
-        brightness = 10;  // Minimum brightness for dark conditions
-    } else if (light_level > 10000) {
-        brightness = 100; // Maximum brightness for bright conditions
+    // Original Prospector uses 0-100 range for sensor values
+    // Handle invalid readings
+    if (light_level < SENSOR_MIN) {
+        brightness = PWM_MIN;  // Default to minimum brightness
+    } else if (light_level > SENSOR_MAX) {
+        brightness = PWM_MAX;  // Cap at maximum
     } else {
-        // Logarithmic mapping for better perception
-        // Map 100-10000 to 10-100% brightness
-        float log_val = log10f((float)light_level);  // log10(100)=2, log10(10000)=4
-        brightness = 10 + (uint8_t)((log_val - 2.0f) * 45.0f);  // Map 2-4 to 0-90, add 10
-        if (brightness > 100) brightness = 100;
-        if (brightness < 10) brightness = 10;
+        // Linear mapping like original Prospector
+        brightness = PWM_MIN + ((PWM_MAX - PWM_MIN) * 
+                               (light_level - SENSOR_MIN)) / (SENSOR_MAX - SENSOR_MIN);
     }
     
-    // Apply brightness via PWM
+    // Apply brightness via LED API
     set_brightness_pwm(brightness);
-    LOG_INF("💡 APDS9960: %d raw → %d%% brightness", light_level, brightness);
+    LOG_INF("💡 APDS9960: %d → %d%% brightness", light_level, brightness);
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -101,10 +99,9 @@ static void brightness_work_handler(struct k_work *work) {
 }
 
 static int brightness_control_init(void) {
-    // Initialize PWM device
-    pwm_dev = DEVICE_DT_GET(DT_NODELABEL(pwm1));
-    if (!device_is_ready(pwm_dev)) {
-        LOG_ERR("PWM device not ready");
+    // Initialize PWM LEDs device (using LED API)
+    if (!device_is_ready(pwm_leds_dev)) {
+        LOG_ERR("PWM LEDs device not ready");
         return -ENODEV;
     }
     
@@ -120,10 +117,10 @@ static int brightness_control_init(void) {
     LOG_INF("✅ APDS9960 ambient light sensor READY - automatic brightness control enabled");
     
     // Try to do an initial sensor read to verify it's working
-    if (sensor_sample_fetch_chan(als_dev, SENSOR_CHAN_ALL) == 0) {
+    if (sensor_sample_fetch(als_dev) == 0) {
         struct sensor_value test_val;
         if (sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &test_val) == 0) {
-            LOG_INF("📊 APDS9960 initial reading: %d (raw ADC value)", test_val.val1);
+            LOG_INF("📊 APDS9960 initial reading: %d (expecting 0-100 range)", test_val.val1);
         }
     }
     
@@ -139,10 +136,9 @@ static int brightness_control_init(void) {
 #else // !CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
 static int brightness_control_init(void) {
-    // Initialize PWM device
-    pwm_dev = DEVICE_DT_GET(DT_NODELABEL(pwm1));
-    if (!device_is_ready(pwm_dev)) {
-        LOG_ERR("PWM device not ready");
+    // Initialize PWM LEDs device (using LED API)
+    if (!device_is_ready(pwm_leds_dev)) {
+        LOG_ERR("PWM LEDs device not ready");
         return -ENODEV;
     }
     
