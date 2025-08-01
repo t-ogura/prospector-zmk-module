@@ -94,16 +94,16 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_flex_flow(widget->obj, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);  // Right-aligned content
 
-    // Signal info title/label (short abbreviation) - moved left to avoid overlap
+    // Signal info title/label (short abbreviation) - compact size
     lv_obj_t *signal_title = lv_label_create(widget->obj);
     lv_label_set_text(signal_title, "RX:");
-    lv_obj_set_style_text_font(signal_title, &lv_font_montserrat_12, 0);  // Use available font
+    lv_obj_set_style_text_font(signal_title, &lv_font_unscii_8, 0);  // Smaller font to save space
     lv_obj_set_style_text_color(signal_title, lv_color_make(0x80, 0x80, 0x80), 0);
-    lv_obj_set_width(signal_title, 25);  // Wider width for better spacing
+    lv_obj_set_width(signal_title, 20);  // Compact width
 
-    // RSSI bar (small, 5-level indicator) - reduced size to avoid overlap
+    // RSSI bar (small, 5-level indicator) - optimal size
     widget->rssi_bar = lv_bar_create(widget->obj);
-    lv_obj_set_size(widget->rssi_bar, 20, 8);  // Smaller width to prevent overlap
+    lv_obj_set_size(widget->rssi_bar, 30, 8);  // Restore reasonable bar width
     lv_bar_set_range(widget->rssi_bar, 0, 5);
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);
@@ -113,20 +113,20 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_INDICATOR);
 
-    // RSSI value label (dBm) - wider width to prevent text wrapping
+    // RSSI value label (dBm) - smaller font to prevent wrapping
     widget->rssi_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->rssi_label, "-99dBm");  // Set reasonable width text first
-    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);  // Use available font
+    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_unscii_8, 0);  // Smaller font to prevent wrapping
     lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_obj_set_width(widget->rssi_label, 50);  // Wider to ensure no wrapping
+    lv_obj_set_width(widget->rssi_label, 35);  // Compact width with small font
     lv_label_set_text(widget->rssi_label, "--dBm");  // Reset to initial text
 
-    // Reception rate label (Hz) - compact width for right alignment
+    // Reception rate label (Hz) - smaller font for compact display
     widget->rate_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->rate_label, "9.9Hz");  // Set reasonable width text first (1Hz rate)
-    lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_12, 0);  // Use available font
+    lv_obj_set_style_text_font(widget->rate_label, &lv_font_unscii_8, 0);  // Smaller font to save space
     lv_obj_set_style_text_color(widget->rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_obj_set_width(widget->rate_label, 40);  // Slightly wider for stability
+    lv_obj_set_width(widget->rate_label, 30);  // Compact width with small font
     lv_label_set_text(widget->rate_label, "--Hz");  // Reset to initial text
 
     // Initialize timing
