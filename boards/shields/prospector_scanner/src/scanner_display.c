@@ -15,6 +15,7 @@
 #include "layer_status_widget.h"
 #include "modifier_status_widget.h"
 #include "profile_status_widget.h"
+#include "signal_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -27,6 +28,7 @@ static struct zmk_widget_connection_status connection_widget;
 static struct zmk_widget_layer_status layer_widget;
 static struct zmk_widget_modifier_status modifier_widget;
 static struct zmk_widget_profile_status profile_widget;
+static struct zmk_widget_signal_status signal_widget;
 
 // Forward declaration
 static void trigger_scanner_start(void);
@@ -58,6 +60,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_connection_status_update(&connection_widget, kbd);
                 zmk_widget_layer_status_update(&layer_widget, kbd);
                 zmk_widget_modifier_status_update(&modifier_widget, kbd);
+                zmk_widget_signal_status_update(&signal_widget, kbd->rssi);
                 
                 // Enhanced debug logging including modifier flags
                 LOG_INF("🔧 SCANNER: Raw keyboard data - modifier_flags=0x%02X", kbd->data.modifier_flags);
@@ -148,10 +151,14 @@ lv_obj_t *zmk_display_status_screen() {
     zmk_widget_profile_status_init(&profile_widget, screen);
     lv_obj_align(zmk_widget_profile_status_obj(&profile_widget), LV_ALIGN_LEFT_MID, 10, 60);
     
-    // Battery widget at the bottom
+    // Battery widget moved up 10px to make room for signal widget
     zmk_widget_scanner_battery_init(&battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -40);
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
+    
+    // Signal status widget (RSSI + reception rate) at the very bottom
+    zmk_widget_signal_status_init(&signal_widget, screen);
+    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_MID, 0, -5);
     
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
