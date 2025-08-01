@@ -161,9 +161,9 @@ lv_obj_t *zmk_display_status_screen() {
     zmk_widget_wpm_status_init(&wpm_widget, screen);
     lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50); // Top-left corner positioning
     
-    // Signal status widget (RSSI + reception rate) at the very bottom RIGHT (as requested)
+    // Signal status widget (RSSI + reception rate) at the very bottom with full width space
     zmk_widget_signal_status_init(&signal_widget, screen);
-    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -10, -5); // Keep right-aligned
+    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -5, -5); // More space from edge
     
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
