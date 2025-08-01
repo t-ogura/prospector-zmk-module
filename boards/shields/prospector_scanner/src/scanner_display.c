@@ -128,35 +128,35 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     
-    // Device name label at top (larger font for better readability) - moved down 10px
+    // Device name label at top right (larger font for better readability) - moved down 10px
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0); // Retro pixel font style
-    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25); // Was 15, now 25
+    lv_obj_align(device_name_label, LV_ALIGN_TOP_RIGHT, -10, 25); // Right-aligned with padding
     lv_label_set_text(device_name_label, "Initializing...");
     
-    // Connection status widget in top right - moved down 30px
+    // Connection status widget in top right - moved down to make room for device name
     zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45); // Was 15, now 45
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 50); // Below device name
     
-    // Layer status widget in the center (horizontal layer display) - moved down 10px
+    // Layer status widget right-aligned (horizontal layer display) - moved down 10px
     zmk_widget_layer_status_init(&layer_widget, screen);
-    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -10); // Was -20, now -10
+    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER_RIGHT, -10, -10); // Right-aligned center
     
-    // Modifier status widget between layer and battery - moved down 10px
+    // Modifier status widget right-aligned between layer and battery - moved down 10px
     zmk_widget_modifier_status_init(&modifier_widget, screen);
-    lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30); // Was 20, now 30
+    lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER_RIGHT, -10, 30); // Right-aligned center
     
     // Profile widget removed - BLE profile already shown in connection status widget
     
-    // Battery widget moved down 20px more as requested (was -40, now -20)
+    // Battery widget right-aligned moved down 20px more as requested (was -40, now -20)
     zmk_widget_scanner_battery_init(&battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_RIGHT, -10, -20);
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
     
-    // Signal status widget (RSSI + reception rate) at the very bottom
+    // Signal status widget (RSSI + reception rate) at the very bottom right
     zmk_widget_signal_status_init(&signal_widget, screen);
-    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_MID, 0, -5);
+    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -10, -5);
     
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
