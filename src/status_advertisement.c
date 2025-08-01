@@ -161,23 +161,8 @@ ZMK_LISTENER(prospector_layer_listener, layer_changed_listener);
 ZMK_SUBSCRIPTION(prospector_layer_listener, zmk_layer_state_changed);
 #endif
 
-// WPM change listener for immediate advertisement updates
-#if IS_ENABLED(CONFIG_ZMK_WPM) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
-static int wpm_changed_listener(const zmk_event_t *eh) {
-    const struct zmk_wpm_state_changed *ev = as_zmk_wpm_state_changed(eh);
-    if (ev) {
-        LOG_DBG("⚡ WPM changed to %d - triggering advertisement update", ev->state);
-        if (adv_started) {
-            k_work_cancel_delayable(&adv_work);
-            k_work_schedule(&adv_work, K_NO_WAIT);
-        }
-    }
-    return ZMK_EV_EVENT_BUBBLE;
-}
-
-ZMK_LISTENER(prospector_wpm_listener, wpm_changed_listener);
-ZMK_SUBSCRIPTION(prospector_wpm_listener, zmk_wpm_state_changed);
-#endif
+// WPM is now handled by custom implementation in position_state_listener
+// No separate WPM event listener needed - integrated into position_state_listener
 
 // Use ZMK's correct API for profile detection
 static uint8_t get_active_profile_slot(void) {
