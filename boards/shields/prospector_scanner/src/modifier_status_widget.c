@@ -94,6 +94,17 @@ void zmk_widget_modifier_status_update(struct zmk_widget_modifier_status *widget
     update_modifier_display(widget, kbd);
 }
 
+void zmk_widget_modifier_status_reset(struct zmk_widget_modifier_status *widget) {
+    if (!widget || !widget->label) {
+        return;
+    }
+    
+    LOG_INF("Modifier widget reset - clearing all modifier displays");
+    
+    // Clear modifier display - empty text means no modifiers active
+    lv_label_set_text(widget->label, "");
+}
+
 lv_obj_t *zmk_widget_modifier_status_obj(struct zmk_widget_modifier_status *widget) {
     return widget ? widget->obj : NULL;
 }

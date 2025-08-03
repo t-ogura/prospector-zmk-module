@@ -36,6 +36,18 @@ void zmk_widget_wpm_status_update(struct zmk_widget_wpm_status *widget, struct z
     LOG_DBG("WPM widget updated: %d", wpm_value);
 }
 
+void zmk_widget_wpm_status_reset(struct zmk_widget_wpm_status *widget) {
+    if (!widget || !widget->wpm_value_label) {
+        return;
+    }
+    
+    LOG_INF("WPM widget reset - clearing WPM display");
+    
+    // Reset WPM display to inactive state
+    lv_label_set_text(widget->wpm_value_label, "0");
+    widget->last_wpm_value = 0;
+}
+
 int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *parent) {
     if (!widget || !parent) {
         return -1;

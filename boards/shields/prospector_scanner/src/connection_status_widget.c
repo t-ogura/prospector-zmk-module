@@ -100,6 +100,18 @@ void zmk_widget_connection_status_update(struct zmk_widget_connection_status *wi
     update_connection_status(widget, kbd);
 }
 
+void zmk_widget_connection_status_reset(struct zmk_widget_connection_status *widget) {
+    if (!widget || !widget->transport_label || !widget->ble_profile_label) {
+        return;
+    }
+    
+    LOG_INF("Connection widget reset - clearing connection status");
+    
+    // Reset to default disconnected state
+    lv_label_set_text(widget->transport_label, "#ff0000 USB#\\n#ffffff BLE#");
+    lv_label_set_text(widget->ble_profile_label, "-");
+}
+
 lv_obj_t *zmk_widget_connection_status_obj(struct zmk_widget_connection_status *widget) {
     return widget ? widget->obj : NULL;
 }

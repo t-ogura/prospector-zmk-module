@@ -43,6 +43,13 @@ int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *p
 void zmk_widget_wpm_status_update(struct zmk_widget_wpm_status *widget, struct zmk_keyboard_status *kbd);
 
 /**
+ * @brief Reset WPM status display to default state
+ * 
+ * @param widget Widget to reset
+ */
+void zmk_widget_wpm_status_reset(struct zmk_widget_wpm_status *widget);
+
+/**
  * @brief Get widget LVGL object
  * 
  * @param widget Widget structure

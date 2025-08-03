@@ -23,6 +23,7 @@ struct zmk_widget_layer_status {
 
 int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_t *parent);
 void zmk_widget_layer_status_update(struct zmk_widget_layer_status *widget, struct zmk_keyboard_status *kbd);
+void zmk_widget_layer_status_reset(struct zmk_widget_layer_status *widget);
 lv_obj_t *zmk_widget_layer_status_obj(struct zmk_widget_layer_status *widget);
 
 #ifdef __cplusplus

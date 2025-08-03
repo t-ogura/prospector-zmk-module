@@ -46,9 +46,18 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
     int active_count = zmk_status_scanner_get_active_count();
     
     if (active_count == 0) {
-        // No keyboards found
+        // No keyboards found - reset all widgets to default state
         lv_label_set_text(device_name_label, "Scanning...");
-        LOG_INF("Display updated: No keyboards");
+        
+        // Reset all widgets to clear stale data
+        zmk_widget_scanner_battery_reset(&battery_widget);
+        zmk_widget_connection_status_reset(&connection_widget);
+        zmk_widget_layer_status_reset(&layer_widget);
+        zmk_widget_modifier_status_reset(&modifier_widget);
+        zmk_widget_signal_status_reset(&signal_widget);
+        zmk_widget_wpm_status_reset(&wpm_widget);
+        
+        LOG_INF("Display updated: No keyboards - all widgets reset");
     } else {
         // Find active keyboards and display their info  
         for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {

@@ -106,6 +106,28 @@ void zmk_widget_layer_status_update(struct zmk_widget_layer_status *widget, stru
     update_layer_display(widget, kbd);
 }
 
+void zmk_widget_layer_status_reset(struct zmk_widget_layer_status *widget) {
+    if (!widget || !widget->layer_labels[0]) {
+        return;
+    }
+    
+    LOG_INF("Layer widget reset - resetting to layer 0");
+    
+    // Reset all layers to inactive state (dark gray)
+    for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
+        if (widget->layer_labels[i]) {
+            lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(40, 40, 40), 0);
+            lv_obj_set_style_text_opa(widget->layer_labels[i], LV_OPA_30, 0);
+        }
+    }
+    
+    // Set layer 0 as active (default state)
+    if (widget->layer_labels[0]) {
+        lv_obj_set_style_text_color(widget->layer_labels[0], lv_color_make(0xFF, 0x9B, 0x9B), 0); // Soft Coral Pink
+        lv_obj_set_style_text_opa(widget->layer_labels[0], LV_OPA_COVER, 0);
+    }
+}
+
 lv_obj_t *zmk_widget_layer_status_obj(struct zmk_widget_layer_status *widget) {
     return widget ? widget->obj : NULL;
 }

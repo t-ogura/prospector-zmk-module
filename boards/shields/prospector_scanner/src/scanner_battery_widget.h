@@ -13,4 +13,5 @@ struct zmk_widget_scanner_battery {
 int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, lv_obj_t *parent);
 void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget, 
                                        struct zmk_keyboard_status *status);
+void zmk_widget_scanner_battery_reset(struct zmk_widget_scanner_battery *widget);
 lv_obj_t *zmk_widget_scanner_battery_obj(struct zmk_widget_scanner_battery *widget);

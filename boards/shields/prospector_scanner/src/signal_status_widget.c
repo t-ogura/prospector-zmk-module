@@ -137,6 +137,28 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     return 0;
 }
 
+void zmk_widget_signal_status_reset(struct zmk_widget_signal_status *widget) {
+    if (!widget || !widget->rssi_bar || !widget->rssi_label || !widget->rate_label) {
+        return;
+    }
+    
+    LOG_INF("Signal widget reset - clearing signal status");
+    
+    // Reset RSSI bar to minimum
+    lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);
+    
+    // Reset RSSI label
+    lv_label_set_text(widget->rssi_label, "---dBm");
+    
+    // Reset rate label
+    lv_label_set_text(widget->rate_label, "0.0Hz");
+    
+    // Reset cached values
+    widget->last_update_time = 0;
+    widget->last_rate_hz = 0.0f;
+}
+
 lv_obj_t *zmk_widget_signal_status_obj(struct zmk_widget_signal_status *widget) {
     return widget ? widget->obj : NULL;
 }

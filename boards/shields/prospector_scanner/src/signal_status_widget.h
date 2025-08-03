@@ -24,6 +24,7 @@ struct zmk_widget_signal_status {
 
 int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_obj_t *parent);
 void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, int8_t rssi);
+void zmk_widget_signal_status_reset(struct zmk_widget_signal_status *widget);
 lv_obj_t *zmk_widget_signal_status_obj(struct zmk_widget_signal_status *widget);
 
 #ifdef __cplusplus

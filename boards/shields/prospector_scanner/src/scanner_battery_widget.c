@@ -199,6 +199,22 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
     }
 }
 
+void zmk_widget_scanner_battery_reset(struct zmk_widget_scanner_battery *widget) {
+    if (!widget || !widget->obj) {
+        return;
+    }
+    
+    LOG_INF("Battery widget reset - clearing all displays");
+    
+    // Clear both containers (Central and Peripheral)
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *container = lv_obj_get_child(widget->obj, i);
+        if (container) {
+            set_battery_bar_value(container, 0, false);
+        }
+    }
+}
+
 lv_obj_t *zmk_widget_scanner_battery_obj(struct zmk_widget_scanner_battery *widget) {
     return widget ? widget->obj : NULL;
 }
