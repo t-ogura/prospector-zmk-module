@@ -17,13 +17,13 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #define DISP_BL DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl))
 
-// Sensor value range for APDS9960 (raw 16-bit ADC counts)
-#define SENSOR_MIN      0       // Minimum sensor reading (complete darkness)
-#define SENSOR_MAX      65535   // Maximum sensor reading (16-bit ADC max)
+// Original Prospector sensor value range (matches original implementation)
+#define SENSOR_MIN      0       // Minimum sensor reading
+#define SENSOR_MAX      100     // Maximum sensor reading (original Prospector range)
 #ifdef CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
 #define PWM_MIN         CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
 #else
-#define PWM_MIN         10      // Minimum brightness (%) - keep display visible
+#define PWM_MIN         1       // Minimum brightness (%) - keep display visible (original: 1)
 #endif
 
 #ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
@@ -31,11 +31,6 @@ static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #else
 #define PWM_MAX         100     // Maximum brightness (%)
 #endif
-
-// Alternative thresholds for more practical range (most indoor scenarios)
-// APDS9960 typically outputs 0-5000 in normal indoor lighting
-#define SENSOR_PRACTICAL_MIN    0       // Dark room
-#define SENSOR_PRACTICAL_MAX    5000    // Bright indoor lighting
 
 static void set_brightness_pwm(uint8_t brightness_percent) {
     if (!device_is_ready(pwm_leds_dev)) {
@@ -87,56 +82,33 @@ static void update_brightness(void) {
         LOG_DBG("Using RED channel as fallback");
     }
     
-    // Convert sensor value to brightness percentage
-    // APDS9960 returns raw ADC counts, not lux directly
-    // Typical range is 0-65535 for 16-bit ADC, but practical range is 0-5000
+    // Convert sensor value to brightness percentage (original Prospector method)
     int32_t light_level = als_val.val1;
     
-    // Log raw value for debugging with more detail
-    LOG_INF("🔆 APDS9960 raw light: %d (val2: %d)", als_val.val1, als_val.val2);
-    LOG_INF("🔆 Range check: min=%d, max=%d, practical_max=%d", 
-            SENSOR_PRACTICAL_MIN, SENSOR_PRACTICAL_MAX, SENSOR_PRACTICAL_MAX);
+    // Log raw value for debugging
+    LOG_INF("🔆 APDS9960 light level: %d (expecting 0-100 range)", light_level);
+    printk("BRIGHTNESS: light=%d (range 0-100)\n", light_level);
     
-    // Also use printk for debugging (more likely to be visible)
-    printk("BRIGHTNESS: light=%d, val2=%d\n", als_val.val1, als_val.val2);
-    
+    // Original Prospector linear mapping function
     uint8_t brightness;
     
-    // Use practical range for better indoor lighting response
-    // Clamp to practical range first
-    if (light_level < SENSOR_PRACTICAL_MIN) {
-        light_level = SENSOR_PRACTICAL_MIN;
-    } else if (light_level > SENSOR_PRACTICAL_MAX) {
-        light_level = SENSOR_PRACTICAL_MAX;
+    // Handle invalid/error readings
+    if (light_level < SENSOR_MIN) {
+        brightness = PWM_MIN;  // Default to minimum brightness on error
+    } else if (light_level > SENSOR_MAX) {
+        light_level = SENSOR_MAX;  // Clamp to maximum
+    } else {
+        // Linear mapping (original Prospector method)
+        brightness = (uint8_t)(
+            PWM_MIN + ((PWM_MAX - PWM_MIN) *
+            (light_level - SENSOR_MIN)) / (SENSOR_MAX - SENSOR_MIN)
+        );
     }
-    
-    // Non-linear mapping for better perceptual response
-    // Use square root curve for more sensitivity in dark conditions
-    uint32_t normalized = ((uint32_t)(light_level - SENSOR_PRACTICAL_MIN) * 1000) / 
-                         (SENSOR_PRACTICAL_MAX - SENSOR_PRACTICAL_MIN);
-    
-    // Apply square root curve (approximation using simple method)
-    // This gives more resolution in dark conditions
-    uint32_t sqrt_normalized = 0;
-    uint32_t bit = 1 << 15; // Start with highest bit
-    while (bit > normalized) bit >>= 2;
-    while (bit != 0) {
-        if (normalized >= sqrt_normalized + bit) {
-            normalized -= sqrt_normalized + bit;
-            sqrt_normalized = (sqrt_normalized >> 1) + bit;
-        } else {
-            sqrt_normalized >>= 1;
-        }
-        bit >>= 2;
-    }
-    
-    // Scale to brightness range
-    brightness = PWM_MIN + ((PWM_MAX - PWM_MIN) * sqrt_normalized) / 31; // sqrt(1000) ≈ 31
     
     // Apply brightness via LED API
     set_brightness_pwm(brightness);
-    LOG_INF("💡 APDS9960: light=%d → brightness=%d%% (normalized=%d, sqrt=%d)", 
-            light_level, brightness, normalized, sqrt_normalized);
+    LOG_INF("💡 APDS9960: light=%d → brightness=%d%% (linear mapping)", 
+            light_level, brightness);
     
     // Also use printk for final result
     printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);
@@ -179,11 +151,12 @@ static int brightness_control_init(void) {
     // APDS9960 is defined in the board overlay at I2C address 0x39
     printk("BRIGHTNESS: Looking for APDS9960 device in device tree...\n");
     
-    als_dev = DEVICE_DT_GET(DT_NODELABEL(apds9960));
+    // Use original Prospector method: get by compatible string
+    als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
-        LOG_ERR("❌ APDS9960 device not found in device tree");
+        LOG_ERR("❌ APDS9960 device not found by compatible 'avago,apds9960'");
         LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-        printk("BRIGHTNESS: APDS9960 device not found in DT, using fixed brightness\n");
+        printk("BRIGHTNESS: APDS9960 device not found by compatible, using fixed brightness\n");
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
@@ -234,8 +207,7 @@ static int brightness_control_init(void) {
         printk("BRIGHTNESS: sensor_channel_get(LIGHT) returned %d\n", ret);
         
         if (ret == 0) {
-            LOG_INF("📊 APDS9960 initial reading: %d (raw ADC value, expecting 0-65535)", test_val.val1);
-            LOG_INF("📊 Practical range for indoor use: 0-5000");
+            LOG_INF("📊 APDS9960 initial reading: %d (original Prospector expects 0-100)", test_val.val1);
             printk("BRIGHTNESS: Initial reading SUCCESS: %d\n", test_val.val1);
             
             // Visual debug: 1 long flash = sensor working successfully
