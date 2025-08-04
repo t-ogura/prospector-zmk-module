@@ -92,8 +92,10 @@ static void update_brightness(void) {
     // Typical range is 0-65535 for 16-bit ADC, but practical range is 0-5000
     int32_t light_level = als_val.val1;
     
-    // Log raw value for debugging
-    LOG_INF("APDS9960 raw light value: %d (val2: %d)", als_val.val1, als_val.val2);
+    // Log raw value for debugging with more detail
+    LOG_INF("🔆 APDS9960 raw light: %d (val2: %d)", als_val.val1, als_val.val2);
+    LOG_INF("🔆 Range check: min=%d, max=%d, practical_max=%d", 
+            SENSOR_PRACTICAL_MIN, SENSOR_PRACTICAL_MAX, SENSOR_PRACTICAL_MAX);
     
     uint8_t brightness;
     
@@ -130,7 +132,8 @@ static void update_brightness(void) {
     
     // Apply brightness via LED API
     set_brightness_pwm(brightness);
-    LOG_INF("💡 APDS9960: %d → %d%% brightness", light_level, brightness);
+    LOG_INF("💡 APDS9960: light=%d → brightness=%d%% (normalized=%d, sqrt=%d)", 
+            light_level, brightness, normalized, sqrt_normalized);
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -169,11 +172,13 @@ static int brightness_control_init(void) {
     }
     
     LOG_INF("✅ APDS9960 ambient light sensor READY - automatic brightness control enabled");
+    LOG_INF("🔧 APDS9960 device name: %s", als_dev->name);
     
     // Configure APDS9960 for ambient light sensing
     // The sensor needs to be properly configured for ALS mode
     
     // Try to do an initial sensor read to verify it's working
+    LOG_INF("🔧 Stabilizing sensor for 100ms...");
     k_msleep(100); // Give sensor time to stabilize
     
     int ret = sensor_sample_fetch(als_dev);
