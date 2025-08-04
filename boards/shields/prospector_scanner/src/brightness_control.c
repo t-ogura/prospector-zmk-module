@@ -94,13 +94,14 @@ static void update_brightness(void) {
     printk("BRIGHTNESS: light=%d (range 0-100)\n", light_level);
     
     // Original Prospector linear mapping function
-    uint8_t brightness;
+    uint8_t brightness = PWM_MIN;  // Initialize to minimum brightness
     
     // Handle invalid/error readings
     if (light_level < SENSOR_MIN) {
         brightness = PWM_MIN;  // Default to minimum brightness on error
     } else if (light_level > SENSOR_MAX) {
         light_level = SENSOR_MAX;  // Clamp to maximum
+        brightness = PWM_MAX;  // Set to maximum brightness
     } else {
         // Linear mapping (original Prospector method)
         brightness = (uint8_t)(
