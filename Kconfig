@@ -157,3 +157,56 @@ config PROSPECTOR_BRIGHTNESS_FADE_STEPS
       Number of intermediate steps for brightness fade transitions.
       More steps = smoother fade but more CPU usage.
       Default is 10 steps. Range is 5-50 steps.
+
+# Ambient Light Sensor Settings
+config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    bool "Enable ambient light sensor for automatic brightness"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER
+    select SENSOR
+    select APDS9960
+    select I2C
+    help
+      Enable APDS9960 ambient light sensor for automatic brightness adjustment.
+      If disabled, uses fixed brightness mode.
+      Requires APDS9960 sensor connected to I2C pins (SDA=D4, SCL=D5).
+
+config PROSPECTOR_ALS_MIN_BRIGHTNESS
+    int "Minimum brightness percentage"
+    range 1 95
+    default 10
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      Minimum brightness level in percentage (1-95%).
+      Display will never go darker than this value.
+      Default is 10% to keep display readable in darkness.
+
+config PROSPECTOR_ALS_MAX_BRIGHTNESS
+    int "Maximum brightness percentage"
+    range 10 100
+    default 100
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      Maximum brightness level in percentage (10-100%).
+      Display will never go brighter than this value.
+      Default is 100% for maximum visibility in bright light.
+
+config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
+    int "Ambient light sensor update interval in milliseconds"
+    range 500 10000
+    default 2000
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      How often to read the ambient light sensor in milliseconds.
+      Lower values = more responsive but higher power consumption.
+      Default is 2000ms (2 seconds). Range is 0.5-10 seconds.
+
+config PROSPECTOR_FIXED_BRIGHTNESS
+    int "Fixed brightness percentage (when ALS disabled)"
+    range 10 100
+    default 80
+    depends on PROSPECTOR_MODE_SCANNER && !PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      Fixed brightness level when ambient light sensor is disabled.
+      Default is 80% for good visibility without being too bright.
+      Range is 10-100%.

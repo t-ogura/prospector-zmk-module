@@ -38,7 +38,7 @@ static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #endif
 
 // Current and target brightness for smooth fade transitions
-static uint8_t current_brightness = 50;  // Start at mid brightness
+static uint8_t current_brightness = 50;  // Start at mid brightness, will be adjusted during init
 static uint8_t target_brightness = 50;
 static struct k_work_delayable fade_work;
 
@@ -320,6 +320,9 @@ static int brightness_control_init(void) {
     k_work_init_delayable(&brightness_work, brightness_work_handler);
     k_work_init_delayable(&fade_work, fade_work_handler);
     
+    // Set initial brightness lower for smooth startup fade
+    current_brightness = PWM_MIN;
+    
     // Force debug widget to be visible with test message
     LOG_INF("🔧 About to access debug widget...");
     printk("BRIGHTNESS: Accessing debug widget\n");
@@ -348,6 +351,9 @@ static int brightness_control_init(void) {
     
     // Initialize fade work queue
     k_work_init_delayable(&fade_work, fade_work_handler);
+    
+    // Set initial brightness lower for smooth startup fade
+    current_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS / 3;  // Start at 1/3 target
     
     // Set fixed brightness with smooth fade
     set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
