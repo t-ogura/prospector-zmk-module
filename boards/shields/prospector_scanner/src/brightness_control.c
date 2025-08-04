@@ -97,6 +97,9 @@ static void update_brightness(void) {
     LOG_INF("🔆 Range check: min=%d, max=%d, practical_max=%d", 
             SENSOR_PRACTICAL_MIN, SENSOR_PRACTICAL_MAX, SENSOR_PRACTICAL_MAX);
     
+    // Also use printk for debugging (more likely to be visible)
+    printk("BRIGHTNESS: light=%d, val2=%d\n", als_val.val1, als_val.val2);
+    
     uint8_t brightness;
     
     // Use practical range for better indoor lighting response
@@ -134,6 +137,9 @@ static void update_brightness(void) {
     set_brightness_pwm(brightness);
     LOG_INF("💡 APDS9960: light=%d → brightness=%d%% (normalized=%d, sqrt=%d)", 
             light_level, brightness, normalized, sqrt_normalized);
+    
+    // Also use printk for final result
+    printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -173,6 +179,9 @@ static int brightness_control_init(void) {
     
     LOG_INF("✅ APDS9960 ambient light sensor READY - automatic brightness control enabled");
     LOG_INF("🔧 APDS9960 device name: %s", als_dev->name);
+    
+    // Also use printk for easier debugging
+    printk("BRIGHTNESS: APDS9960 sensor ready, name=%s\n", als_dev->name);
     
     // Configure APDS9960 for ambient light sensing
     // The sensor needs to be properly configured for ALS mode
