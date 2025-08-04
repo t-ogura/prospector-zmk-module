@@ -318,10 +318,63 @@ static void delayed_init_work_handler(struct k_work *work) {
     LOG_INF("🔥 DELAYED INIT WORK EXECUTED!");
     printk("BRIGHTNESS: Delayed init work executed\n");
     
-    // Force debug widget update
-    zmk_widget_debug_status_set_text(&debug_widget, "DELAYED INIT");
-    zmk_widget_debug_status_set_visible(&debug_widget, true);
-    LOG_INF("🔥 Debug widget updated via delayed work");
+    // Now execute the actual brightness control initialization from here
+    LOG_INF("🔧 Executing brightness control logic from delayed work...");
+    
+    // Check PWM device
+    if (!device_is_ready(pwm_leds_dev)) {
+        zmk_widget_debug_status_set_text(&debug_widget, "PWM NOT READY");
+        LOG_ERR("PWM LEDs device not ready in delayed work");
+        return;
+    }
+    
+#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+    LOG_INF("🔧 ALS mode detected in delayed work");
+    
+    // Try to get APDS9960 device
+    const struct device *als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
+    if (!als_dev) {
+        zmk_widget_debug_status_set_text(&debug_widget, "ALS: No Device");
+        LOG_ERR("APDS9960 device not found");
+        return;
+    }
+    
+    if (!device_is_ready(als_dev)) {
+        zmk_widget_debug_status_set_text(&debug_widget, "ALS: Not Ready");
+        LOG_ERR("APDS9960 device not ready");
+        return;
+    }
+    
+    // Test sensor reading
+    int ret = sensor_sample_fetch(als_dev);
+    if (ret < 0) {
+        char error_buf[32];
+        snprintf(error_buf, sizeof(error_buf), "ALS: I2C Err %d", ret);
+        zmk_widget_debug_status_set_text(&debug_widget, error_buf);
+        LOG_ERR("APDS9960 sample fetch failed: %d", ret);
+        return;
+    }
+    
+    struct sensor_value als_val;
+    ret = sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &als_val);
+    if (ret < 0) {
+        char error_buf[32];
+        snprintf(error_buf, sizeof(error_buf), "ALS: Ch Err %d", ret);
+        zmk_widget_debug_status_set_text(&debug_widget, error_buf);
+        LOG_ERR("APDS9960 channel get failed: %d", ret);
+        return;
+    }
+    
+    // Success! Show sensor value
+    char success_buf[32];
+    snprintf(success_buf, sizeof(success_buf), "ALS: OK (%d)", als_val.val1);
+    zmk_widget_debug_status_set_text(&debug_widget, success_buf);
+    LOG_INF("✅ APDS9960 working: %d", als_val.val1);
+    
+#else
+    LOG_INF("🔧 Fixed brightness mode detected in delayed work");
+    zmk_widget_debug_status_set_text(&debug_widget, "ALS: Disabled");
+#endif
 }
 
 // Also initialize via delayed work
