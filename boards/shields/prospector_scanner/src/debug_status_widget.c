@@ -29,19 +29,18 @@ int zmk_widget_debug_status_init(struct zmk_widget_debug_status *widget, lv_obj_
     lv_obj_set_style_text_font(widget->debug_label, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(widget->debug_label, lv_color_hex(0xFFFFFF), 0); // White text
     lv_obj_set_style_text_align(widget->debug_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(widget->debug_label, "");
+    lv_label_set_text(widget->debug_label, "DEBUG TEST");  // Start with test text
     lv_obj_center(widget->debug_label);
     
-    // Initially hidden
-    lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+    // Start visible for testing
+    lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
     
     LOG_DBG("Debug status widget initialized at modifier position");
     return 0;
 }
 
-int zmk_widget_debug_status_deinit(struct zmk_widget_debug_status *widget) {
-    lv_obj_del(widget->obj);
-    return 0;
+lv_obj_t *zmk_widget_debug_status_obj(struct zmk_widget_debug_status *widget) {
+    return widget->obj;
 }
 
 void zmk_widget_debug_status_set_text(struct zmk_widget_debug_status *widget, const char *text) {

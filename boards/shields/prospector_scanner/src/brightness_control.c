@@ -118,11 +118,14 @@ static void update_brightness(void) {
     // Also use printk for final result
     printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);
     
-    // Debug display: Show current light level and brightness
-    char status_buf[64];
-    snprintf(status_buf, sizeof(status_buf), "L:%d B:%d%%", light_level, brightness);
-    zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    // TEMPORARY: Debug display using device name label
+    extern lv_obj_t *device_name_label;
+    if (device_name_label) {
+        char status_buf[64];
+        snprintf(status_buf, sizeof(status_buf), "L:%d B:%d%%", light_level, brightness);
+        lv_label_set_text(device_name_label, status_buf);
+        LOG_INF("Debug: Updated device name to %s", status_buf);
+    }
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -261,9 +264,14 @@ static int brightness_control_init(void) {
     // Initialize work queue
     k_work_init_delayable(&brightness_work, brightness_work_handler);
     
-    // Show initial status immediately (if display is ready)
-    zmk_widget_debug_status_set_text(&debug_widget, "ALS: Initializing...");
-    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    // TEMPORARY: Use device name label for debug display test
+    extern lv_obj_t *device_name_label;
+    if (device_name_label) {
+        lv_label_set_text(device_name_label, "ALS: TEST INIT");
+        LOG_INF("Debug: Set device name to ALS test");
+    } else {
+        LOG_WRN("Debug: device_name_label not ready yet");
+    }
     
     // Start brightness monitoring with delay to ensure display is ready
     k_work_schedule(&brightness_work, K_SECONDS(3));
