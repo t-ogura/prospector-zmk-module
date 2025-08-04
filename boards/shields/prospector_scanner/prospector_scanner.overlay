@@ -5,6 +5,7 @@
  */
 
 #include <dt-bindings/zmk/matrix_transform.h>
+#include <dt-bindings/i2c/i2c.h>
 #include <physical_layouts.dtsi>
 
 / {
@@ -156,12 +157,14 @@ disp_spi: &spi3 {
     pinctrl-0 = <&i2c0_default>;
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
+    clock-frequency = <I2C_BITRATE_STANDARD>; // 100kHz - most compatible speed
 
     apds9960: apds9960@39 {
         compatible = "avago,apds9960";
         status = "okay";
         reg = <0x39>;
-        int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  // Pin 2 (D2) = P0.02 = INT
+        // Remove interrupt pin - might cause issues if not connected
+        // int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 };
 

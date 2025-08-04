@@ -359,17 +359,49 @@ static void delayed_init_work_handler(struct k_work *work) {
         
         LOG_INF("I2C0 bus is ready, but APDS9960 device_is_ready() failed");
         
-        // Perform manual I2C scan to check if APDS9960 responds at 0x39
-        LOG_INF("Performing I2C scan at address 0x39...");
-        uint8_t test_data = 0;
-        int scan_ret = i2c_read(i2c_dev, &test_data, 1, 0x39);
+        // Perform comprehensive I2C bus scan to find any responding devices
+        LOG_INF("Performing comprehensive I2C bus scan...");
+        bool found_any_device = false;
         
-        if (scan_ret == 0) {
-            LOG_INF("✅ APDS9960 responds at I2C address 0x39");
-            zmk_widget_debug_status_set_text(&debug_widget, "ALS: I2C OK, Dev Fail");
+        // Scan common I2C addresses
+        uint8_t test_addresses[] = {0x39, 0x29, 0x49, 0x23, 0x44, 0x45, 0x48, 0x4A, 0x53, 0x68, 0x76, 0x77};
+        int num_addresses = sizeof(test_addresses) / sizeof(test_addresses[0]);
+        
+        for (int i = 0; i < num_addresses; i++) {
+            uint8_t addr = test_addresses[i];
+            uint8_t test_data = 0;
+            int scan_ret = i2c_read(i2c_dev, &test_data, 1, addr);
+            
+            if (scan_ret == 0) {
+                LOG_INF("✅ Device found at I2C address 0x%02X", addr);
+                found_any_device = true;
+                if (addr == 0x39) {
+                    LOG_INF("🎯 APDS9960 found at expected address 0x39!");
+                }
+            }
+        }
+        
+        if (!found_any_device) {
+            LOG_WRN("❌ No I2C devices found on bus - possible hardware issue");
+            zmk_widget_debug_status_set_text(&debug_widget, "ALS: No I2C Devices");
         } else {
-            LOG_INF("❌ No response from APDS9960 at 0x39 (error: %d)", scan_ret);
-            zmk_widget_debug_status_set_text(&debug_widget, "ALS: No Response");
+            // Try specific APDS9960 register read (WHO_AM_I register at 0x92)
+            uint8_t who_am_i = 0;
+            int who_ret = i2c_reg_read_byte(i2c_dev, 0x39, 0x92, &who_am_i);
+            
+            if (who_ret == 0) {
+                LOG_INF("✅ APDS9960 WHO_AM_I register: 0x%02X (expected: 0xAB)", who_am_i);
+                if (who_am_i == 0xAB) {
+                    zmk_widget_debug_status_set_text(&debug_widget, "ALS: ID OK, Init Fail");
+                } else {
+                    char id_buf[32];
+                    snprintf(id_buf, sizeof(id_buf), "ALS: Wrong ID 0x%02X", who_am_i);
+                    zmk_widget_debug_status_set_text(&debug_widget, id_buf);
+                }
+            } else {
+                LOG_INF("❌ Failed to read APDS9960 WHO_AM_I register: %d", who_ret);
+                zmk_widget_debug_status_set_text(&debug_widget, "ALS: Reg Read Fail");
+            }
         }
         
         LOG_INF("Hardware check complete - device_is_ready() failed");
