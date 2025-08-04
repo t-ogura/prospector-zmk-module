@@ -68,8 +68,7 @@ config LED
     default y
 
 config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    select SENSOR
-    select APDS9960
+    default y if APDS9960
 
 config PROSPECTOR_FIXED_BRIGHTNESS
     int "Fixed display brightness percentage"
