@@ -10,8 +10,12 @@
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/led.h>
 #include <zephyr/logging/log.h>
+#include "debug_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+// Global debug widget for sensor status display
+extern struct zmk_widget_debug_status debug_widget;
 
 // LED driver for backlight control (following original Prospector approach)
 static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
@@ -112,9 +116,25 @@ static void update_brightness(void) {
     
     // Also use printk for final result
     printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);
+    
+    // Debug display: Show current light level and brightness
+    char status_buf[64];
+    snprintf(status_buf, sizeof(status_buf), "L:%d B:%d%%", light_level, brightness);
+    zmk_widget_debug_status_set_text(&debug_widget, status_buf);
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
 }
 
 static void brightness_work_handler(struct k_work *work) {
+    // Check if this is a timeout call to hide debug display
+    static bool hiding_debug = false;
+    
+    if (hiding_debug) {
+        // Hide debug display after timeout
+        zmk_widget_debug_status_set_visible(&debug_widget, false);
+        hiding_debug = false;
+        return;
+    }
+    
     update_brightness();
     
     // Schedule next update
@@ -169,14 +189,12 @@ static int brightness_control_init(void) {
         printk("BRIGHTNESS: APDS9960 device not ready (I2C communication failed?)\n");
         printk("BRIGHTNESS: Check hardware connections - SDA to D4, SCL to D5, VCC to 3.3V, GND to GND\n");
         
-        // Visual debug: Flash display to indicate sensor not ready
-        // Pattern: 3 quick flashes = sensor not ready (hardware issue)
-        for (int i = 0; i < 3; i++) {
-            set_brightness_pwm(100);
-            k_msleep(200);
-            set_brightness_pwm(10);
-            k_msleep(200);
-        }
+        // Debug display: Show sensor not ready status
+        zmk_widget_debug_status_set_text(&debug_widget, "ALS: Device Not Ready");
+        zmk_widget_debug_status_set_visible(&debug_widget, true);
+        
+        // Keep display visible for 3 seconds, then hide
+        k_work_schedule(&brightness_work, K_MSEC(3000));
         
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
@@ -210,25 +228,17 @@ static int brightness_control_init(void) {
             LOG_INF("📊 APDS9960 initial reading: %d (original Prospector expects 0-100)", test_val.val1);
             printk("BRIGHTNESS: Initial reading SUCCESS: %d\n", test_val.val1);
             
-            // Visual debug: 1 long flash = sensor working successfully
-            set_brightness_pwm(100);
-            k_msleep(1000);
-            set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+            // Debug display: Show sensor working status
+            char status_buf[64];
+            snprintf(status_buf, sizeof(status_buf), "ALS: OK (%d)", test_val.val1);
+            zmk_widget_debug_status_set_text(&debug_widget, status_buf);
+            zmk_widget_debug_status_set_visible(&debug_widget, true);
+            
+            // Keep display visible for 3 seconds, then hide
+            k_work_schedule(&brightness_work, K_MSEC(3000));
         } else {
             LOG_WRN("Failed to get initial light value: %d", ret);
             printk("BRIGHTNESS: Failed to get light value, error %d\n", ret);
-            
-            // Visual debug: 2 double flashes = sensor found but channel read failed
-            for (int i = 0; i < 2; i++) {
-                set_brightness_pwm(100);
-                k_msleep(150);
-                set_brightness_pwm(10);
-                k_msleep(150);
-                set_brightness_pwm(100);
-                k_msleep(150);
-                set_brightness_pwm(10);
-                k_msleep(300);
-            }
             
             // Try alternative channels
             ret = sensor_channel_get(als_dev, SENSOR_CHAN_RED, &test_val);
@@ -236,20 +246,36 @@ static int brightness_control_init(void) {
             if (ret == 0) {
                 printk("BRIGHTNESS: RED channel value: %d\n", test_val.val1);
                 LOG_INF("✅ RED channel working as fallback: %d", test_val.val1);
+                
+                // Debug display: Show fallback channel working
+                char status_buf[64];
+                snprintf(status_buf, sizeof(status_buf), "ALS: RED Ch (%d)", test_val.val1);
+                zmk_widget_debug_status_set_text(&debug_widget, status_buf);
+                zmk_widget_debug_status_set_visible(&debug_widget, true);
+            } else {
+                // Debug display: Show channel read failed
+                char status_buf[64];
+                snprintf(status_buf, sizeof(status_buf), "ALS: Ch Read Fail (%d)", ret);
+                zmk_widget_debug_status_set_text(&debug_widget, status_buf);
+                zmk_widget_debug_status_set_visible(&debug_widget, true);
             }
+            
+            // Keep display visible for 3 seconds
+            k_work_schedule(&brightness_work, K_MSEC(3000));
         }
     } else {
         LOG_WRN("Failed to fetch initial sample: %d", ret);
         printk("BRIGHTNESS: sensor_sample_fetch FAILED with error %d\n", ret);
         printk("BRIGHTNESS: This suggests I2C communication problem or sensor not connected\n");
         
-        // Visual debug: 5 slow flashes = I2C communication failed
-        for (int i = 0; i < 5; i++) {
-            set_brightness_pwm(100);
-            k_msleep(500);
-            set_brightness_pwm(10);
-            k_msleep(500);
-        }
+        // Debug display: Show I2C communication failed
+        char status_buf[64];
+        snprintf(status_buf, sizeof(status_buf), "ALS: I2C Fail (%d)", ret);
+        zmk_widget_debug_status_set_text(&debug_widget, status_buf);
+        zmk_widget_debug_status_set_visible(&debug_widget, true);
+        
+        // Keep display visible for 5 seconds for critical error
+        k_work_schedule(&brightness_work, K_MSEC(5000));
     }
     
     // Initialize work queue

@@ -17,6 +17,7 @@
 // Profile widget removed - connection status already handled by connection_status_widget
 #include "signal_status_widget.h"
 #include "wpm_status_widget.h"
+#include "debug_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -31,6 +32,9 @@ static struct zmk_widget_modifier_status modifier_widget;
 // Profile widget removed - redundant with connection status widget
 static struct zmk_widget_signal_status signal_widget;
 static struct zmk_widget_wpm_status wpm_widget;
+
+// Global debug widget for sensor diagnostics (positioned in modifier area)
+struct zmk_widget_debug_status debug_widget;
 
 // Forward declaration
 static void trigger_scanner_start(void);
@@ -173,6 +177,9 @@ lv_obj_t *zmk_display_status_screen() {
     // Signal status widget (RSSI + reception rate) at the very bottom with full width space
     zmk_widget_signal_status_init(&signal_widget, screen);
     lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -5, -5); // More space from edge
+    
+    // Debug status widget (overlaps modifier area when no modifiers active)
+    zmk_widget_debug_status_init(&debug_widget, screen);
     
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
