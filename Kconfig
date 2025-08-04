@@ -137,4 +137,23 @@ config PROSPECTOR_SCANNER_TIMEOUT_MS
     help
       Time in milliseconds to wait before considering a keyboard as lost.
       Default is 300000ms (5 minutes). Range is 10-600 seconds.
-      After this timeout, the keyboard data will be cleared and widgets reset.
+
+config PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS
+    int "Brightness fade duration in milliseconds"
+    range 100 5000
+    default 1000
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Duration for smooth brightness transitions in milliseconds.
+      Default is 1000ms (1 second). Range is 100ms to 5 seconds.
+      Shorter duration = faster fade, longer duration = smoother fade.
+
+config PROSPECTOR_BRIGHTNESS_FADE_STEPS
+    int "Number of brightness fade steps"
+    range 5 50
+    default 10
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Number of intermediate steps for brightness fade transitions.
+      More steps = smoother fade but more CPU usage.
+      Default is 10 steps. Range is 5-50 steps.

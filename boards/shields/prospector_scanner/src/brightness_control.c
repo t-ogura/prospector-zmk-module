@@ -37,20 +37,72 @@ static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #define PWM_MAX         100     // Maximum brightness (%)
 #endif
 
+// Current and target brightness for smooth fade transitions
+static uint8_t current_brightness = 50;  // Start at mid brightness
+static uint8_t target_brightness = 50;
+static struct k_work_delayable fade_work;
+
+// Smooth fade transition - configurable via Kconfig
+#ifdef CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS
+#define FADE_STEPS CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS
+#else
+#define FADE_STEPS 10
+#endif
+
+#ifdef CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS
+#define FADE_INTERVAL_MS (CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS / FADE_STEPS)
+#else
+#define FADE_INTERVAL_MS 100  // Default: 1000ms / 10 steps = 100ms per step
+#endif
+
+static void fade_work_handler(struct k_work *work) {
+    if (current_brightness == target_brightness) {
+        return; // Fade complete
+    }
+    
+    // Calculate step size for smooth transition
+    int diff = target_brightness - current_brightness;
+    int step = (diff > 0) ? 1 : -1;
+    
+    // Limit step size for very large differences
+    if (abs(diff) > FADE_STEPS) {
+        step = diff / FADE_STEPS;
+    }
+    
+    current_brightness += step;
+    
+    // Clamp to target if we're close enough
+    if (abs(target_brightness - current_brightness) <= abs(step)) {
+        current_brightness = target_brightness;
+    }
+    
+    // Apply brightness via LED API
+    if (device_is_ready(pwm_leds_dev)) {
+        int ret = led_set_brightness(pwm_leds_dev, DISP_BL, current_brightness);
+        if (ret >= 0) {
+            LOG_DBG("🔄 Fade step: %d%% → target: %d%%", current_brightness, target_brightness);
+        }
+    }
+    
+    // Continue fading if not at target
+    if (current_brightness != target_brightness) {
+        k_work_schedule(&fade_work, K_MSEC(FADE_INTERVAL_MS));
+    }
+}
+
 static void set_brightness_pwm(uint8_t brightness_percent) {
     if (!device_is_ready(pwm_leds_dev)) {
         LOG_ERR("❌ PWM LEDs device not ready for brightness control");
         return;
     }
     
-    // Use LED API like original Prospector
-    int ret = led_set_brightness(pwm_leds_dev, DISP_BL, brightness_percent);
+    // Set target brightness and start smooth fade
+    target_brightness = brightness_percent;
     
-    if (ret < 0) {
-        LOG_ERR("❌ Failed to set LED brightness: %d", ret);
-    } else {
-        LOG_DBG("✅ Backlight brightness: %d%%", brightness_percent);
-    }
+    LOG_INF("🎯 Starting brightness fade: %d%% → %d%%", current_brightness, target_brightness);
+    
+    // Start fade transition (or continue if already fading)
+    k_work_schedule(&fade_work, K_NO_WAIT);
 }
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
@@ -264,8 +316,9 @@ static int brightness_control_init(void) {
         zmk_widget_debug_status_set_visible(&debug_widget, true);
     }
     
-    // Initialize work queue
+    // Initialize work queues
     k_work_init_delayable(&brightness_work, brightness_work_handler);
+    k_work_init_delayable(&fade_work, fade_work_handler);
     
     // Force debug widget to be visible with test message
     LOG_INF("🔧 About to access debug widget...");
@@ -293,7 +346,10 @@ static int brightness_control_init(void) {
         return -ENODEV;
     }
     
-    // Set fixed brightness
+    // Initialize fade work queue
+    k_work_init_delayable(&fade_work, fade_work_handler);
+    
+    // Set fixed brightness with smooth fade
     set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
     LOG_INF("🔆 Fixed brightness mode: %d%% (ambient light sensor disabled)", 
             CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
