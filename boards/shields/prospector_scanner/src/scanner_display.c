@@ -181,6 +181,11 @@ lv_obj_t *zmk_display_status_screen() {
     // Debug status widget (overlaps modifier area when no modifiers active)
     zmk_widget_debug_status_init(&debug_widget, screen);
     
+    // IMMEDIATE TEST: Try to update debug widget from display init
+    LOG_INF("🔥 IMMEDIATE TEST: Updating debug widget from display init");
+    zmk_widget_debug_status_set_text(&debug_widget, "DISPLAY INIT TEST");
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
     

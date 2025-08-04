@@ -308,4 +308,31 @@ static int brightness_control_init(void) {
 
 #endif // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
+// Try different initialization approaches
 SYS_INIT(brightness_control_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+
+// Also try a delayed work approach in case SYS_INIT isn't working
+static struct k_work_delayable delayed_init_work;
+
+static void delayed_init_work_handler(struct k_work *work) {
+    LOG_INF("🔥 DELAYED INIT WORK EXECUTED!");
+    printk("BRIGHTNESS: Delayed init work executed\n");
+    
+    // Force debug widget update
+    zmk_widget_debug_status_set_text(&debug_widget, "DELAYED INIT");
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    LOG_INF("🔥 Debug widget updated via delayed work");
+}
+
+// Also initialize via delayed work
+static int delayed_brightness_init(void) {
+    LOG_INF("🔥 Setting up delayed brightness init...");
+    printk("BRIGHTNESS: Setting up delayed init work\n");
+    
+    k_work_init_delayable(&delayed_init_work, delayed_init_work_handler);
+    k_work_schedule(&delayed_init_work, K_SECONDS(5));
+    
+    return 0;
+}
+
+SYS_INIT(delayed_brightness_init, POST_KERNEL, 99);
