@@ -126,19 +126,9 @@ static void update_brightness(void) {
 }
 
 static void brightness_work_handler(struct k_work *work) {
-    // Check if this is a timeout call to hide debug display
-    static bool hiding_debug = false;
-    
-    if (hiding_debug) {
-        // Hide debug display after timeout
-        zmk_widget_debug_status_set_visible(&debug_widget, false);
-        hiding_debug = false;
-        return;
-    }
-    
     update_brightness();
     
-    // Schedule next update
+    // Schedule next update - continuous monitoring
 #ifdef CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS
     k_work_schedule(&brightness_work, K_MSEC(CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS));
 #else
@@ -190,12 +180,10 @@ static int brightness_control_init(void) {
         printk("BRIGHTNESS: APDS9960 device not ready (I2C communication failed?)\n");
         printk("BRIGHTNESS: Check hardware connections - SDA to D4, SCL to D5, VCC to 3.3V, GND to GND\n");
         
-        // Debug display: Show sensor not ready status
+        // Debug display: Show sensor not ready status (persistent)
         zmk_widget_debug_status_set_text(&debug_widget, "ALS: Device Not Ready");
         zmk_widget_debug_status_set_visible(&debug_widget, true);
-        
-        // Keep display visible for 3 seconds, then hide
-        k_work_schedule(&brightness_work, K_MSEC(3000));
+        // No auto-hide - keep visible to show problem
         
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
@@ -229,14 +217,11 @@ static int brightness_control_init(void) {
             LOG_INF("📊 APDS9960 initial reading: %d (original Prospector expects 0-100)", test_val.val1);
             printk("BRIGHTNESS: Initial reading SUCCESS: %d\n", test_val.val1);
             
-            // Debug display: Show sensor working status
+            // Debug display: Show sensor working status (will update continuously)
             char status_buf[64];
             snprintf(status_buf, sizeof(status_buf), "ALS: OK (%d)", test_val.val1);
             zmk_widget_debug_status_set_text(&debug_widget, status_buf);
             zmk_widget_debug_status_set_visible(&debug_widget, true);
-            
-            // Keep display visible for 3 seconds, then hide
-            k_work_schedule(&brightness_work, K_MSEC(3000));
         } else {
             LOG_WRN("Failed to get initial light value: %d", ret);
             printk("BRIGHTNESS: Failed to get light value, error %d\n", ret);
@@ -254,36 +239,34 @@ static int brightness_control_init(void) {
                 zmk_widget_debug_status_set_text(&debug_widget, status_buf);
                 zmk_widget_debug_status_set_visible(&debug_widget, true);
             } else {
-                // Debug display: Show channel read failed
+                // Debug display: Show channel read failed (persistent error)
                 char status_buf[64];
                 snprintf(status_buf, sizeof(status_buf), "ALS: Ch Read Fail (%d)", ret);
                 zmk_widget_debug_status_set_text(&debug_widget, status_buf);
                 zmk_widget_debug_status_set_visible(&debug_widget, true);
             }
-            
-            // Keep display visible for 3 seconds
-            k_work_schedule(&brightness_work, K_MSEC(3000));
         }
     } else {
         LOG_WRN("Failed to fetch initial sample: %d", ret);
         printk("BRIGHTNESS: sensor_sample_fetch FAILED with error %d\n", ret);
         printk("BRIGHTNESS: This suggests I2C communication problem or sensor not connected\n");
         
-        // Debug display: Show I2C communication failed
+        // Debug display: Show I2C communication failed (persistent critical error)
         char status_buf[64];
         snprintf(status_buf, sizeof(status_buf), "ALS: I2C Fail (%d)", ret);
         zmk_widget_debug_status_set_text(&debug_widget, status_buf);
         zmk_widget_debug_status_set_visible(&debug_widget, true);
-        
-        // Keep display visible for 5 seconds for critical error
-        k_work_schedule(&brightness_work, K_MSEC(5000));
     }
     
     // Initialize work queue
     k_work_init_delayable(&brightness_work, brightness_work_handler);
     
-    // Start brightness monitoring
-    k_work_schedule(&brightness_work, K_SECONDS(1));
+    // Show initial status immediately (if display is ready)
+    zmk_widget_debug_status_set_text(&debug_widget, "ALS: Initializing...");
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    
+    // Start brightness monitoring with delay to ensure display is ready
+    k_work_schedule(&brightness_work, K_SECONDS(3));
     
     return 0;
 }
