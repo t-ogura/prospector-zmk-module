@@ -170,8 +170,9 @@ config PROSPECTOR_FIXED_BRIGHTNESS
     int "Fixed brightness percentage (when ALS disabled)"
     range 10 100
     default 80
-    depends on PROSPECTOR_MODE_SCANNER && !PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    depends on PROSPECTOR_MODE_SCANNER
     help
       Fixed brightness level when ambient light sensor is disabled.
+      Also used as fallback brightness when ALS sensor fails.
       Default is 80% for good visibility without being too bright.
       Range is 10-100%.
