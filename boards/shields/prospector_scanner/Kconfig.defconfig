@@ -67,15 +67,7 @@ config PWM
 config LED
     default y
 
-config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    default y if APDS9960
-
-config PROSPECTOR_FIXED_BRIGHTNESS
-    int "Fixed display brightness percentage"
-    default 80
-    range 10 100
-    help
-      Fixed brightness level when ambient light sensor is not used
+# Ambient light sensor and brightness settings moved to main Kconfig
 
 config PROSPECTOR_MAX_LAYERS
     int "Maximum number of layers to display"

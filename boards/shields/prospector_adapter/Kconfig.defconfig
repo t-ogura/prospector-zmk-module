@@ -60,7 +60,6 @@ config PWM
 config LED
     default y
 
-config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    default y if APDS9960
+# Ambient light sensor settings moved to main Kconfig
 
 endif

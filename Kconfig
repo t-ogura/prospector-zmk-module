@@ -6,40 +6,7 @@ config PROSPECTOR_ROTATE_DISPLAY_180
     bool "Rotate the display 180 degrees"
     default n
 
-config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    bool "Use ambient light sensor for auto brightness"
-    default n
-    depends on SENSOR
-
-config PROSPECTOR_FIXED_BRIGHTNESS
-    int "Fixed display brightness"
-    default 50
-    range 1 100
-    depends on !PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-
-config PROSPECTOR_ALS_MIN_BRIGHTNESS
-    int "Minimum brightness percentage"
-    default 10
-    range 5 50
-    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    help
-      Minimum brightness level to maintain display visibility in dark conditions.
-
-config PROSPECTOR_ALS_MAX_BRIGHTNESS
-    int "Maximum brightness percentage"
-    default 100
-    range 50 100
-    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    help
-      Maximum brightness level for bright conditions.
-
-config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
-    int "Ambient light sensor update interval in milliseconds"
-    default 2000
-    range 500 10000
-    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    help
-      How often to check ambient light and adjust brightness.
+# Old ALS configurations removed - moved to bottom of file with proper dependencies
 
 # New configuration options for Scanner Mode
 
@@ -163,13 +130,11 @@ config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     bool "Enable ambient light sensor for automatic brightness"
     default y
     depends on PROSPECTOR_MODE_SCANNER
-    select SENSOR
-    select APDS9960
-    select I2C
     help
       Enable APDS9960 ambient light sensor for automatic brightness adjustment.
       If disabled, uses fixed brightness mode.
       Requires APDS9960 sensor connected to I2C pins (SDA=D4, SCL=D5).
+      Note: You must also enable SENSOR=y, APDS9960=y, and I2C=y in your config.
 
 config PROSPECTOR_ALS_MIN_BRIGHTNESS
     int "Minimum brightness percentage"
