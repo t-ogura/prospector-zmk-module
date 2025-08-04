@@ -160,6 +160,21 @@ static int brightness_control_init(void) {
         return -ENODEV;
     }
     
+    /*
+     * Visual Debug Patterns for APDS9960 Sensor Status:
+     * 
+     * 1 long flash (1s):           ✅ Sensor working successfully  
+     * 2 double flashes:            ⚠️  Sensor found but channel read failed
+     * 3 quick flashes (200ms):     ❌ Sensor not ready (hardware issue)
+     * 5 slow flashes (500ms):      ❌ I2C communication failed
+     * 
+     * Hardware Requirements:
+     * - APDS9960 connected to I2C0 (SDA=D4/P0.04, SCL=D5/P0.05)  
+     * - I2C address: 0x39
+     * - VCC: 3.3V, GND: Ground
+     * - Optional INT: D2/P0.28 (with pull-up)
+     */
+    
     // Initialize ALS device using direct node reference
     // APDS9960 is defined in the board overlay at I2C address 0x39
     printk("BRIGHTNESS: Looking for APDS9960 device in device tree...\n");
@@ -180,6 +195,16 @@ static int brightness_control_init(void) {
         LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         printk("BRIGHTNESS: APDS9960 device not ready (I2C communication failed?)\n");
         printk("BRIGHTNESS: Check hardware connections - SDA to D4, SCL to D5, VCC to 3.3V, GND to GND\n");
+        
+        // Visual debug: Flash display to indicate sensor not ready
+        // Pattern: 3 quick flashes = sensor not ready (hardware issue)
+        for (int i = 0; i < 3; i++) {
+            set_brightness_pwm(100);
+            k_msleep(200);
+            set_brightness_pwm(10);
+            k_msleep(200);
+        }
+        
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
@@ -212,21 +237,47 @@ static int brightness_control_init(void) {
             LOG_INF("📊 APDS9960 initial reading: %d (raw ADC value, expecting 0-65535)", test_val.val1);
             LOG_INF("📊 Practical range for indoor use: 0-5000");
             printk("BRIGHTNESS: Initial reading SUCCESS: %d\n", test_val.val1);
+            
+            // Visual debug: 1 long flash = sensor working successfully
+            set_brightness_pwm(100);
+            k_msleep(1000);
+            set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         } else {
             LOG_WRN("Failed to get initial light value: %d", ret);
             printk("BRIGHTNESS: Failed to get light value, error %d\n", ret);
+            
+            // Visual debug: 2 double flashes = sensor found but channel read failed
+            for (int i = 0; i < 2; i++) {
+                set_brightness_pwm(100);
+                k_msleep(150);
+                set_brightness_pwm(10);
+                k_msleep(150);
+                set_brightness_pwm(100);
+                k_msleep(150);
+                set_brightness_pwm(10);
+                k_msleep(300);
+            }
             
             // Try alternative channels
             ret = sensor_channel_get(als_dev, SENSOR_CHAN_RED, &test_val);
             printk("BRIGHTNESS: RED channel test returned %d\n", ret);
             if (ret == 0) {
                 printk("BRIGHTNESS: RED channel value: %d\n", test_val.val1);
+                LOG_INF("✅ RED channel working as fallback: %d", test_val.val1);
             }
         }
     } else {
         LOG_WRN("Failed to fetch initial sample: %d", ret);
         printk("BRIGHTNESS: sensor_sample_fetch FAILED with error %d\n", ret);
         printk("BRIGHTNESS: This suggests I2C communication problem or sensor not connected\n");
+        
+        // Visual debug: 5 slow flashes = I2C communication failed
+        for (int i = 0; i < 5; i++) {
+            set_brightness_pwm(100);
+            k_msleep(500);
+            set_brightness_pwm(10);
+            k_msleep(500);
+        }
     }
     
     // Initialize work queue
