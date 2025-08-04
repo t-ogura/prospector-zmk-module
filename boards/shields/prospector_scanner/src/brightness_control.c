@@ -9,6 +9,7 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/led.h>
+#include <zephyr/drivers/i2c.h>
 #include <zephyr/logging/log.h>
 #include "debug_status_widget.h"
 
@@ -340,8 +341,38 @@ static void delayed_init_work_handler(struct k_work *work) {
     }
     
     if (!device_is_ready(als_dev)) {
-        zmk_widget_debug_status_set_text(&debug_widget, "ALS: Not Ready");
-        LOG_ERR("APDS9960 device not ready");
+        LOG_ERR("APDS9960 device not ready - investigating I2C status");
+        
+        // Check I2C bus status
+        const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
+        if (!i2c_dev) {
+            zmk_widget_debug_status_set_text(&debug_widget, "ALS: No I2C Bus");
+            LOG_ERR("I2C0 bus device not found");
+            return;
+        }
+        
+        if (!device_is_ready(i2c_dev)) {
+            zmk_widget_debug_status_set_text(&debug_widget, "ALS: I2C Not Ready");
+            LOG_ERR("I2C0 bus not ready");
+            return;
+        }
+        
+        LOG_INF("I2C0 bus is ready, but APDS9960 device_is_ready() failed");
+        
+        // Perform manual I2C scan to check if APDS9960 responds at 0x39
+        LOG_INF("Performing I2C scan at address 0x39...");
+        uint8_t test_data = 0;
+        int scan_ret = i2c_read(i2c_dev, &test_data, 1, 0x39);
+        
+        if (scan_ret == 0) {
+            LOG_INF("✅ APDS9960 responds at I2C address 0x39");
+            zmk_widget_debug_status_set_text(&debug_widget, "ALS: I2C OK, Dev Fail");
+        } else {
+            LOG_INF("❌ No response from APDS9960 at 0x39 (error: %d)", scan_ret);
+            zmk_widget_debug_status_set_text(&debug_widget, "ALS: No Response");
+        }
+        
+        LOG_INF("Hardware check complete - device_is_ready() failed");
         return;
     }
     
