@@ -25,7 +25,11 @@ static bool scanning = false;
 static struct k_work_delayable timeout_work;
 
 // Timeout for considering a keyboard as lost (in milliseconds)
-#define KEYBOARD_TIMEOUT_MS 300000  // 5 minutes - reset to scanning if no data received
+#ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
+#define KEYBOARD_TIMEOUT_MS CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
+#else
+#define KEYBOARD_TIMEOUT_MS 300000  // 5 minutes default
+#endif
 
 static void notify_event(enum zmk_status_scanner_event event, int keyboard_index) {
     if (event_callback) {

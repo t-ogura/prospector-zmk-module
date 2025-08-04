@@ -103,3 +103,13 @@ config PROSPECTOR_MAX_KEYBOARDS
     depends on PROSPECTOR_MULTI_KEYBOARD
     help
       Maximum number of keyboards that can be tracked simultaneously.
+
+config PROSPECTOR_SCANNER_TIMEOUT_MS
+    int "Scanner timeout in milliseconds"
+    range 10000 600000
+    default 300000
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Time in milliseconds to wait before considering a keyboard as lost.
+      Default is 300000ms (5 minutes). Range is 10-600 seconds.
+      After this timeout, the keyboard data will be cleared and widgets reset.
