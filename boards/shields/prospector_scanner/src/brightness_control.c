@@ -162,17 +162,24 @@ static int brightness_control_init(void) {
     
     // Initialize ALS device using direct node reference
     // APDS9960 is defined in the board overlay at I2C address 0x39
+    printk("BRIGHTNESS: Looking for APDS9960 device in device tree...\n");
+    
     als_dev = DEVICE_DT_GET(DT_NODELABEL(apds9960));
     if (!als_dev) {
         LOG_ERR("❌ APDS9960 device not found in device tree");
         LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        printk("BRIGHTNESS: APDS9960 device not found in DT, using fixed brightness\n");
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
     
+    printk("BRIGHTNESS: APDS9960 device found, checking if ready...\n");
+    
     if (!device_is_ready(als_dev)) {
         LOG_ERR("❌ APDS9960 ambient light sensor NOT READY - hardware may be missing or not connected");
         LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        printk("BRIGHTNESS: APDS9960 device not ready (I2C communication failed?)\n");
+        printk("BRIGHTNESS: Check hardware connections - SDA to D4, SCL to D5, VCC to 3.3V, GND to GND\n");
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
@@ -183,6 +190,9 @@ static int brightness_control_init(void) {
     // Also use printk for easier debugging
     printk("BRIGHTNESS: APDS9960 sensor ready, name=%s\n", als_dev->name);
     
+    // Check I2C communication with sensor
+    printk("BRIGHTNESS: Testing I2C communication at address 0x39\n");
+    
     // Configure APDS9960 for ambient light sensing
     // The sensor needs to be properly configured for ALS mode
     
@@ -191,17 +201,32 @@ static int brightness_control_init(void) {
     k_msleep(100); // Give sensor time to stabilize
     
     int ret = sensor_sample_fetch(als_dev);
+    printk("BRIGHTNESS: sensor_sample_fetch returned %d\n", ret);
+    
     if (ret == 0) {
         struct sensor_value test_val;
         ret = sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &test_val);
+        printk("BRIGHTNESS: sensor_channel_get(LIGHT) returned %d\n", ret);
+        
         if (ret == 0) {
             LOG_INF("📊 APDS9960 initial reading: %d (raw ADC value, expecting 0-65535)", test_val.val1);
             LOG_INF("📊 Practical range for indoor use: 0-5000");
+            printk("BRIGHTNESS: Initial reading SUCCESS: %d\n", test_val.val1);
         } else {
             LOG_WRN("Failed to get initial light value: %d", ret);
+            printk("BRIGHTNESS: Failed to get light value, error %d\n", ret);
+            
+            // Try alternative channels
+            ret = sensor_channel_get(als_dev, SENSOR_CHAN_RED, &test_val);
+            printk("BRIGHTNESS: RED channel test returned %d\n", ret);
+            if (ret == 0) {
+                printk("BRIGHTNESS: RED channel value: %d\n", test_val.val1);
+            }
         }
     } else {
         LOG_WRN("Failed to fetch initial sample: %d", ret);
+        printk("BRIGHTNESS: sensor_sample_fetch FAILED with error %d\n", ret);
+        printk("BRIGHTNESS: This suggests I2C communication problem or sensor not connected\n");
     }
     
     // Initialize work queue
