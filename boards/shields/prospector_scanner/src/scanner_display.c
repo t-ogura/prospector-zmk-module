@@ -23,8 +23,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
-// Global UI objects for dynamic updates (device_name_label exposed for debug)
-lv_obj_t *device_name_label = NULL;
+// Global UI objects for dynamic updates
+static lv_obj_t *device_name_label = NULL;
 static struct zmk_widget_scanner_battery battery_widget;
 static struct zmk_widget_connection_status connection_widget;
 static struct zmk_widget_layer_status layer_widget;
