@@ -137,11 +137,16 @@ static void brightness_work_handler(struct k_work *work) {
 }
 
 static int brightness_control_init(void) {
+    LOG_INF("🚀 brightness_control_init STARTED (ALS enabled)");
+    printk("BRIGHTNESS: brightness_control_init called (ALS mode)\n");
+    
     // Initialize PWM LEDs device (using LED API)
     if (!device_is_ready(pwm_leds_dev)) {
         LOG_ERR("PWM LEDs device not ready");
         return -ENODEV;
     }
+    
+    LOG_INF("✅ PWM LEDs device ready");
     
     /*
      * Visual Debug Patterns for APDS9960 Sensor Status:
@@ -262,9 +267,12 @@ static int brightness_control_init(void) {
     k_work_init_delayable(&brightness_work, brightness_work_handler);
     
     // Force debug widget to be visible with test message
+    LOG_INF("🔧 About to access debug widget...");
+    printk("BRIGHTNESS: Accessing debug widget\n");
+    
     zmk_widget_debug_status_set_visible(&debug_widget, true);
     zmk_widget_debug_status_set_text(&debug_widget, "ALS: INIT TEST");
-    LOG_INF("Forced debug widget visible with test message");
+    LOG_INF("🎯 Forced debug widget visible with test message");
     
     // Start brightness monitoring with delay to ensure display is ready
     k_work_schedule(&brightness_work, K_SECONDS(3));
@@ -275,6 +283,9 @@ static int brightness_control_init(void) {
 #else // !CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
 static int brightness_control_init(void) {
+    LOG_INF("🚀 brightness_control_init STARTED (Fixed brightness mode)");
+    printk("BRIGHTNESS: brightness_control_init called (Fixed mode)\n");
+    
     // Initialize PWM LEDs device (using LED API)
     if (!device_is_ready(pwm_leds_dev)) {
         LOG_ERR("PWM LEDs device not ready");
@@ -285,6 +296,13 @@ static int brightness_control_init(void) {
     set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
     LOG_INF("🔆 Fixed brightness mode: %d%% (ambient light sensor disabled)", 
             CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+            
+    // Test debug widget access even in fixed mode
+    LOG_INF("🔧 Testing debug widget access in fixed mode...");
+    zmk_widget_debug_status_set_text(&debug_widget, "ALS: DISABLED");
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    LOG_INF("🔧 Debug widget should show ALS: DISABLED");
+    
     return 0;
 }
 
