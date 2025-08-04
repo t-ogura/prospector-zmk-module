@@ -17,11 +17,25 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #define DISP_BL DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl))
 
-// Sensor value range from original Prospector (0-100, not raw ADC)
-#define SENSOR_MIN      0       // Minimum sensor reading
-#define SENSOR_MAX      100     // Maximum sensor reading  
+// Sensor value range for APDS9960 (raw 16-bit ADC counts)
+#define SENSOR_MIN      0       // Minimum sensor reading (complete darkness)
+#define SENSOR_MAX      65535   // Maximum sensor reading (16-bit ADC max)
+#ifdef CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
+#define PWM_MIN         CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
+#else
 #define PWM_MIN         10      // Minimum brightness (%) - keep display visible
+#endif
+
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+#define PWM_MAX         CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+#else
 #define PWM_MAX         100     // Maximum brightness (%)
+#endif
+
+// Alternative thresholds for more practical range (most indoor scenarios)
+// APDS9960 typically outputs 0-5000 in normal indoor lighting
+#define SENSOR_PRACTICAL_MIN    0       // Dark room
+#define SENSOR_PRACTICAL_MAX    5000    // Bright indoor lighting
 
 static void set_brightness_pwm(uint8_t brightness_percent) {
     if (!device_is_ready(pwm_leds_dev)) {
@@ -45,46 +59,74 @@ static const struct device *als_dev;
 static struct k_work_delayable brightness_work;
 
 static void update_brightness(void) {
-    if (!als_dev) {
+    if (!als_dev || !device_is_ready(als_dev)) {
+        LOG_WRN("ALS device not ready");
         return;
     }
     
-    // Use sensor_sample_fetch like original Prospector
+    // Use sensor_sample_fetch to get latest data
     int ret = sensor_sample_fetch(als_dev);
     if (ret < 0) {
         LOG_WRN("Failed to fetch ALS sample: %d", ret);
+        // If sensor fails, maintain current brightness
         return;
     }
     
-    struct sensor_value als_val;
-    // Try to get ambient light value first
+    struct sensor_value als_val = {0, 0};
+    // Try to get ambient light value
+    // APDS9960 should provide data on SENSOR_CHAN_LIGHT
     ret = sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &als_val);
     if (ret < 0) {
         LOG_WRN("Failed to get ambient light value: %d", ret);
-        return;
+        // Try alternative channel if primary fails
+        ret = sensor_channel_get(als_dev, SENSOR_CHAN_RED, &als_val);
+        if (ret < 0) {
+            LOG_WRN("Failed to get any light value from APDS9960");
+            return;
+        }
+        LOG_DBG("Using RED channel as fallback");
     }
     
     // Convert sensor value to brightness percentage
     // APDS9960 returns raw ADC counts, not lux directly
-    // Typical range is 0-65535 for 16-bit ADC
+    // Typical range is 0-65535 for 16-bit ADC, but practical range is 0-5000
     int32_t light_level = als_val.val1;
     
     // Log raw value for debugging
-    LOG_DBG("APDS9960 raw light value: %d (val2: %d)", als_val.val1, als_val.val2);
+    LOG_INF("APDS9960 raw light value: %d (val2: %d)", als_val.val1, als_val.val2);
     
     uint8_t brightness;
     
-    // Original Prospector uses 0-100 range for sensor values
-    // Handle invalid readings
-    if (light_level < SENSOR_MIN) {
-        brightness = PWM_MIN;  // Default to minimum brightness
-    } else if (light_level > SENSOR_MAX) {
-        brightness = PWM_MAX;  // Cap at maximum
-    } else {
-        // Linear mapping like original Prospector
-        brightness = PWM_MIN + ((PWM_MAX - PWM_MIN) * 
-                               (light_level - SENSOR_MIN)) / (SENSOR_MAX - SENSOR_MIN);
+    // Use practical range for better indoor lighting response
+    // Clamp to practical range first
+    if (light_level < SENSOR_PRACTICAL_MIN) {
+        light_level = SENSOR_PRACTICAL_MIN;
+    } else if (light_level > SENSOR_PRACTICAL_MAX) {
+        light_level = SENSOR_PRACTICAL_MAX;
     }
+    
+    // Non-linear mapping for better perceptual response
+    // Use square root curve for more sensitivity in dark conditions
+    uint32_t normalized = ((uint32_t)(light_level - SENSOR_PRACTICAL_MIN) * 1000) / 
+                         (SENSOR_PRACTICAL_MAX - SENSOR_PRACTICAL_MIN);
+    
+    // Apply square root curve (approximation using simple method)
+    // This gives more resolution in dark conditions
+    uint32_t sqrt_normalized = 0;
+    uint32_t bit = 1 << 15; // Start with highest bit
+    while (bit > normalized) bit >>= 2;
+    while (bit != 0) {
+        if (normalized >= sqrt_normalized + bit) {
+            normalized -= sqrt_normalized + bit;
+            sqrt_normalized = (sqrt_normalized >> 1) + bit;
+        } else {
+            sqrt_normalized >>= 1;
+        }
+        bit >>= 2;
+    }
+    
+    // Scale to brightness range
+    brightness = PWM_MIN + ((PWM_MAX - PWM_MIN) * sqrt_normalized) / 31; // sqrt(1000) ≈ 31
     
     // Apply brightness via LED API
     set_brightness_pwm(brightness);
@@ -95,7 +137,11 @@ static void brightness_work_handler(struct k_work *work) {
     update_brightness();
     
     // Schedule next update
+#ifdef CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS
+    k_work_schedule(&brightness_work, K_MSEC(CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS));
+#else
     k_work_schedule(&brightness_work, K_SECONDS(2));
+#endif
 }
 
 static int brightness_control_init(void) {
@@ -105,8 +151,16 @@ static int brightness_control_init(void) {
         return -ENODEV;
     }
     
-    // Initialize ALS device
-    als_dev = DEVICE_DT_GET(DT_ALIAS(als));
+    // Initialize ALS device using direct node reference
+    // APDS9960 is defined in the board overlay at I2C address 0x39
+    als_dev = DEVICE_DT_GET(DT_NODELABEL(apds9960));
+    if (!als_dev) {
+        LOG_ERR("❌ APDS9960 device not found in device tree");
+        LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        return 0;
+    }
+    
     if (!device_is_ready(als_dev)) {
         LOG_ERR("❌ APDS9960 ambient light sensor NOT READY - hardware may be missing or not connected");
         LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
@@ -116,12 +170,24 @@ static int brightness_control_init(void) {
     
     LOG_INF("✅ APDS9960 ambient light sensor READY - automatic brightness control enabled");
     
+    // Configure APDS9960 for ambient light sensing
+    // The sensor needs to be properly configured for ALS mode
+    
     // Try to do an initial sensor read to verify it's working
-    if (sensor_sample_fetch(als_dev) == 0) {
+    k_msleep(100); // Give sensor time to stabilize
+    
+    int ret = sensor_sample_fetch(als_dev);
+    if (ret == 0) {
         struct sensor_value test_val;
-        if (sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &test_val) == 0) {
-            LOG_INF("📊 APDS9960 initial reading: %d (expecting 0-100 range)", test_val.val1);
+        ret = sensor_channel_get(als_dev, SENSOR_CHAN_LIGHT, &test_val);
+        if (ret == 0) {
+            LOG_INF("📊 APDS9960 initial reading: %d (raw ADC value, expecting 0-65535)", test_val.val1);
+            LOG_INF("📊 Practical range for indoor use: 0-5000");
+        } else {
+            LOG_WRN("Failed to get initial light value: %d", ret);
         }
+    } else {
+        LOG_WRN("Failed to fetch initial sample: %d", ret);
     }
     
     // Initialize work queue
