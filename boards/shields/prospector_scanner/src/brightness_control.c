@@ -261,9 +261,10 @@ static int brightness_control_init(void) {
     // Initialize work queue
     k_work_init_delayable(&brightness_work, brightness_work_handler);
     
-    // Show initial status in debug widget
-    zmk_widget_debug_status_set_text(&debug_widget, "ALS: Initializing...");
+    // Force debug widget to be visible with test message
     zmk_widget_debug_status_set_visible(&debug_widget, true);
+    zmk_widget_debug_status_set_text(&debug_widget, "ALS: INIT TEST");
+    LOG_INF("Forced debug widget visible with test message");
     
     // Start brightness monitoring with delay to ensure display is ready
     k_work_schedule(&brightness_work, K_SECONDS(3));

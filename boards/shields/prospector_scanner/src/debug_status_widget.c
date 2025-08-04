@@ -29,11 +29,11 @@ int zmk_widget_debug_status_init(struct zmk_widget_debug_status *widget, lv_obj_
     lv_obj_set_style_text_font(widget->debug_label, &lv_font_montserrat_12, 0);  // Use available font
     lv_obj_set_style_text_color(widget->debug_label, lv_color_hex(0xFFFFFF), 0); // White text
     lv_obj_set_style_text_align(widget->debug_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(widget->debug_label, "");  // Start empty
+    lv_label_set_text(widget->debug_label, "DEBUG READY");  // Test text to confirm visibility
     lv_obj_center(widget->debug_label);
     
-    // Initially hidden until brightness control starts
-    lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+    // Start visible for testing
+    lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
     
     LOG_DBG("Debug status widget initialized at modifier position");
     return 0;
@@ -44,19 +44,38 @@ lv_obj_t *zmk_widget_debug_status_obj(struct zmk_widget_debug_status *widget) {
 }
 
 void zmk_widget_debug_status_set_text(struct zmk_widget_debug_status *widget, const char *text) {
-    if (widget->debug_label && text) {
-        lv_label_set_text(widget->debug_label, text);
-        LOG_DBG("Debug widget text updated: %s", text);
+    if (!widget) {
+        LOG_ERR("Debug widget is NULL for text set!");
+        return;
     }
+    if (!widget->debug_label) {
+        LOG_ERR("Debug widget label is NULL!");
+        return;
+    }
+    if (!text) {
+        LOG_WRN("Debug widget text is NULL!");
+        return;
+    }
+    
+    lv_label_set_text(widget->debug_label, text);
+    LOG_INF("📝 Debug widget text updated: '%s'", text);
 }
 
 void zmk_widget_debug_status_set_visible(struct zmk_widget_debug_status *widget, bool visible) {
-    if (widget->obj) {
-        if (visible) {
-            lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
-        }
-        LOG_DBG("Debug widget visibility: %s", visible ? "visible" : "hidden");
+    if (!widget) {
+        LOG_ERR("Debug widget is NULL!");
+        return;
+    }
+    if (!widget->obj) {
+        LOG_ERR("Debug widget obj is NULL!");
+        return;
+    }
+    
+    if (visible) {
+        lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+        LOG_INF("🟢 Debug widget set to VISIBLE");
+    } else {
+        lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+        LOG_INF("🔴 Debug widget set to HIDDEN");
     }
 }
