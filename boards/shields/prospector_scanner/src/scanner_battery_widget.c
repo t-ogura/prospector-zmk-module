@@ -171,6 +171,7 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
         lv_obj_t *peripheral_container = lv_obj_get_child(widget->obj, 0);
         if (peripheral_container) {
             set_battery_bar_value(peripheral_container, status->data.peripheral_battery[0], true);
+            // peripheral_battery[0] is always LEFT keyboard according to protocol
             LOG_INF("✅ Split mode: Left=%d%%, Right=%d%%", 
                status->data.peripheral_battery[0], status->data.battery_level);
         }

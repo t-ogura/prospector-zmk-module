@@ -73,6 +73,16 @@ config ZMK_STATUS_ADV_ACTIVITY_TIMEOUT_MS
       Can be set up to 300000ms (5 minutes) for extended active periods.
       2000ms = 2 seconds for responsive but power-efficient transitions.
 
+config ZMK_STATUS_ADV_CENTRAL_SIDE
+    string "Physical side of central device in split keyboard"
+    default "RIGHT"
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Specify which physical side the central device is on.
+      RIGHT: Central is on the right side (default - most split keyboards)
+      LEFT: Central is on the left side (e.g. some keyboards like Sweep)
+      This determines the battery display position in scanner devices.
+
 config PROSPECTOR_MODE_SCANNER
     bool "Enable Prospector Scanner Mode"
     default n

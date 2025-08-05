@@ -371,8 +371,28 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.device_role = ZMK_DEVICE_ROLE_CENTRAL;
     manufacturer_data.device_index = 0; // Central is always index 0
     
-    // Copy peripheral battery levels
-    memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 3);
+    // Handle battery placement based on central side configuration
+    // Default to "RIGHT" if not configured (backward compatibility)
+    const char *central_side = "RIGHT";
+#ifdef CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE
+    central_side = CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE;
+#endif
+    
+    if (strcmp(central_side, "LEFT") == 0) {
+        // Central is on LEFT: 
+        // peripheral_battery[0] = RIGHT keyboard (first peripheral)
+        // peripheral_battery[1] = AUX (if exists)
+        // peripheral_battery[2] = unused
+        manufacturer_data.peripheral_battery[0] = peripheral_batteries[0]; // Right keyboard
+        manufacturer_data.peripheral_battery[1] = peripheral_batteries[1]; // Aux if exists
+        manufacturer_data.peripheral_battery[2] = peripheral_batteries[2]; // Third peripheral
+    } else {
+        // Central is on RIGHT (default):
+        // peripheral_battery[0] = LEFT keyboard (first peripheral)
+        // peripheral_battery[1] = AUX (if exists)  
+        // peripheral_battery[2] = unused
+        memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 3);
+    }
            
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     // Peripheral: Skip advertising to preserve split communication  
