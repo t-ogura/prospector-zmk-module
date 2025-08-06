@@ -11,6 +11,7 @@
 #include <zephyr/drivers/led.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/logging/log.h>
+#include <math.h>
 #include "debug_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -160,11 +161,20 @@ static void update_brightness(void) {
         light_level = SENSOR_MAX;  // Clamp to maximum
         brightness = PWM_MAX;  // Set to maximum brightness
     } else {
-        // Linear mapping (original Prospector method)
-        brightness = (uint8_t)(
-            PWM_MIN + ((PWM_MAX - PWM_MIN) *
-            (light_level - SENSOR_MIN)) / (SENSOR_MAX - SENSOR_MIN)
-        );
+        // Non-linear mapping for more natural brightness response
+        // Use square root function to create a curve that's more sensitive to lower values
+        // but less sensitive at higher values (like human eye perception)
+        
+        float normalized = (float)(light_level - SENSOR_MIN) / (SENSOR_MAX - SENSOR_MIN);  // 0.0 - 1.0
+        
+        // Apply square root for more gradual increase
+        // This makes the sensor less likely to jump to 100% quickly
+        float curved = sqrtf(normalized);
+        
+        brightness = (uint8_t)(PWM_MIN + ((PWM_MAX - PWM_MIN) * curved));
+        
+        LOG_DBG("📊 Non-linear mapping: raw=%d, normalized=%.2f, curved=%.2f, brightness=%d%%", 
+                light_level, normalized, curved, brightness);
     }
     
     // Apply brightness via LED API
