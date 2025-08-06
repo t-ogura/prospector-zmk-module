@@ -45,7 +45,7 @@ static const char* scanner_battery_icon_text[] = {
     [SCANNER_BATTERY_ICON_MEDIUM]   = LV_SYMBOL_BATTERY_2,
     [SCANNER_BATTERY_ICON_LOW]      = LV_SYMBOL_BATTERY_1,
     [SCANNER_BATTERY_ICON_CRITICAL] = LV_SYMBOL_BATTERY_EMPTY,
-    [SCANNER_BATTERY_ICON_CHARGING] = LV_SYMBOL_CHARGE,  // Use charge symbol if available
+    [SCANNER_BATTERY_ICON_CHARGING] = LV_SYMBOL_CHARGE,  // Just charge symbol, battery icon added dynamically
     [SCANNER_BATTERY_ICON_HIDDEN]   = ""
 };
 
@@ -89,7 +89,30 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
 
     // Update battery icon
     if (widget->battery_icon) {
-        lv_label_set_text(widget->battery_icon, scanner_battery_icon_text[icon_state]);
+        // For charging state, show battery level icon + charge symbol
+        if (icon_state == SCANNER_BATTERY_ICON_CHARGING) {
+            const char* battery_symbol;
+            if (battery_level >= 80) {
+                battery_symbol = LV_SYMBOL_BATTERY_FULL;
+            } else if (battery_level >= 60) {
+                battery_symbol = LV_SYMBOL_BATTERY_3;
+            } else if (battery_level >= 40) {
+                battery_symbol = LV_SYMBOL_BATTERY_2;
+            } else if (battery_level >= 20) {
+                battery_symbol = LV_SYMBOL_BATTERY_1;
+            } else {
+                battery_symbol = LV_SYMBOL_BATTERY_EMPTY;
+            }
+            
+            // Combine battery symbol with charge symbol
+            static char combined_symbol[32];
+            snprintf(combined_symbol, sizeof(combined_symbol), "%s " LV_SYMBOL_CHARGE, battery_symbol);
+            lv_label_set_text(widget->battery_icon, combined_symbol);
+        } else {
+            // Normal battery state - just show battery icon
+            lv_label_set_text(widget->battery_icon, scanner_battery_icon_text[icon_state]);
+        }
+        
         lv_obj_set_style_text_color(widget->battery_icon, 
                                    scanner_battery_colors[icon_state], 0);
     }
