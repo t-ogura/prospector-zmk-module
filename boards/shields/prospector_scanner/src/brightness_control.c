@@ -22,9 +22,13 @@ extern struct zmk_widget_debug_status debug_widget;
 static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #define DISP_BL DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl))
 
-// Original Prospector sensor value range (matches original implementation)
+// APDS9960 sensor value range (configurable threshold)
 #define SENSOR_MIN      0       // Minimum sensor reading
-#define SENSOR_MAX      100     // Maximum sensor reading (original Prospector range)
+#ifdef CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD
+#define SENSOR_MAX      CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD  // User-configurable threshold
+#else
+#define SENSOR_MAX      100     // Default threshold (original Prospector range)
+#endif
 #ifdef CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
 #define PWM_MIN         CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
 #else
@@ -143,8 +147,8 @@ static void update_brightness(void) {
     int32_t light_level = als_val.val1;
     
     // Log raw value for debugging
-    LOG_INF("🔆 APDS9960 light level: %d (expecting 0-100 range)", light_level);
-    printk("BRIGHTNESS: light=%d (range 0-100)\n", light_level);
+    LOG_INF("🔆 APDS9960 light level: %d (threshold: %d)", light_level, SENSOR_MAX);
+    printk("BRIGHTNESS: light=%d (threshold=%d)\n", light_level, SENSOR_MAX);
     
     // Original Prospector linear mapping function
     uint8_t brightness = PWM_MIN;  // Initialize to minimum brightness
@@ -165,8 +169,8 @@ static void update_brightness(void) {
     
     // Apply brightness via LED API
     set_brightness_pwm(brightness);
-    LOG_INF("💡 APDS9960: light=%d → brightness=%d%% (linear mapping)", 
-            light_level, brightness);
+    LOG_INF("💡 APDS9960: light=%d → brightness=%d%% (threshold=%d)", 
+            light_level, brightness, SENSOR_MAX);
     
     // Also use printk for final result
     printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);

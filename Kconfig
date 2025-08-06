@@ -176,6 +176,17 @@ config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
       Lower values = more responsive but higher power consumption.
       Default is 2000ms (2 seconds). Range is 0.5-10 seconds.
 
+config PROSPECTOR_ALS_SENSOR_THRESHOLD
+    int "Light sensor threshold for maximum brightness"
+    range 50 500
+    default 100
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      Light sensor value at which display reaches maximum brightness.
+      Lower values = more sensitive (reach 100% brightness sooner).
+      Higher values = less sensitive (need brighter light for 100%).
+      Default is 100. Try 150-200 if sensor seems too sensitive.
+
 config PROSPECTOR_FIXED_BRIGHTNESS
     int "Fixed brightness percentage (when ALS disabled)"
     range 10 100
