@@ -46,6 +46,7 @@ static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 static uint8_t current_brightness = 50;  // Start at mid brightness, will be adjusted during init
 static uint8_t target_brightness = 50;
 static struct k_work_delayable fade_work;
+static struct k_work_delayable brightness_work;
 
 // Smooth fade transition - configurable via Kconfig
 #ifdef CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS
@@ -113,7 +114,6 @@ static void set_brightness_pwm(uint8_t brightness_percent) {
 #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
 
 static const struct device *als_dev;
-static struct k_work_delayable brightness_work;
 
 static void update_brightness(void) {
     if (!als_dev || !device_is_ready(als_dev)) {
@@ -529,3 +529,29 @@ static int delayed_brightness_init(void) {
 }
 
 SYS_INIT(delayed_brightness_init, POST_KERNEL, 99);
+
+// Public API functions called from scanner_display.c
+void prospector_set_brightness(uint8_t brightness_percent) {
+    // Clamp brightness to valid range
+    if (brightness_percent > 100) {
+        brightness_percent = 100;
+    }
+    if (brightness_percent < PWM_MIN) {
+        brightness_percent = PWM_MIN;
+    }
+    
+    LOG_DBG("Setting brightness to %d%% (requested by scanner)", brightness_percent);
+    set_brightness_pwm(brightness_percent);
+}
+
+void prospector_resume_brightness(void) {
+    LOG_DBG("Resuming brightness control after scanner event");
+    
+#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+    // In ALS mode, trigger an immediate brightness update
+    k_work_schedule(&brightness_work, K_NO_WAIT);
+#else
+    // In fixed mode, restore to configured brightness
+    set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+#endif
+}
