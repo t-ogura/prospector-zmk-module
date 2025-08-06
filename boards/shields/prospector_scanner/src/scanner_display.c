@@ -253,7 +253,7 @@ lv_obj_t *zmk_display_status_screen() {
     
     // Connection status widget in top right - moved down to make room for battery
     zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 35); // Moved up from 45 to 35
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45); // Original position
     
     // Layer status widget in the center (horizontal layer display) - moved down 10px
     zmk_widget_layer_status_init(&layer_widget, screen);

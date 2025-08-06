@@ -36,14 +36,14 @@ static void init_battery_colors(void) {
     colors_initialized = true;
 }
 
-// Battery icon text based on level
+// Battery icon text based on level - using simple text to avoid font issues
 static const char* scanner_battery_icon_text[] = {
-    [SCANNER_BATTERY_ICON_FULL]     = "🔋",
-    [SCANNER_BATTERY_ICON_HIGH]     = "🔋", 
-    [SCANNER_BATTERY_ICON_MEDIUM]   = "🔋",
-    [SCANNER_BATTERY_ICON_LOW]      = "🔋",
-    [SCANNER_BATTERY_ICON_CRITICAL] = "🪫",
-    [SCANNER_BATTERY_ICON_CHARGING] = "⚡",
+    [SCANNER_BATTERY_ICON_FULL]     = "BAT",
+    [SCANNER_BATTERY_ICON_HIGH]     = "BAT", 
+    [SCANNER_BATTERY_ICON_MEDIUM]   = "BAT",
+    [SCANNER_BATTERY_ICON_LOW]      = "BAT",
+    [SCANNER_BATTERY_ICON_CRITICAL] = "LOW",
+    [SCANNER_BATTERY_ICON_CHARGING] = "CHG",
     [SCANNER_BATTERY_ICON_HIDDEN]   = ""
 };
 
@@ -151,9 +151,9 @@ int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_sta
 
     // Create battery icon label
     widget->battery_icon = lv_label_create(widget->obj);
-    lv_obj_set_style_text_font(widget->battery_icon, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(widget->battery_icon, &lv_font_montserrat_12, 0);  // Smaller font
     lv_obj_align(widget->battery_icon, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_label_set_text(widget->battery_icon, "🔋");
+    lv_label_set_text(widget->battery_icon, "BAT");
 
     // Create percentage label  
     widget->percentage_label = lv_label_create(widget->obj);
@@ -170,7 +170,7 @@ int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_sta
     lv_obj_set_style_text_color(widget->charging_icon, 
                                scanner_battery_colors[SCANNER_BATTERY_ICON_CHARGING], 0); // Blue
     lv_obj_align_to(widget->charging_icon, widget->percentage_label, LV_ALIGN_OUT_RIGHT_MID, 2, 0);
-    lv_label_set_text(widget->charging_icon, "⚡");
+    lv_label_set_text(widget->charging_icon, "CHG");
     lv_obj_add_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
 
     // Initialize state
@@ -275,7 +275,7 @@ void zmk_widget_scanner_battery_status_reset(struct zmk_widget_scanner_battery_s
 
     // Reset to default state
     if (widget->battery_icon) {
-        lv_label_set_text(widget->battery_icon, "🔋");
+        lv_label_set_text(widget->battery_icon, "BAT");
         lv_obj_set_style_text_color(widget->battery_icon, lv_color_white(), 0);
     }
 
