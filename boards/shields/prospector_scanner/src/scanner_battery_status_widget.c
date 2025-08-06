@@ -9,6 +9,8 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/logging/log.h>
 
+#include <lvgl.h>
+
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/battery.h>
@@ -36,14 +38,14 @@ static void init_battery_colors(void) {
     colors_initialized = true;
 }
 
-// Battery icon text based on level - using simple text to avoid font issues
+// Battery icon text based on level - using LVGL built-in battery symbols
 static const char* scanner_battery_icon_text[] = {
-    [SCANNER_BATTERY_ICON_FULL]     = "BAT",
-    [SCANNER_BATTERY_ICON_HIGH]     = "BAT", 
-    [SCANNER_BATTERY_ICON_MEDIUM]   = "BAT",
-    [SCANNER_BATTERY_ICON_LOW]      = "BAT",
-    [SCANNER_BATTERY_ICON_CRITICAL] = "LOW",
-    [SCANNER_BATTERY_ICON_CHARGING] = "CHG",
+    [SCANNER_BATTERY_ICON_FULL]     = LV_SYMBOL_BATTERY_FULL,
+    [SCANNER_BATTERY_ICON_HIGH]     = LV_SYMBOL_BATTERY_3, 
+    [SCANNER_BATTERY_ICON_MEDIUM]   = LV_SYMBOL_BATTERY_2,
+    [SCANNER_BATTERY_ICON_LOW]      = LV_SYMBOL_BATTERY_1,
+    [SCANNER_BATTERY_ICON_CRITICAL] = LV_SYMBOL_BATTERY_EMPTY,
+    [SCANNER_BATTERY_ICON_CHARGING] = LV_SYMBOL_CHARGE,  // Use charge symbol if available
     [SCANNER_BATTERY_ICON_HIDDEN]   = ""
 };
 
@@ -101,14 +103,10 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
                                    scanner_battery_colors[icon_state], 0);
     }
 
-    // Show/hide charging icon
+    // Hide charging icon - we use battery icon to show charging state
+    // This prevents duplicate display of charging status
     if (widget->charging_icon) {
-        bool show_charging = (icon_state == SCANNER_BATTERY_ICON_CHARGING);
-        if (show_charging) {
-            lv_obj_clear_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
-        }
+        lv_obj_add_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
     }
 
     LOG_DBG("Scanner battery widget updated: %s %d%% (state %d)",
