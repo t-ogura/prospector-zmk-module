@@ -197,3 +197,43 @@ config PROSPECTOR_FIXED_BRIGHTNESS
       Also used as fallback brightness when ALS sensor fails.
       Default is 80% for good visibility without being too bright.
       Range is 10-100%.
+
+# Scanner Battery Support Configuration
+config PROSPECTOR_BATTERY_SUPPORT
+    bool "Enable scanner battery operation support"
+    default n
+    depends on PROSPECTOR_MODE_SCANNER
+    select ZMK_BATTERY_REPORTING
+    select USB_DEVICE_STACK
+    help
+      Enable battery operation for Prospector scanner device.
+      Automatically detects battery presence via device tree.
+      Safe to enable even without battery hardware - will auto-hide if not detected.
+      Displays battery level and charging status in top-right corner.
+
+config PROSPECTOR_BATTERY_WIDGET_POSITION
+    string "Battery widget screen position"
+    default "TOP_RIGHT"
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Screen position for battery status widget.
+      Options: TOP_RIGHT, TOP_LEFT, BOTTOM_RIGHT, BOTTOM_LEFT
+      Default TOP_RIGHT for minimal UI disruption.
+
+config PROSPECTOR_BATTERY_WIDGET_HIDE_WHEN_FULL
+    bool "Hide battery widget when USB powered and fully charged"
+    default n
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Hide battery widget when USB connected and battery is 100% charged.
+      Shows charging icon during charging, hides when charging complete.
+      Keeps UI clean when external powered.
+
+config PROSPECTOR_BATTERY_SHOW_PERCENTAGE
+    bool "Show battery percentage text"
+    default y
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Show numerical percentage (e.g., "85%") next to battery icon.
+      Disable for minimal UI or space constraints.
+      Icon color coding still indicates battery level.

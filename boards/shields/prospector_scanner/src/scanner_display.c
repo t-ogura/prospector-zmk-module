@@ -10,6 +10,10 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/logging/log.h>
 #include <zmk/status_scanner.h>
+#include <zmk/events/battery_state_changed.h>
+#include <zmk/events/usb_conn_state_changed.h>
+#include <zmk/battery.h>
+#include <zmk/usb.h>
 #include "scanner_battery_widget.h"
 #include "connection_status_widget.h"
 #include "layer_status_widget.h"
@@ -18,8 +22,13 @@
 #include "signal_status_widget.h"
 #include "wpm_status_widget.h"
 #include "debug_status_widget.h"
+#include "scanner_battery_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+// External brightness control functions
+void prospector_set_brightness(uint8_t brightness_percent);
+void prospector_resume_brightness(void);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
@@ -36,8 +45,65 @@ static struct zmk_widget_wpm_status wpm_widget;
 // Global debug widget for sensor diagnostics (positioned in modifier area)
 struct zmk_widget_debug_status debug_widget;
 
+// Scanner's own battery status widget (top-right corner)
+static struct zmk_widget_scanner_battery_status scanner_battery_widget;
+
 // Forward declaration
 static void trigger_scanner_start(void);
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+// Scanner battery event listener for updating battery widget
+static void update_scanner_battery_widget(void) {
+    uint8_t battery_level = 0;
+    bool usb_powered = false;
+    bool charging = false;
+
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    battery_level = zmk_battery_state_of_charge();
+#endif
+
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    usb_powered = zmk_usb_is_powered();
+    // Simple charging detection: USB powered and battery < 100%
+    charging = usb_powered && (battery_level < 100);
+#endif
+
+    LOG_DBG("Scanner battery update: %d%% USB=%s charging=%s", 
+            battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
+
+    zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
+                                            battery_level, usb_powered, charging);
+}
+
+// Battery state changed event handler
+static int scanner_battery_listener(const zmk_event_t *eh) {
+    if (as_zmk_battery_state_changed(eh)) {
+        LOG_DBG("Scanner battery state changed event received");
+        update_scanner_battery_widget();
+        return 0;
+    }
+    
+    return -ENOTSUP;
+}
+
+// USB connection state changed event handler  
+static int scanner_usb_listener(const zmk_event_t *eh) {
+    if (as_zmk_usb_conn_state_changed(eh)) {
+        LOG_DBG("Scanner USB connection state changed event received");
+        update_scanner_battery_widget();
+        return 0;
+    }
+    
+    return -ENOTSUP;
+}
+
+// Register event listeners for scanner battery monitoring
+ZMK_LISTENER(scanner_battery, scanner_battery_listener);
+ZMK_SUBSCRIPTION(scanner_battery, zmk_battery_state_changed);
+
+ZMK_LISTENER(scanner_usb, scanner_usb_listener);
+ZMK_SUBSCRIPTION(scanner_usb, zmk_usb_conn_state_changed);
+#endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
 
 // Scanner event callback for display updates
 static void update_display_from_scanner(struct zmk_status_scanner_event_data *event_data) {
@@ -59,9 +125,24 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         zmk_widget_layer_status_reset(&layer_widget);
         zmk_widget_modifier_status_reset(&modifier_widget);
         zmk_widget_signal_status_reset(&signal_widget);
-        zmk_widget_wpm_status_reset(&wpm_widget);
+        zmk_widget_wpm_status_reset(&wmp_widget);
         
-        LOG_INF("Display updated: No keyboards - all widgets reset");
+        // Reset scanner's own battery widget (don't reset - should show scanner status)
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT) 
+        // Scanner battery widget shows scanner's own status, not keyboard status
+        // Don't reset it when keyboards disconnect - scanner battery is independent
+#endif
+        
+        // Reduce brightness when no keyboards are connected
+#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+        // When ALS is enabled, set to minimum brightness
+        prospector_set_brightness(CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS);
+#else
+        // When ALS is disabled, reduce to 20% of configured brightness
+        prospector_set_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS / 5);
+#endif
+        
+        LOG_INF("Display updated: No keyboards - all widgets reset, brightness reduced");
     } else {
         // Find active keyboards and display their info  
         for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
@@ -77,6 +158,9 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_modifier_status_update(&modifier_widget, kbd);
                 zmk_widget_signal_status_update(&signal_widget, kbd->rssi);
                 zmk_widget_wpm_status_update(&wpm_widget, kbd);
+                
+                // Resume normal brightness control when keyboard is connected
+                prospector_resume_brightness();
                 
                 // Enhanced debug logging including modifier flags
                 LOG_INF("🔧 SCANNER: Raw keyboard data - modifier_flags=0x%02X", kbd->data.modifier_flags);
@@ -151,9 +235,15 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25); // Back to center
     lv_label_set_text(device_name_label, "Initializing...");
     
-    // Connection status widget in top right - moved down 30px
+    // Scanner battery status widget in top right corner (above connection status)
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
+    lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, -5, 10);
+#endif
+    
+    // Connection status widget in top right - moved down to make room for battery
     zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45); // Back to original
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 35); // Moved up from 45 to 35
     
     // Layer status widget in the center (horizontal layer display) - moved down 10px
     zmk_widget_layer_status_init(&layer_widget, screen);
@@ -185,6 +275,12 @@ lv_obj_t *zmk_display_status_screen() {
     LOG_INF("🔥 IMMEDIATE TEST: Updating debug widget from display init");
     zmk_widget_debug_status_set_text(&debug_widget, "DISPLAY INIT TEST");
     zmk_widget_debug_status_set_visible(&debug_widget, true);
+    
+    // Initialize scanner battery widget with current status
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    LOG_INF("Initializing scanner battery widget with current status");
+    update_scanner_battery_widget();
+#endif
     
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();

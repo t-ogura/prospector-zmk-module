@@ -13,6 +13,7 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # Essential scanner sources
   zephyr_library_sources(src/scanner_display.c)
   zephyr_library_sources(src/scanner_battery_widget.c)  # Battery widget for split keyboard display
+  zephyr_library_sources(src/scanner_battery_status_widget.c)  # Scanner's own battery status widget
   zephyr_library_sources(src/connection_status_widget.c)  # YADS-style connection status widget
   zephyr_library_sources(src/layer_status_widget.c)  # YADS-style large layer display widget
   zephyr_library_sources(src/modifier_status_widget.c)  # Modifier key status widget (C S A G)
