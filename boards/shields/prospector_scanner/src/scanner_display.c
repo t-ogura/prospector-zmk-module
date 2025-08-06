@@ -135,7 +135,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         zmk_widget_layer_status_reset(&layer_widget);
         zmk_widget_modifier_status_reset(&modifier_widget);
         zmk_widget_signal_status_reset(&signal_widget);
-        zmk_widget_wpm_status_reset(&wmp_widget);
+        zmk_widget_wpm_status_reset(&wpm_widget);
         
         // Reset scanner's own battery widget (don't reset - should show scanner status)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT) 

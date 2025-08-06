@@ -18,15 +18,23 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Color definitions for battery level indication
-static const lv_color_t scanner_battery_colors[] = {
-    [SCANNER_BATTERY_ICON_FULL]     = LV_COLOR_MAKE(0x00, 0xFF, 0x00), // Green
-    [SCANNER_BATTERY_ICON_HIGH]     = LV_COLOR_MAKE(0x7F, 0xFF, 0x00), // Light Green
-    [SCANNER_BATTERY_ICON_MEDIUM]   = LV_COLOR_MAKE(0xFF, 0xFF, 0x00), // Yellow
-    [SCANNER_BATTERY_ICON_LOW]      = LV_COLOR_MAKE(0xFF, 0x7F, 0x00), // Orange
-    [SCANNER_BATTERY_ICON_CRITICAL] = LV_COLOR_MAKE(0xFF, 0x00, 0x00), // Red
-    [SCANNER_BATTERY_ICON_CHARGING] = LV_COLOR_MAKE(0x00, 0x7F, 0xFF), // Blue
-};
+// Color definitions for battery level indication - initialized at runtime
+static lv_color_t scanner_battery_colors[6];
+static bool colors_initialized = false;
+
+// Initialize colors at runtime to avoid compile-time macro issues
+static void init_battery_colors(void) {
+    if (colors_initialized) return;
+    
+    scanner_battery_colors[SCANNER_BATTERY_ICON_FULL]     = lv_color_hex(0x00FF00); // Green
+    scanner_battery_colors[SCANNER_BATTERY_ICON_HIGH]     = lv_color_hex(0x7FFF00); // Light Green
+    scanner_battery_colors[SCANNER_BATTERY_ICON_MEDIUM]   = lv_color_hex(0xFFFF00); // Yellow
+    scanner_battery_colors[SCANNER_BATTERY_ICON_LOW]      = lv_color_hex(0xFF7F00); // Orange
+    scanner_battery_colors[SCANNER_BATTERY_ICON_CRITICAL] = lv_color_hex(0xFF0000); // Red
+    scanner_battery_colors[SCANNER_BATTERY_ICON_CHARGING] = lv_color_hex(0x007FFF); // Blue
+    
+    colors_initialized = true;
+}
 
 // Battery icon text based on level
 static const char* scanner_battery_icon_text[] = {
@@ -73,6 +81,9 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
     if (!widget || !widget->obj) {
         return;
     }
+    
+    // Initialize colors if not done yet
+    init_battery_colors();
 
     // Update battery icon
     if (widget->battery_icon) {
@@ -93,7 +104,11 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
     // Show/hide charging icon
     if (widget->charging_icon) {
         bool show_charging = (icon_state == SCANNER_BATTERY_ICON_CHARGING);
-        lv_obj_set_hidden(widget->charging_icon, !show_charging);
+        if (show_charging) {
+            lv_obj_clear_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     LOG_DBG("Scanner battery widget updated: %s %d%% (state %d)",
@@ -150,11 +165,13 @@ int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_sta
     // Create charging icon (initially hidden)
     widget->charging_icon = lv_label_create(widget->obj);
     lv_obj_set_style_text_font(widget->charging_icon, &lv_font_montserrat_12, 0);
+    // Initialize colors first, then set charging icon color
+    init_battery_colors();
     lv_obj_set_style_text_color(widget->charging_icon, 
-                               LV_COLOR_MAKE(0x00, 0x7F, 0xFF), 0); // Blue
+                               scanner_battery_colors[SCANNER_BATTERY_ICON_CHARGING], 0); // Blue
     lv_obj_align_to(widget->charging_icon, widget->percentage_label, LV_ALIGN_OUT_RIGHT_MID, 2, 0);
     lv_label_set_text(widget->charging_icon, "⚡");
-    lv_obj_set_hidden(widget->charging_icon, true);
+    lv_obj_add_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
 
     // Initialize state
     widget->last_battery_level = 0;
@@ -239,7 +256,11 @@ void zmk_widget_scanner_battery_status_set_visible(struct zmk_widget_scanner_bat
     }
 
     if (widget->visible != visible) {
-        lv_obj_set_hidden(widget->obj, !visible);
+        if (visible) {
+            lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+        }
         widget->visible = visible;
         LOG_DBG("Scanner battery widget visibility: %s", visible ? "shown" : "hidden");
     }
@@ -264,7 +285,7 @@ void zmk_widget_scanner_battery_status_reset(struct zmk_widget_scanner_battery_s
     }
 
     if (widget->charging_icon) {
-        lv_obj_set_hidden(widget->charging_icon, true);
+        lv_obj_add_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
     }
 
     // Reset cached state
