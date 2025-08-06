@@ -101,7 +101,10 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
 }
 
 bool zmk_scanner_battery_hardware_available(void) {
-#if DT_HAS_CHOSEN(zmk_battery)
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_DEMO_MODE)
+    // Demo mode: always return true for UI testing
+    return true;
+#elif DT_HAS_CHOSEN(zmk_battery)
     const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
     return device_is_ready(battery_dev);
 #else

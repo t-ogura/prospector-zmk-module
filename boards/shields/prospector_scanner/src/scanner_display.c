@@ -58,6 +58,15 @@ static void update_scanner_battery_widget(void) {
     bool usb_powered = false;
     bool charging = false;
 
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_DEMO_MODE)
+    // Demo mode: Show sample battery status for UI testing
+    battery_level = 75;  // 75% battery level (yellow/orange range)
+    usb_powered = true;  // Show USB connected
+    charging = true;     // Show charging icon
+    LOG_DBG("Scanner battery DEMO MODE: %d%% USB=%s charging=%s", 
+            battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
+#else
+    // Normal mode: Get real battery status
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     battery_level = zmk_battery_state_of_charge();
 #endif
@@ -70,6 +79,7 @@ static void update_scanner_battery_widget(void) {
 
     LOG_DBG("Scanner battery update: %d%% USB=%s charging=%s", 
             battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
+#endif
 
     zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
                                             battery_level, usb_powered, charging);

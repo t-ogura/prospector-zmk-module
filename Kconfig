@@ -237,3 +237,13 @@ config PROSPECTOR_BATTERY_SHOW_PERCENTAGE
       Show numerical percentage (e.g., "85%") next to battery icon.
       Disable for minimal UI or space constraints.
       Icon color coding still indicates battery level.
+
+config PROSPECTOR_BATTERY_DEMO_MODE
+    bool "Enable battery widget demo mode (no hardware required)"
+    default n
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Force display battery widget even without battery hardware.
+      Shows demo battery status (75%, USB powered) for UI testing.
+      Useful for testing widget appearance and positioning.
+      DISABLE for production use.
