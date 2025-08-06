@@ -19,7 +19,10 @@ struct zmk_widget_signal_status {
     lv_obj_t *rssi_label;      // RSSI dBm value
     lv_obj_t *rate_label;      // Reception rate in Hz
     uint32_t last_update_time; // For calculating reception rate
+    uint32_t last_display_update; // For display rate limiting
     float last_rate_hz;        // Cached reception rate
+    uint32_t reception_count;   // Number of receptions in current interval
+    uint32_t interval_start;    // Start of current measurement interval
 };
 
 int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_obj_t *parent);

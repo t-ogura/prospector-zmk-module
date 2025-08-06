@@ -42,20 +42,29 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
         return;
     }
 
-    // Rate limiting: Update at most once per second (1Hz)
     uint32_t now = k_uptime_get_32();
-    if (widget->last_update_time > 0 && (now - widget->last_update_time) < 1000) {
-        return; // Skip update if less than 1 second has passed
+    
+    // Track reception for rate calculation
+    widget->reception_count++;
+    
+    // Calculate reception rate every second
+    if (widget->interval_start == 0) {
+        widget->interval_start = now;
+    } else if ((now - widget->interval_start) >= 1000) {
+        // Calculate rate based on actual reception count
+        float interval_seconds = (now - widget->interval_start) / 1000.0f;
+        widget->last_rate_hz = widget->reception_count / interval_seconds;
+        
+        // Reset for next interval
+        widget->reception_count = 0;
+        widget->interval_start = now;
     }
-
-    // Calculate reception rate
-    if (widget->last_update_time > 0) {
-        uint32_t delta_ms = now - widget->last_update_time;
-        if (delta_ms > 0) {
-            widget->last_rate_hz = 1000.0f / (float)delta_ms;
-        }
+    
+    // Rate-limit display updates to once per second for performance
+    if (widget->last_display_update > 0 && (now - widget->last_display_update) < 1000) {
+        return; // Skip display update if less than 1 second has passed
     }
-    widget->last_update_time = now;
+    widget->last_display_update = now;
 
     // Update RSSI bar
     uint8_t bars = rssi_to_bars(rssi);
@@ -131,7 +140,10 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
 
     // Initialize timing
     widget->last_update_time = 0;
+    widget->last_display_update = 0;
     widget->last_rate_hz = 0;
+    widget->reception_count = 0;
+    widget->interval_start = 0;
 
     LOG_INF("Signal status widget initialized (RSSI + reception rate)");
     return 0;
@@ -156,7 +168,10 @@ void zmk_widget_signal_status_reset(struct zmk_widget_signal_status *widget) {
     
     // Reset cached values
     widget->last_update_time = 0;
+    widget->last_display_update = 0;
     widget->last_rate_hz = 0.0f;
+    widget->reception_count = 0;
+    widget->interval_start = 0;
 }
 
 lv_obj_t *zmk_widget_signal_status_obj(struct zmk_widget_signal_status *widget) {
