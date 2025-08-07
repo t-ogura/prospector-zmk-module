@@ -302,3 +302,14 @@ config PROSPECTOR_BATTERY_DEMO_MODE
       Shows demo battery status (75%, USB powered) for UI testing.
       Useful for testing widget appearance and positioning.
       DISABLE for production use.
+
+config PROSPECTOR_BATTERY_UPDATE_INTERVAL_S
+    int "Battery status update interval in seconds"
+    range 5 300
+    default 30
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      How often to refresh battery status from hardware in seconds.
+      Lower values provide more responsive display but use more CPU.
+      Default is 30 seconds. Range is 5 seconds to 5 minutes.
+      Battery events will still trigger immediate updates.

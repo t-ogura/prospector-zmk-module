@@ -77,8 +77,13 @@ static void update_scanner_battery_widget(void) {
     charging = usb_powered && (battery_level < 100);
 #endif
 
-    LOG_DBG("Scanner battery update: %d%% USB=%s charging=%s", 
+    // Always log battery status changes at INFO level for visibility
+    LOG_INF("🔋 Scanner battery status: %d%% USB=%s charging=%s", 
             battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
+    
+    // Also output via printk for easier debugging
+    printk("BATTERY: %d%% USB=%s charging=%s\\n", 
+           battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
 #endif
 
     zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
@@ -113,6 +118,24 @@ ZMK_SUBSCRIPTION(scanner_battery, zmk_battery_state_changed);
 
 ZMK_LISTENER(scanner_usb, scanner_usb_listener);
 ZMK_SUBSCRIPTION(scanner_usb, zmk_usb_conn_state_changed);
+
+// Periodic battery status update work
+static void battery_periodic_update_handler(struct k_work *work) {
+    LOG_DBG("Periodic battery status update triggered");
+    update_scanner_battery_widget();
+    
+    // Schedule next update
+    k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
+}
+
+static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_handler);
+
+// Start periodic battery monitoring
+static void start_battery_monitoring(void) {
+    // Update battery status at configurable intervals for more responsive display
+    k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
+    LOG_INF("Started periodic battery monitoring (%ds intervals)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
+}
 #endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM)
@@ -335,6 +358,9 @@ lv_obj_t *zmk_display_status_screen() {
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     LOG_INF("Initializing scanner battery widget with current status");
     update_scanner_battery_widget();
+    
+    // Start periodic battery monitoring for more responsive updates
+    start_battery_monitoring();
 #endif
     
     // Trigger scanner initialization after screen is ready
