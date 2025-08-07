@@ -159,12 +159,14 @@ config PROSPECTOR_ALS_MIN_BRIGHTNESS
 config PROSPECTOR_ALS_MAX_BRIGHTNESS
     int "Maximum brightness percentage"
     range 10 100
+    default 60 if PROSPECTOR_BATTERY_SUPPORT
     default 100
     depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     help
       Maximum brightness level in percentage (10-100%).
       Display will never go brighter than this value.
-      Default is 100% for maximum visibility in bright light.
+      Default is 60% when battery operation enabled (to preserve battery life),
+      100% when USB powered only for maximum visibility in bright light.
 
 config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
     int "Ambient light sensor update interval in milliseconds"
@@ -190,12 +192,14 @@ config PROSPECTOR_ALS_SENSOR_THRESHOLD
 config PROSPECTOR_FIXED_BRIGHTNESS
     int "Fixed brightness percentage (when ALS disabled)"
     range 10 100
+    default 60 if PROSPECTOR_BATTERY_SUPPORT
     default 80
     depends on PROSPECTOR_MODE_SCANNER
     help
       Fixed brightness level when ambient light sensor is disabled.
       Also used as fallback brightness when ALS sensor fails.
-      Default is 80% for good visibility without being too bright.
+      Default is 60% when battery operation enabled (to preserve battery life),
+      80% when USB powered only for good visibility.
       Range is 10-100%.
 
 # Scanner Battery Support Configuration
