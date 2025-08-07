@@ -186,11 +186,11 @@ static void update_brightness(void) {
     // Also use printk for final result
     printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);
     
-    // Debug display: Show current light level and brightness
-    char status_buf[64];
-    snprintf(status_buf, sizeof(status_buf), "L:%d B:%d%%", light_level, brightness);
-    zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    // Debug display: Hide for production use
+    // char status_buf[64];
+    // snprintf(status_buf, sizeof(status_buf), "L:%d B:%d%%", light_level, brightness);
+    // zmk_widget_debug_status_set_text(&debug_widget, status_buf);
+    zmk_widget_debug_status_set_visible(&debug_widget, false);
 }
 
 static void brightness_work_handler(struct k_work *work) {
@@ -255,7 +255,7 @@ static int brightness_control_init(void) {
         
         // Debug display: Show sensor not ready status (persistent)
         zmk_widget_debug_status_set_text(&debug_widget, "ALS: Device Not Ready");
-        zmk_widget_debug_status_set_visible(&debug_widget, true);
+        zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
         // No auto-hide - keep visible to show problem
         
         set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
@@ -294,7 +294,7 @@ static int brightness_control_init(void) {
             char status_buf[64];
             snprintf(status_buf, sizeof(status_buf), "ALS: OK (%d)", test_val.val1);
             zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-            zmk_widget_debug_status_set_visible(&debug_widget, true);
+            zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
         } else {
             LOG_WRN("Failed to get initial light value: %d", ret);
             printk("BRIGHTNESS: Failed to get light value, error %d\n", ret);
@@ -310,13 +310,13 @@ static int brightness_control_init(void) {
                 char status_buf[64];
                 snprintf(status_buf, sizeof(status_buf), "ALS: RED Ch (%d)", test_val.val1);
                 zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-                zmk_widget_debug_status_set_visible(&debug_widget, true);
+                zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
             } else {
                 // Debug display: Show channel read failed (persistent error)
                 char status_buf[64];
                 snprintf(status_buf, sizeof(status_buf), "ALS: Ch Read Fail (%d)", ret);
                 zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-                zmk_widget_debug_status_set_visible(&debug_widget, true);
+                zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
             }
         }
     } else {
@@ -328,7 +328,7 @@ static int brightness_control_init(void) {
         char status_buf[64];
         snprintf(status_buf, sizeof(status_buf), "ALS: I2C Fail (%d)", ret);
         zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-        zmk_widget_debug_status_set_visible(&debug_widget, true);
+        zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
     }
     
     // Initialize work queues
@@ -342,7 +342,7 @@ static int brightness_control_init(void) {
     LOG_INF("🔧 About to access debug widget...");
     printk("BRIGHTNESS: Accessing debug widget\n");
     
-    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
     zmk_widget_debug_status_set_text(&debug_widget, "ALS: INIT TEST");
     LOG_INF("🎯 Forced debug widget visible with test message");
     
@@ -378,7 +378,7 @@ static int brightness_control_init(void) {
     // Test debug widget access even in fixed mode
     LOG_INF("🔧 Testing debug widget access in fixed mode...");
     zmk_widget_debug_status_set_text(&debug_widget, "ALS: DISABLED");
-    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
     LOG_INF("🔧 Debug widget should show ALS: DISABLED");
     
     return 0;
