@@ -145,8 +145,8 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
     if (widget->last_display_update > 0) {
         uint32_t interval_ms = now - widget->last_display_update;
         
-        // Only update rate calculation if at least 800ms has passed (allows for some variance from 1Hz)
-        if (interval_ms >= 800) {
+        // Update rate calculation if enough time has passed (500ms minimum for responsiveness)
+        if (interval_ms >= 500) {
             if (widget->reception_count > 0) {
                 // Calculate average rate: receptions per second
                 current_rate_hz = (widget->reception_count * 1000.0f) / interval_ms;
@@ -157,14 +157,14 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
                 widget->last_rate_hz = calculate_smoothed_rate(widget, current_rate_hz);
             }
             // Reset for next measurement period
-            widget->reception_count = 1; // Count this current reception
+            widget->reception_count = 0; // Reset counter - this reception was already counted
             widget->last_display_update = now;
         }
         // If less than 800ms, just increment reception count but don't recalculate rate
     } else {
         // First reception - initialize
         widget->last_rate_hz = 1.0f;  // Assume 1Hz for first reception
-        widget->reception_count = 1;
+        widget->reception_count = 1;  // Count this first reception
         widget->last_display_update = now;
     }
 
