@@ -135,36 +135,38 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
     // Track reception for rate calculation
     widget->last_update_time = now;
     
-    // Rate-limit display updates to once per second for performance
-    if (widget->last_display_update > 0 && (now - widget->last_display_update) < 1000) {
-        return; // Skip display update if less than 1 second has passed
-    }
+    // Remove rate limiting - allow immediate display updates for responsive UI
+    // The periodic 1Hz system will handle regular updates, but reception events should update immediately
     
-    // Calculate actual reception rate only when updating display
-    // This ensures moving average gets consistent samples at 1-second intervals
-    float current_rate_hz = 0.0f;
+    // Only calculate rate if enough time has passed for meaningful measurement
+    // This prevents erratic rate calculations from individual receptions
+    float current_rate_hz = widget->last_rate_hz;  // Keep current rate by default
+    
     if (widget->last_display_update > 0) {
-        // Calculate rate based on reception count in the last second
         uint32_t interval_ms = now - widget->last_display_update;
-        if (interval_ms > 0 && widget->reception_count > 0) {
-            // Calculate average rate: receptions per second
-            current_rate_hz = (widget->reception_count * 1000.0f) / interval_ms;
-            
-            // Apply moving average smoothing to rate
-            LOG_INF("Rate calc: count=%d, interval=%dms, raw_rate=%.1f", 
-                    widget->reception_count, interval_ms, current_rate_hz);
-            widget->last_rate_hz = calculate_smoothed_rate(widget, current_rate_hz);
-            
-            // Reset reception count for next interval
-            widget->reception_count = 0;
+        
+        // Only update rate calculation if at least 800ms has passed (allows for some variance from 1Hz)
+        if (interval_ms >= 800) {
+            if (widget->reception_count > 0) {
+                // Calculate average rate: receptions per second
+                current_rate_hz = (widget->reception_count * 1000.0f) / interval_ms;
+                
+                // Apply moving average smoothing to rate
+                LOG_INF("Rate calc: count=%d, interval=%dms, raw_rate=%.1f", 
+                        widget->reception_count, interval_ms, current_rate_hz);
+                widget->last_rate_hz = calculate_smoothed_rate(widget, current_rate_hz);
+            }
+            // Reset for next measurement period
+            widget->reception_count = 1; // Count this current reception
+            widget->last_display_update = now;
         }
+        // If less than 800ms, just increment reception count but don't recalculate rate
     } else {
-        // First display update - initialize
+        // First reception - initialize
         widget->last_rate_hz = 1.0f;  // Assume 1Hz for first reception
-        widget->reception_count = 0;
+        widget->reception_count = 1;
+        widget->last_display_update = now;
     }
-    
-    widget->last_display_update = now;
 
     // Update RSSI bar using smoothed value
     uint8_t bars = rssi_to_bars(smoothed_rssi);
@@ -340,16 +342,27 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
     
     // If signal is still active, check if we need to update rate calculation
     if (widget->signal_active) {
-        // If no recent reception activity, add a 0.0 rate sample to moving average
-        if (widget->reception_count == 0 && widget->last_display_update > 0) {
-            // No receptions in this period - add 0.0Hz sample to drive rate toward 0
-            float zero_rate = 0.0f;
-            widget->last_rate_hz = calculate_smoothed_rate(widget, zero_rate);
+        // Check if it's been more than 1 second since last rate calculation
+        uint32_t time_since_last_calc = now - widget->last_display_update;
+        
+        if (time_since_last_calc >= 1000) {  // 1 second or more
+            if (widget->reception_count == 0) {
+                // No receptions in this period - add 0.0Hz sample to drive rate toward 0
+                float zero_rate = 0.0f;
+                widget->last_rate_hz = calculate_smoothed_rate(widget, zero_rate);
+                
+                LOG_INF("No reception in 1s interval - adding 0.0Hz sample, smoothed rate now %.1fHz", 
+                        widget->last_rate_hz);
+            } else {
+                // Calculate rate based on actual receptions in this period
+                float current_rate = (widget->reception_count * 1000.0f) / time_since_last_calc;
+                widget->last_rate_hz = calculate_smoothed_rate(widget, current_rate);
+                
+                LOG_INF("Periodic rate update: %d receptions in %dms = %.1fHz, smoothed to %.1fHz", 
+                        widget->reception_count, time_since_last_calc, current_rate, widget->last_rate_hz);
+            }
             
-            LOG_INF("No reception in 1s interval - adding 0.0Hz sample, smoothed rate now %.1fHz", 
-                    widget->last_rate_hz);
-            
-            // Update rate display with declining rate
+            // Update rate display with current rate
             if (widget->last_rate_hz > 0.1f) {
                 char rate_text[16];
                 int rate_int = (int)(widget->last_rate_hz * 10);
@@ -359,11 +372,12 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
                 // Rate has declined to nearly zero
                 lv_label_set_text(widget->rate_label, "0.0Hz");
             }
+            
+            // Reset for next measurement period
+            widget->reception_count = 0;
+            widget->last_display_update = now;
         }
-        
-        // Reset reception count for next interval
-        widget->reception_count = 0;
-        widget->last_display_update = now;
+        // If less than 1 second, don't update - let individual receptions handle immediate display
         
     } else {
         // No signal active - ensure display shows no activity
