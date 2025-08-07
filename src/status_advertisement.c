@@ -92,6 +92,11 @@ static int position_state_listener(const zmk_event_t *eh) {
         bool was_active = is_active;
         is_active = true;
         
+        // Debug activity state transitions
+        if (!was_active) {
+            LOG_INF("⚡ ACTIVITY: Switched to ACTIVE mode - now using %dms intervals (10Hz)", ACTIVE_UPDATE_INTERVAL_MS);
+        }
+        
         // Custom WPM calculation
         key_press_count++;
         if (wpm_start_time == 0) {
@@ -180,7 +185,9 @@ static uint32_t get_current_update_interval(void) {
     // Check if we should transition from active to idle
     if (is_active && (now - last_activity_time) > ACTIVITY_TIMEOUT_MS) {
         is_active = false;
-        LOG_DBG("💤 Switching to idle mode - reducing update frequency");
+        uint32_t idle_duration = now - last_activity_time;
+        LOG_INF("💤 ACTIVITY: Switched to IDLE mode after %dms - now using %dms intervals (1Hz)", 
+                idle_duration, IDLE_UPDATE_INTERVAL_MS);
     }
     
     // Check connection states using reliable APIs
@@ -593,12 +600,30 @@ static void adv_work_handler(struct k_work *work) {
     
     // Schedule next update with adaptive interval
     uint32_t interval_ms = get_current_update_interval();
+    
+    // Periodic logging of current interval (every 20th update to avoid spam)
+    static int update_counter = 0;
+    update_counter++;
+    if (update_counter % 20 == 0) {
+        LOG_INF("📊 PROSPECTOR: Using %dms intervals (%.1fHz) - %s mode", 
+                interval_ms, 1000.0f/interval_ms, is_active ? "ACTIVE" : "IDLE");
+    }
+    
     k_work_schedule(&adv_work, K_MSEC(interval_ms));
 }
 
 // Initialize Prospector simple advertising system  
 static int init_prospector_status(const struct device *dev) {
     k_work_init_delayable(&adv_work, adv_work_handler);
+    
+#if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
+    LOG_INF("⚙️ PROSPECTOR: Activity-based advertisement initialized");
+    LOG_INF("   ACTIVE interval: %dms (%.1fHz)", ACTIVE_UPDATE_INTERVAL_MS, 1000.0f/ACTIVE_UPDATE_INTERVAL_MS);
+    LOG_INF("   IDLE interval: %dms (%.1fHz)", IDLE_UPDATE_INTERVAL_MS, 1000.0f/IDLE_UPDATE_INTERVAL_MS);
+    LOG_INF("   Activity timeout: %dms", ACTIVITY_TIMEOUT_MS);
+#else
+    LOG_INF("⚙️ PROSPECTOR: Fixed advertisement interval: %dms", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
+#endif
     
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     LOG_INF("Prospector: Peripheral device - advertising disabled to preserve split communication");
