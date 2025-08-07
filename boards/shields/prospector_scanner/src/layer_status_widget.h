@@ -13,7 +13,12 @@
 extern "C" {
 #endif
 
-#define MAX_LAYER_DISPLAY (CONFIG_PROSPECTOR_MAX_LAYERS + 1)  // Display layers 0 to CONFIG_PROSPECTOR_MAX_LAYERS
+// Use Kconfig setting for maximum layers, fallback to 7 if not configured
+#ifdef CONFIG_PROSPECTOR_MAX_LAYERS
+#define MAX_LAYER_DISPLAY CONFIG_PROSPECTOR_MAX_LAYERS
+#else
+#define MAX_LAYER_DISPLAY 7  // Default: Display layers 0-6
+#endif
 
 struct zmk_widget_layer_status {
     lv_obj_t *obj;

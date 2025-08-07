@@ -107,6 +107,16 @@ config PROSPECTOR_MAX_KEYBOARDS
     help
       Maximum number of keyboards that can be tracked simultaneously.
 
+config PROSPECTOR_MAX_LAYERS
+    int "Maximum number of layers to display"
+    range 4 10
+    default 6
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Maximum number of layers to display in the layer status widget (layers 0 to N-1).
+      Default is 6 layers (0-5). Increase if your keyboard has more layers.
+      Range is 4-10 layers. Display shows layers 0 through (MAX_LAYERS-1).
+
 config PROSPECTOR_SCANNER_TIMEOUT_MS
     int "Scanner timeout in milliseconds"
     range 10000 600000
