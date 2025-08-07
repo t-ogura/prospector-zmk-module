@@ -248,7 +248,7 @@ lv_obj_t *zmk_display_status_screen() {
     // Scanner battery status widget in top right corner (above connection status)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, -10, 5);
+    lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, -25, 0);
 #endif
     
     // Connection status widget in top right - moved down to make room for battery
