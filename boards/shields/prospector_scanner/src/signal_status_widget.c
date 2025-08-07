@@ -327,4 +327,51 @@ void zmk_widget_signal_status_check_timeout(struct zmk_widget_signal_status *wid
     check_signal_timeout(widget);
 }
 
+// Periodic 1Hz update function - called every second regardless of signal reception
+void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *widget) {
+    if (!widget || !widget->obj) {
+        return;
+    }
+    
+    uint32_t now = k_uptime_get_32();
+    
+    // Force timeout check every second
+    check_signal_timeout(widget);
+    
+    // If signal is still active, check if we need to update rate calculation
+    if (widget->signal_active) {
+        // If no recent reception activity, add a 0.0 rate sample to moving average
+        if (widget->reception_count == 0 && widget->last_display_update > 0) {
+            // No receptions in this period - add 0.0Hz sample to drive rate toward 0
+            float zero_rate = 0.0f;
+            widget->last_rate_hz = calculate_smoothed_rate(widget, zero_rate);
+            
+            LOG_INF("No reception in 1s interval - adding 0.0Hz sample, smoothed rate now %.1fHz", 
+                    widget->last_rate_hz);
+            
+            // Update rate display with declining rate
+            if (widget->last_rate_hz > 0.1f) {
+                char rate_text[16];
+                int rate_int = (int)(widget->last_rate_hz * 10);
+                snprintf(rate_text, sizeof(rate_text), "%d.%dHz", rate_int / 10, rate_int % 10);
+                lv_label_set_text(widget->rate_label, rate_text);
+            } else {
+                // Rate has declined to nearly zero
+                lv_label_set_text(widget->rate_label, "0.0Hz");
+            }
+        }
+        
+        // Reset reception count for next interval
+        widget->reception_count = 0;
+        widget->last_display_update = now;
+        
+    } else {
+        // No signal active - ensure display shows no activity
+        lv_label_set_text(widget->rssi_label, "--dBm");
+        lv_label_set_text(widget->rate_label, "--Hz");
+        lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);
+    }
+}
+
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY

@@ -53,9 +53,13 @@ static void trigger_scanner_start(void);
 
 // Forward declaration for signal timeout checking
 static void check_signal_timeout_handler(struct k_work *work);
+static void periodic_rx_update_handler(struct k_work *work);
 
 // Work queue for periodic signal timeout checking
 static K_WORK_DELAYABLE_DEFINE(signal_timeout_work, check_signal_timeout_handler);
+
+// Work queue for 1Hz RX periodic updates
+static K_WORK_DELAYABLE_DEFINE(rx_periodic_work, periodic_rx_update_handler);
 
 // Periodic signal timeout check (every 5 seconds)
 static void check_signal_timeout_handler(struct k_work *work) {
@@ -66,10 +70,20 @@ static void check_signal_timeout_handler(struct k_work *work) {
     k_work_schedule(&signal_timeout_work, K_SECONDS(5));
 }
 
+// 1Hz periodic RX update - called every second for smooth rate decline
+static void periodic_rx_update_handler(struct k_work *work) {
+    // Call periodic update for signal widget - ensures 1Hz update even without receptions
+    zmk_widget_signal_status_periodic_update(&signal_widget);
+    
+    // Schedule next update in 1 second - this ensures continuous 1Hz updates
+    k_work_schedule(&rx_periodic_work, K_SECONDS(1));
+}
+
 // Start periodic signal monitoring
 static void start_signal_monitoring(void) {
     k_work_schedule(&signal_timeout_work, K_SECONDS(5));
-    LOG_INF("Started periodic signal timeout monitoring (5s intervals)");
+    k_work_schedule(&rx_periodic_work, K_SECONDS(1));  // Start 1Hz updates
+    LOG_INF("Started periodic signal timeout monitoring (5s intervals) and 1Hz RX updates");
 }
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)

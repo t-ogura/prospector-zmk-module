@@ -48,6 +48,7 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
 void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, int8_t rssi);
 void zmk_widget_signal_status_reset(struct zmk_widget_signal_status *widget);
 void zmk_widget_signal_status_check_timeout(struct zmk_widget_signal_status *widget);
+void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *widget);
 lv_obj_t *zmk_widget_signal_status_obj(struct zmk_widget_signal_status *widget);
 
 #ifdef __cplusplus
