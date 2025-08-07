@@ -119,6 +119,12 @@ ZMK_SUBSCRIPTION(scanner_battery, zmk_battery_state_changed);
 ZMK_LISTENER(scanner_usb, scanner_usb_listener);
 ZMK_SUBSCRIPTION(scanner_usb, zmk_usb_conn_state_changed);
 
+// Forward declaration of work handler
+static void battery_periodic_update_handler(struct k_work *work);
+
+// Work queue definition 
+static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_handler);
+
 // Periodic battery status update work
 static void battery_periodic_update_handler(struct k_work *work) {
     LOG_DBG("Periodic battery status update triggered");
@@ -127,8 +133,6 @@ static void battery_periodic_update_handler(struct k_work *work) {
     // Schedule next update
     k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
 }
-
-static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_handler);
 
 // Start periodic battery monitoring
 static void start_battery_monitoring(void) {
