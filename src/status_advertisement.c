@@ -290,12 +290,32 @@ static void build_manufacturer_payload(void) {
             wpm_start_time = 0;
             LOG_DBG("📊 WPM reset due to inactivity");
         } else {
-            // Continuously recalculate WPM for real-time updates (including decrease)
+            // Enhanced WPM calculation with aggressive decay during idle periods
             uint32_t elapsed_ms = now - wpm_start_time;
+            uint32_t time_since_activity = now - last_activity_time;
+            
             if (elapsed_ms > 2000) { // At least 2 seconds of data
                 uint32_t elapsed_seconds = elapsed_ms / 1000;
                 if (elapsed_seconds > 0) {
-                    current_wpm = (key_press_count * 60) / (elapsed_seconds * 5); // Divide by 5 for words
+                    // Calculate base WPM
+                    uint32_t base_wpm = (key_press_count * 60) / (elapsed_seconds * 5);
+                    
+                    // Apply aggressive decay for idle periods (much faster WPM decline)
+                    if (time_since_activity > 5000) {  // After 5 seconds of inactivity
+                        // Simple linear decay: drops to ~0 after 30 seconds of idle
+                        float idle_seconds = (time_since_activity - 5000) / 1000.0f;
+                        float decay_factor = 1.0f - (idle_seconds / 25.0f);  // Linear decay over 25s
+                        if (decay_factor < 0.0f) decay_factor = 0.0f;
+                        
+                        current_wpm = (uint8_t)(base_wpm * decay_factor);
+                        LOG_DBG("📊 WPM with decay: base=%d, idle=%.1fs, decay=%.3f, final=%d", 
+                                base_wpm, idle_seconds + 5.0f, decay_factor, current_wpm);
+                    } else {
+                        // Normal calculation when actively typing or recently active
+                        current_wpm = base_wpm;
+                        LOG_DBG("📊 WPM active: %d", current_wpm);
+                    }
+                    
                     if (current_wpm > 255) current_wpm = 255;
                 }
             }

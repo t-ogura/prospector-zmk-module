@@ -177,14 +177,18 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
     // Update RSSI value label with smoothed value
     lv_label_set_text_fmt(widget->rssi_label, "%ddBm", smoothed_rssi);
 
-    // Update reception rate label with actual rate
-    if (widget->last_rate_hz > 0.1f) {  // Only show rate if > 0.1Hz
-        char rate_text[16];
-        int rate_int = (int)(widget->last_rate_hz * 10);  // Convert to tenths
-        snprintf(rate_text, sizeof(rate_text), "%d.%dHz", rate_int / 10, rate_int % 10);
-        lv_label_set_text(widget->rate_label, rate_text);
-    } else {
-        lv_label_set_text(widget->rate_label, "--Hz");
+    // Update reception rate label with actual rate (but limit display updates to 1Hz max)
+    static uint32_t last_rate_display_update = 0;
+    if ((now - last_rate_display_update) >= 1000) {  // Limit rate display updates to 1Hz
+        if (widget->last_rate_hz > 0.1f) {  // Only show rate if > 0.1Hz
+            char rate_text[16];
+            int rate_int = (int)(widget->last_rate_hz * 10);  // Convert to tenths
+            snprintf(rate_text, sizeof(rate_text), "%d.%dHz", rate_int / 10, rate_int % 10);
+            lv_label_set_text(widget->rate_label, rate_text);
+        } else {
+            lv_label_set_text(widget->rate_label, "--Hz");
+        }
+        last_rate_display_update = now;
     }
 
     LOG_DBG("Signal update: raw=%ddBm smoothed=%ddBm (%d bars), rate=%.1fHz", 
