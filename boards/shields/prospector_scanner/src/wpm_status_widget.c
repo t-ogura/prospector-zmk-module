@@ -6,6 +6,7 @@
 
 #include <lvgl.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/kernel.h>
 #include <zmk/status_scanner.h>
 #include "wpm_status_widget.h"
 
