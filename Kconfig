@@ -55,23 +55,24 @@ config ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS
 
 config ZMK_STATUS_ADV_IDLE_INTERVAL_MS
     int "Idle advertisement interval in milliseconds" 
-    range 500 60000
-    default 1000
+    range 500 300000
+    default 30000
     depends on ZMK_STATUS_ADV_ACTIVITY_BASED
     help
       Advertisement interval when keyboard is idle.
-      1000ms = 1Hz for battery conservation.
-      Can be set up to 60000ms (1 minute) for maximum battery saving.
+      30000ms (30 seconds) default for significant battery conservation.
+      Can be set up to 300000ms (5 minutes) for maximum battery saving.
+      Scanner timeout should be set longer than this value.
 
 config ZMK_STATUS_ADV_ACTIVITY_TIMEOUT_MS
     int "Activity timeout in milliseconds"
     range 1000 300000
-    default 2000
+    default 5000
     depends on ZMK_STATUS_ADV_ACTIVITY_BASED
     help
       Time to wait before switching from active to idle mode.
       Can be set up to 300000ms (5 minutes) for extended active periods.
-      2000ms = 2 seconds for responsive but power-efficient transitions.
+      5000ms = 5 seconds default prevents frequent mode switching during brief pauses.
 
 config ZMK_STATUS_ADV_CENTRAL_SIDE
     string "Physical side of central device in split keyboard"
@@ -109,11 +110,33 @@ config PROSPECTOR_MAX_KEYBOARDS
 config PROSPECTOR_SCANNER_TIMEOUT_MS
     int "Scanner timeout in milliseconds"
     range 10000 600000
-    default 300000
+    default 480000
     depends on PROSPECTOR_MODE_SCANNER
     help
       Time in milliseconds to wait before considering a keyboard as lost.
-      Default is 300000ms (5 minutes). Range is 10-600 seconds.
+      Default is 480000ms (8 minutes) - should be longer than keyboard idle interval.
+      Range is 10-600 seconds (10min max).
+
+config PROSPECTOR_SCANNER_IDLE_BRIGHTNESS_MS
+    int "Time before dimming display when no keyboard activity"
+    range 60000 600000
+    default 120000
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Time in milliseconds before dimming display when keyboard is idle.
+      Scanner will reduce brightness when no activity is detected.
+      Default is 120000ms (2 minutes). Range is 1-10 minutes.
+      Only applies when battery support is enabled.
+
+config PROSPECTOR_SCANNER_IDLE_BRIGHTNESS_PERCENT
+    int "Display brightness during scanner idle mode"
+    range 5 50
+    default 20
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Brightness percentage when scanner detects prolonged keyboard idle.
+      Low brightness saves battery while maintaining visibility.
+      Default is 20%. Range is 5-50%.
 
 config PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS
     int "Brightness fade duration in milliseconds"
