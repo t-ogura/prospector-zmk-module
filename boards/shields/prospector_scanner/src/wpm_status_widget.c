@@ -19,6 +19,22 @@ void zmk_widget_wpm_status_update(struct zmk_widget_wpm_status *widget, struct z
     }
     
     uint8_t wpm_value = kbd->data.wpm_value;
+    uint32_t current_time = k_uptime_get_32();
+    
+    // Update last activity time when we receive non-zero WPM
+    if (wpm_value > 0) {
+        widget->last_activity_time = current_time;
+    }
+    
+    // Check for WPM timeout (2 minutes of no activity = WPM should be 0)
+    #define WPM_TIMEOUT_MS 120000  // 2 minutes
+    if (widget->last_activity_time > 0 && 
+        (current_time - widget->last_activity_time) > WPM_TIMEOUT_MS &&
+        wpm_value > 0) {
+        // Force WPM to 0 after timeout
+        wpm_value = 0;
+        LOG_INF("WPM forced to 0 after %d seconds of inactivity", (int)((current_time - widget->last_activity_time) / 1000));
+    }
     
     // Only update if WPM value changed (reduce display flickering)
     if (wpm_value == widget->last_wpm_value) {
@@ -46,6 +62,7 @@ void zmk_widget_wpm_status_reset(struct zmk_widget_wpm_status *widget) {
     // Reset WPM display to inactive state
     lv_label_set_text(widget->wpm_value_label, "0");
     widget->last_wpm_value = 0;
+    widget->last_activity_time = 0;
 }
 
 int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *parent) {
@@ -78,6 +95,7 @@ int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *p
     
     // Initialize state
     widget->last_wpm_value = 0;
+    widget->last_activity_time = 0;
     
     LOG_INF("Enhanced WPM status widget initialized with title + value layout");
     return 0;

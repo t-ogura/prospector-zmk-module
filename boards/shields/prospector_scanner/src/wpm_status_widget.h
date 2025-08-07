@@ -23,6 +23,7 @@ struct zmk_widget_wpm_status {
     lv_obj_t *wpm_title_label;    // "WPM" label (small font)
     lv_obj_t *wpm_value_label;    // Number value (normal font)
     uint8_t last_wpm_value;
+    uint32_t last_activity_time;  // Timestamp of last non-zero WPM activity
 };
 
 /**

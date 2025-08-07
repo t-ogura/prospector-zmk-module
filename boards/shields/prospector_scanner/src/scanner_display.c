@@ -51,6 +51,27 @@ static struct zmk_widget_scanner_battery_status scanner_battery_widget;
 // Forward declaration
 static void trigger_scanner_start(void);
 
+// Forward declaration for signal timeout checking
+static void check_signal_timeout_handler(struct k_work *work);
+
+// Work queue for periodic signal timeout checking
+static K_WORK_DELAYABLE_DEFINE(signal_timeout_work, check_signal_timeout_handler);
+
+// Periodic signal timeout check (every 5 seconds)
+static void check_signal_timeout_handler(struct k_work *work) {
+    // Check signal widget for timeout
+    zmk_widget_signal_status_check_timeout(&signal_widget);
+    
+    // Schedule next check
+    k_work_schedule(&signal_timeout_work, K_SECONDS(5));
+}
+
+// Start periodic signal monitoring
+static void start_signal_monitoring(void) {
+    k_work_schedule(&signal_timeout_work, K_SECONDS(5));
+    LOG_INF("Started periodic signal timeout monitoring (5s intervals)");
+}
+
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 // Scanner battery event listener for updating battery widget
 static void update_scanner_battery_widget(void) {
@@ -366,6 +387,9 @@ lv_obj_t *zmk_display_status_screen() {
     // Start periodic battery monitoring for more responsive updates
     start_battery_monitoring();
 #endif
+    
+    // Start periodic signal timeout monitoring
+    start_signal_monitoring();
     
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();

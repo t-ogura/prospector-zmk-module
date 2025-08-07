@@ -219,6 +219,29 @@ config PROSPECTOR_ALS_MAX_BRIGHTNESS
       Display will never go brighter than this value.
       Default is 60% when battery operation enabled (to preserve battery life),
       100% when USB powered only for maximum visibility in bright light.
+      Note: For separate battery/USB max values, use the options below instead.
+
+config PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY
+    int "Maximum brightness percentage when on battery power"
+    range 10 100
+    default 0
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Maximum brightness when running on battery power (10-100%).
+      Set to 0 to use PROSPECTOR_ALS_MAX_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general max brightness for battery operation.
+      Example: Set to 50 for 5-50% range when on battery.
+
+config PROSPECTOR_ALS_MAX_BRIGHTNESS_USB
+    int "Maximum brightness percentage when on USB power"
+    range 10 100
+    default 0
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Maximum brightness when running on USB power (10-100%).
+      Set to 0 to use PROSPECTOR_ALS_MAX_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general max brightness for USB operation.
+      Example: Set to 90 for 5-90% range when on USB power.
 
 config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
     int "Ambient light sensor update interval in milliseconds"
@@ -253,6 +276,29 @@ config PROSPECTOR_FIXED_BRIGHTNESS
       Default is 60% when battery operation enabled (to preserve battery life),
       80% when USB powered only for good visibility.
       Range is 10-100%.
+      Note: For separate battery/USB fixed values, use the options below instead.
+
+config PROSPECTOR_FIXED_BRIGHTNESS_BATTERY
+    int "Fixed brightness percentage when on battery power (ALS disabled)"
+    range 10 100
+    default 0
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Fixed brightness when running on battery power and ALS is disabled (10-100%).
+      Set to 0 to use PROSPECTOR_FIXED_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general fixed brightness for battery operation.
+      Example: Set to 40 for constant 40% when on battery and ALS disabled.
+
+config PROSPECTOR_FIXED_BRIGHTNESS_USB
+    int "Fixed brightness percentage when on USB power (ALS disabled)"
+    range 10 100
+    default 0
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Fixed brightness when running on USB power and ALS is disabled (10-100%).
+      Set to 0 to use PROSPECTOR_FIXED_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general fixed brightness for USB operation.
+      Example: Set to 85 for constant 85% when on USB and ALS disabled.
 
 # Scanner Battery Support Configuration
 config PROSPECTOR_BATTERY_SUPPORT

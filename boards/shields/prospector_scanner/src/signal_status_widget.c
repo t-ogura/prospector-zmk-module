@@ -14,6 +14,84 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
+// Timeout for clearing signal display when no reception (30 seconds)
+#define SIGNAL_TIMEOUT_MS 30000
+
+// Add smoothed RSSI calculation using moving average
+static int8_t calculate_smoothed_rssi(struct zmk_widget_signal_status *widget, int8_t new_rssi) {
+    // Add new sample to circular buffer
+    widget->rssi_samples[widget->rssi_sample_index] = new_rssi;
+    widget->rssi_sample_index = (widget->rssi_sample_index + 1) % RSSI_SMOOTHING_SAMPLES;
+    
+    // Track how many samples we have (up to buffer size)
+    if (widget->rssi_sample_count < RSSI_SMOOTHING_SAMPLES) {
+        widget->rssi_sample_count++;
+    }
+    
+    // Calculate average of available samples
+    int32_t sum = 0;
+    for (uint8_t i = 0; i < widget->rssi_sample_count; i++) {
+        sum += widget->rssi_samples[i];
+    }
+    
+    widget->rssi_smoothed = sum / widget->rssi_sample_count;
+    return widget->rssi_smoothed;
+}
+
+// Add smoothed Hz rate calculation using moving average
+static float calculate_smoothed_rate(struct zmk_widget_signal_status *widget, float new_rate) {
+    // Add new sample to circular buffer
+    widget->rate_samples[widget->rate_sample_index] = new_rate;
+    widget->rate_sample_index = (widget->rate_sample_index + 1) % RATE_SMOOTHING_SAMPLES;
+    
+    // Track how many samples we have (up to buffer size)
+    if (widget->rate_sample_count < RATE_SMOOTHING_SAMPLES) {
+        widget->rate_sample_count++;
+    }
+    
+    // Calculate average of available samples
+    float sum = 0.0f;
+    for (uint8_t i = 0; i < widget->rate_sample_count; i++) {
+        sum += widget->rate_samples[i];
+    }
+    
+    widget->rate_smoothed = sum / widget->rate_sample_count;
+    
+    // Debug logging for rate smoothing
+    LOG_INF("Rate smooth: new=%.1f, avg=%.1f, samples=%d", new_rate, widget->rate_smoothed, widget->rate_sample_count);
+    
+    return widget->rate_smoothed;
+}
+
+// Check for signal timeout and clear display if needed
+static void check_signal_timeout(struct zmk_widget_signal_status *widget) {
+    uint32_t now = k_uptime_get_32();
+    
+    if (widget->signal_active && 
+        widget->last_signal_time > 0 && 
+        (now - widget->last_signal_time) > SIGNAL_TIMEOUT_MS) {
+        
+        LOG_INF("Signal timeout - clearing RX display after %dms", now - widget->last_signal_time);
+        
+        // Clear RSSI display
+        lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);
+        lv_label_set_text(widget->rssi_label, "--dBm");
+        
+        // Show decreasing rate (0.0Hz indicates no reception)
+        lv_label_set_text(widget->rate_label, "0.0Hz");
+        
+        // Reset state
+        widget->signal_active = false;
+        widget->last_rate_hz = 0.0f;
+        widget->reception_count = 0;
+        widget->rssi_sample_count = 0;  // Clear RSSI smoothing buffer
+        widget->rssi_sample_index = 0;
+        widget->rate_sample_count = 0;  // Clear rate smoothing buffer
+        widget->rate_sample_index = 0;
+    }
+}
+
 // Convert RSSI to 0-5 bar level
 static uint8_t rssi_to_bars(int8_t rssi) {
     if (rssi >= -50) return 5;  // Excellent signal
@@ -44,39 +122,61 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
 
     uint32_t now = k_uptime_get_32();
     
+    // Record signal reception time for timeout detection
+    widget->last_signal_time = now;
+    widget->signal_active = true;
+    
+    // Calculate smoothed RSSI using moving average
+    int8_t smoothed_rssi = calculate_smoothed_rssi(widget, rssi);
+    
     // Track reception for rate calculation
     widget->reception_count++;
     
-    // Calculate reception rate every second
-    if (widget->interval_start == 0) {
-        widget->interval_start = now;
-    } else if ((now - widget->interval_start) >= 1000) {
-        // Calculate rate based on actual reception count
-        float interval_seconds = (now - widget->interval_start) / 1000.0f;
-        widget->last_rate_hz = widget->reception_count / interval_seconds;
-        
-        // Reset for next interval
-        widget->reception_count = 0;
-        widget->interval_start = now;
-    }
+    // Track reception for rate calculation
+    widget->last_update_time = now;
     
     // Rate-limit display updates to once per second for performance
     if (widget->last_display_update > 0 && (now - widget->last_display_update) < 1000) {
         return; // Skip display update if less than 1 second has passed
     }
+    
+    // Calculate actual reception rate only when updating display
+    // This ensures moving average gets consistent samples at 1-second intervals
+    float current_rate_hz = 0.0f;
+    if (widget->last_display_update > 0) {
+        // Calculate rate based on reception count in the last second
+        uint32_t interval_ms = now - widget->last_display_update;
+        if (interval_ms > 0 && widget->reception_count > 0) {
+            // Calculate average rate: receptions per second
+            current_rate_hz = (widget->reception_count * 1000.0f) / interval_ms;
+            
+            // Apply moving average smoothing to rate
+            LOG_INF("Rate calc: count=%d, interval=%dms, raw_rate=%.1f", 
+                    widget->reception_count, interval_ms, current_rate_hz);
+            widget->last_rate_hz = calculate_smoothed_rate(widget, current_rate_hz);
+            
+            // Reset reception count for next interval
+            widget->reception_count = 0;
+        }
+    } else {
+        // First display update - initialize
+        widget->last_rate_hz = 1.0f;  // Assume 1Hz for first reception
+        widget->reception_count = 0;
+    }
+    
     widget->last_display_update = now;
 
-    // Update RSSI bar
-    uint8_t bars = rssi_to_bars(rssi);
+    // Update RSSI bar using smoothed value
+    uint8_t bars = rssi_to_bars(smoothed_rssi);
     lv_bar_set_value(widget->rssi_bar, bars, LV_ANIM_OFF);
     lv_color_t rssi_color = get_rssi_color(bars);
     lv_obj_set_style_bg_color(widget->rssi_bar, rssi_color, LV_PART_INDICATOR);
 
-    // Update RSSI value label
-    lv_label_set_text_fmt(widget->rssi_label, "%ddBm", rssi);
+    // Update RSSI value label with smoothed value
+    lv_label_set_text_fmt(widget->rssi_label, "%ddBm", smoothed_rssi);
 
-    // Update reception rate label with manual formatting (float formatting issues in LVGL)
-    if (widget->last_rate_hz > 0) {
+    // Update reception rate label with actual rate
+    if (widget->last_rate_hz > 0.1f) {  // Only show rate if > 0.1Hz
         char rate_text[16];
         int rate_int = (int)(widget->last_rate_hz * 10);  // Convert to tenths
         snprintf(rate_text, sizeof(rate_text), "%d.%dHz", rate_int / 10, rate_int % 10);
@@ -85,8 +185,8 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
         lv_label_set_text(widget->rate_label, "--Hz");
     }
 
-    LOG_DBG("Signal status update: RSSI=%ddBm (%d bars), Rate=%.1fHz", 
-            rssi, bars, widget->last_rate_hz);
+    LOG_DBG("Signal update: raw=%ddBm smoothed=%ddBm (%d bars), rate=%.1fHz", 
+            rssi, smoothed_rssi, bars, widget->last_rate_hz);
 }
 
 int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_obj_t *parent) {
@@ -144,6 +244,26 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     widget->last_rate_hz = 0;
     widget->reception_count = 0;
     widget->interval_start = 0;
+    
+    // Initialize RSSI smoothing
+    widget->rssi_sample_index = 0;
+    widget->rssi_sample_count = 0;
+    widget->rssi_smoothed = 0;
+    for (uint8_t i = 0; i < RSSI_SMOOTHING_SAMPLES; i++) {
+        widget->rssi_samples[i] = 0;
+    }
+    
+    // Initialize rate smoothing
+    widget->rate_sample_index = 0;
+    widget->rate_sample_count = 0;
+    widget->rate_smoothed = 0.0f;
+    for (uint8_t i = 0; i < RATE_SMOOTHING_SAMPLES; i++) {
+        widget->rate_samples[i] = 0.0f;
+    }
+    
+    // Initialize timeout detection
+    widget->last_signal_time = 0;
+    widget->signal_active = false;
 
     LOG_INF("Signal status widget initialized (RSSI + reception rate)");
     return 0;
@@ -154,17 +274,17 @@ void zmk_widget_signal_status_reset(struct zmk_widget_signal_status *widget) {
         return;
     }
     
-    LOG_INF("Signal widget reset - clearing signal status");
+    LOG_INF("Signal widget reset - clearing all signal status");
     
     // Reset RSSI bar to minimum
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);
     
     // Reset RSSI label
-    lv_label_set_text(widget->rssi_label, "---dBm");
+    lv_label_set_text(widget->rssi_label, "--dBm");
     
     // Reset rate label
-    lv_label_set_text(widget->rate_label, "0.0Hz");
+    lv_label_set_text(widget->rate_label, "--Hz");
     
     // Reset cached values
     widget->last_update_time = 0;
@@ -172,10 +292,39 @@ void zmk_widget_signal_status_reset(struct zmk_widget_signal_status *widget) {
     widget->last_rate_hz = 0.0f;
     widget->reception_count = 0;
     widget->interval_start = 0;
+    
+    // Reset RSSI smoothing buffer
+    widget->rssi_sample_index = 0;
+    widget->rssi_sample_count = 0;
+    widget->rssi_smoothed = 0;
+    for (uint8_t i = 0; i < RSSI_SMOOTHING_SAMPLES; i++) {
+        widget->rssi_samples[i] = 0;
+    }
+    
+    // Reset rate smoothing buffer
+    widget->rate_sample_index = 0;
+    widget->rate_sample_count = 0;
+    widget->rate_smoothed = 0.0f;
+    for (uint8_t i = 0; i < RATE_SMOOTHING_SAMPLES; i++) {
+        widget->rate_samples[i] = 0.0f;
+    }
+    
+    // Reset timeout detection
+    widget->last_signal_time = 0;
+    widget->signal_active = false;
 }
 
 lv_obj_t *zmk_widget_signal_status_obj(struct zmk_widget_signal_status *widget) {
     return widget ? widget->obj : NULL;
+}
+
+// Public function to check for signal timeout (called periodically)
+void zmk_widget_signal_status_check_timeout(struct zmk_widget_signal_status *widget) {
+    if (!widget || !widget->obj) {
+        return;
+    }
+    
+    check_signal_timeout(widget);
 }
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY

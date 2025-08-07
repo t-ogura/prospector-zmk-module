@@ -12,6 +12,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
+#include <zmk/usb.h>
 #include "debug_status_widget.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -36,11 +37,159 @@ static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #define PWM_MIN         1       // Minimum brightness (%) - keep display visible (original: 1)
 #endif
 
-#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
-#define PWM_MAX         CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+// Dynamic max brightness based on power source
+// Function to get current max brightness based on battery/USB status
+static uint8_t get_current_max_brightness_als(void) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    // Check if we have separate battery/USB settings
+#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY > 0)
+#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB > 0)
+    // Both battery and USB settings defined - use appropriate one
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    bool usb_powered = zmk_usb_is_powered();
+    if (usb_powered) {
+        return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
+    } else {
+        return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
+    }
 #else
-#define PWM_MAX         100     // Maximum brightness (%)
+    // No USB stack - assume battery powered
+    return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
 #endif
+#else
+    // Only battery setting defined - use it for battery, fallback for USB
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    bool usb_powered = zmk_usb_is_powered();
+    if (usb_powered) {
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+        return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
+#else
+        return 100;  // Default USB max
+#endif
+    } else {
+        return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
+    }
+#else
+    // No USB stack - use battery setting
+    return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
+#endif
+#endif
+#elif IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB > 0)
+    // Only USB setting defined - use it for USB, fallback for battery
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    bool usb_powered = zmk_usb_is_powered();
+    if (usb_powered) {
+        return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
+    } else {
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+        return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
+#else
+        return 60;  // Default battery max
+#endif
+    }
+#else
+    // No USB stack - use fallback
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+    return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
+#else
+    return 60;  // Default battery max
+#endif
+#endif
+#else
+    // No separate settings - use general setting or defaults
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+    return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
+#else
+    return 60;  // Default when battery support enabled
+#endif
+#endif
+#else
+    // No battery support - use general setting or default
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+    return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
+#else
+    return 100;  // Default when no battery support
+#endif
+#endif
+}
+
+// Similar function for fixed brightness
+static uint8_t get_current_fixed_brightness(void) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    // Check if we have separate battery/USB settings
+#if IS_ENABLED(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_BATTERY) && (CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_BATTERY > 0)
+#if IS_ENABLED(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB > 0)
+    // Both battery and USB settings defined - use appropriate one
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    bool usb_powered = zmk_usb_is_powered();
+    if (usb_powered) {
+        return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
+    } else {
+        return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_BATTERY;
+    }
+#else
+    // No USB stack - assume battery powered
+    return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_BATTERY;
+#endif
+#else
+    // Only battery setting defined - use it for battery, fallback for USB
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    bool usb_powered = zmk_usb_is_powered();
+    if (usb_powered) {
+#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
+        return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+#else
+        return 80;  // Default USB fixed
+#endif
+    } else {
+        return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_BATTERY;
+    }
+#else
+    // No USB stack - use battery setting
+    return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_BATTERY;
+#endif
+#endif
+#elif IS_ENABLED(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB > 0)
+    // Only USB setting defined - use it for USB, fallback for battery
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    bool usb_powered = zmk_usb_is_powered();
+    if (usb_powered) {
+        return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
+    } else {
+#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
+        return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+#else
+        return 60;  // Default battery fixed
+#endif
+    }
+#else
+    // No USB stack - use fallback
+#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
+    return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+#else
+    return 60;  // Default battery fixed
+#endif
+#endif
+#else
+    // No separate settings - use general setting or defaults
+#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
+    return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+#else
+    return 60;  // Default when battery support enabled
+#endif
+#endif
+#else
+    // No battery support - use general setting or default
+#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
+    return CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+#else
+    return 80;  // Default when no battery support
+#endif
+#endif
+}
+
+// Legacy define for backwards compatibility - now dynamic
+#define PWM_MAX         get_current_max_brightness_als()
 
 // Current and target brightness for smooth fade transitions
 static uint8_t current_brightness = 50;  // Start at mid brightness, will be adjusted during init
@@ -151,6 +300,9 @@ static void update_brightness(void) {
     LOG_INF("🔆 APDS9960 light level: %d (threshold: %d)", light_level, SENSOR_MAX);
     printk("BRIGHTNESS: light=%d (threshold=%d)\n", light_level, SENSOR_MAX);
     
+    // Get current max brightness based on power source
+    uint8_t pwm_max = get_current_max_brightness_als();
+    
     // Original Prospector linear mapping function
     uint8_t brightness = PWM_MIN;  // Initialize to minimum brightness
     
@@ -172,7 +324,7 @@ static void update_brightness(void) {
         // Example: light=150/200 (0.75) → 0.75² = 0.56 → ~56% brightness
         float curved = normalized * normalized;
         
-        brightness = (uint8_t)(PWM_MIN + ((PWM_MAX - PWM_MIN) * curved));
+        brightness = (uint8_t)(PWM_MIN + ((pwm_max - PWM_MIN) * curved));
         
         LOG_DBG("📊 Square curve mapping: raw=%d, normalized=%.2f, curved=%.2f, brightness=%d%%", 
                 light_level, normalized, curved, brightness);
@@ -239,9 +391,10 @@ static int brightness_control_init(void) {
     als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
         LOG_ERR("❌ APDS9960 device not found by compatible 'avago,apds9960'");
-        LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        uint8_t fixed_brightness = get_current_fixed_brightness();
+        LOG_WRN("Using fixed brightness: %d%% (power-aware)", fixed_brightness);
         printk("BRIGHTNESS: APDS9960 device not found by compatible, using fixed brightness\n");
-        set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        set_brightness_pwm(fixed_brightness);
         return 0;
     }
     
@@ -249,7 +402,8 @@ static int brightness_control_init(void) {
     
     if (!device_is_ready(als_dev)) {
         LOG_ERR("❌ APDS9960 ambient light sensor NOT READY - hardware may be missing or not connected");
-        LOG_WRN("Using fixed brightness: %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        uint8_t fixed_brightness = get_current_fixed_brightness();
+        LOG_WRN("Using fixed brightness: %d%% (power-aware)", fixed_brightness);
         printk("BRIGHTNESS: APDS9960 device not ready (I2C communication failed?)\n");
         printk("BRIGHTNESS: Check hardware connections - SDA to D4, SCL to D5, VCC to 3.3V, GND to GND\n");
         
@@ -258,7 +412,7 @@ static int brightness_control_init(void) {
         zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
         // No auto-hide - keep visible to show problem
         
-        set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        set_brightness_pwm(fixed_brightness);
         return 0;
     }
     
@@ -367,13 +521,16 @@ static int brightness_control_init(void) {
     // Initialize fade work queue
     k_work_init_delayable(&fade_work, fade_work_handler);
     
+    // Get current power-aware fixed brightness
+    uint8_t fixed_brightness = get_current_fixed_brightness();
+    
     // Set initial brightness lower for smooth startup fade
-    current_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS / 3;  // Start at 1/3 target
+    current_brightness = fixed_brightness / 3;  // Start at 1/3 target
     
     // Set fixed brightness with smooth fade
-    set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-    LOG_INF("🔆 Fixed brightness mode: %d%% (ambient light sensor disabled)", 
-            CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+    set_brightness_pwm(fixed_brightness);
+    LOG_INF("🔆 Fixed brightness mode: %d%% (power-aware, ambient light sensor disabled)", 
+            fixed_brightness);
             
     // Test debug widget access even in fixed mode
     LOG_INF("🔧 Testing debug widget access in fixed mode...");
@@ -551,7 +708,8 @@ void prospector_resume_brightness(void) {
     // In ALS mode, trigger an immediate brightness update
     k_work_schedule(&brightness_work, K_NO_WAIT);
 #else
-    // In fixed mode, restore to configured brightness
-    set_brightness_pwm(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+    // In fixed mode, restore to configured brightness (battery/USB aware)
+    uint8_t fixed_brightness = get_current_fixed_brightness();
+    set_brightness_pwm(fixed_brightness);
 #endif
 }
