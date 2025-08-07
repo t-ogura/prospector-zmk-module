@@ -104,13 +104,15 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
                 battery_symbol = LV_SYMBOL_BATTERY_EMPTY;
             }
             
-            // Combine charge symbol on the left with battery symbol
+            // Combine charge symbol on the left with battery symbol (fixed width)
             static char combined_symbol[32];
-            snprintf(combined_symbol, sizeof(combined_symbol), LV_SYMBOL_CHARGE " %s", battery_symbol);
+            snprintf(combined_symbol, sizeof(combined_symbol), LV_SYMBOL_CHARGE "%s", battery_symbol);
             lv_label_set_text(widget->battery_icon, combined_symbol);
         } else {
-            // Normal battery state - just show battery icon
-            lv_label_set_text(widget->battery_icon, scanner_battery_icon_text[icon_state]);
+            // Normal battery state - add invisible space to maintain consistent width
+            static char padded_symbol[32];
+            snprintf(padded_symbol, sizeof(padded_symbol), " %s", scanner_battery_icon_text[icon_state]);
+            lv_label_set_text(widget->battery_icon, padded_symbol);
         }
         
         lv_obj_set_style_text_color(widget->battery_icon, 
@@ -180,7 +182,7 @@ int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_sta
     widget->percentage_label = lv_label_create(widget->obj);
     lv_obj_set_style_text_font(widget->percentage_label, &lv_font_unscii_8, 0);  // Smaller unscii font
     lv_obj_set_style_text_color(widget->percentage_label, lv_color_white(), 0);
-    lv_obj_align_to(widget->percentage_label, widget->battery_icon, LV_ALIGN_OUT_RIGHT_MID, 2, 0);
+    lv_obj_align_to(widget->percentage_label, widget->battery_icon, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
     lv_label_set_text(widget->percentage_label, "--");
 
     // Create charging icon (initially hidden)
