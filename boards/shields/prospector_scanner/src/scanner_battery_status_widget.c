@@ -38,13 +38,14 @@ static void init_battery_colors(void) {
     colors_initialized = true;
 }
 
-// Battery icon text based on level - using LVGL built-in battery symbols
+// Battery icon text based on level - using consistent LVGL battery symbols
+// Use BATTERY_FULL for all levels to maintain consistent width, color indicates level
 static const char* scanner_battery_icon_text[] = {
     [SCANNER_BATTERY_ICON_FULL]     = LV_SYMBOL_BATTERY_FULL,
-    [SCANNER_BATTERY_ICON_HIGH]     = LV_SYMBOL_BATTERY_3, 
-    [SCANNER_BATTERY_ICON_MEDIUM]   = LV_SYMBOL_BATTERY_2,
-    [SCANNER_BATTERY_ICON_LOW]      = LV_SYMBOL_BATTERY_1,
-    [SCANNER_BATTERY_ICON_CRITICAL] = LV_SYMBOL_BATTERY_EMPTY,
+    [SCANNER_BATTERY_ICON_HIGH]     = LV_SYMBOL_BATTERY_FULL,  // Same width as FULL
+    [SCANNER_BATTERY_ICON_MEDIUM]   = LV_SYMBOL_BATTERY_FULL,  // Same width as FULL
+    [SCANNER_BATTERY_ICON_LOW]      = LV_SYMBOL_BATTERY_FULL,  // Same width as FULL
+    [SCANNER_BATTERY_ICON_CRITICAL] = LV_SYMBOL_BATTERY_FULL,  // Same width as FULL
     [SCANNER_BATTERY_ICON_CHARGING] = LV_SYMBOL_CHARGE,  // Just charge symbol, battery icon added dynamically
     [SCANNER_BATTERY_ICON_HIDDEN]   = ""
 };
@@ -91,20 +92,11 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
     if (widget->battery_icon) {
         // For charging state, show battery level icon + charge symbol
         if (icon_state == SCANNER_BATTERY_ICON_CHARGING) {
-            const char* battery_symbol;
-            if (battery_level >= 80) {
-                battery_symbol = LV_SYMBOL_BATTERY_FULL;
-            } else if (battery_level >= 60) {
-                battery_symbol = LV_SYMBOL_BATTERY_3;
-            } else if (battery_level >= 40) {
-                battery_symbol = LV_SYMBOL_BATTERY_2;
-            } else if (battery_level >= 20) {
-                battery_symbol = LV_SYMBOL_BATTERY_1;
-            } else {
-                battery_symbol = LV_SYMBOL_BATTERY_EMPTY;
-            }
+            // Always use BATTERY_FULL symbol for consistent width across all charge levels
+            // Battery level is indicated by color, not by different symbols
+            const char* battery_symbol = LV_SYMBOL_BATTERY_FULL;
             
-            // Combine charge symbol on the left with battery symbol (fixed width)
+            // Combine charge symbol on the left with battery symbol (consistent width)
             static char combined_symbol[32];
             snprintf(combined_symbol, sizeof(combined_symbol), LV_SYMBOL_CHARGE "%s", battery_symbol);
             lv_label_set_text(widget->battery_icon, combined_symbol);
