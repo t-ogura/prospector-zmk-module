@@ -115,6 +115,41 @@ ZMK_LISTENER(scanner_usb, scanner_usb_listener);
 ZMK_SUBSCRIPTION(scanner_usb, zmk_usb_conn_state_changed);
 #endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
 
+#if IS_ENABLED(CONFIG_PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM)
+// Advertisement frequency monitoring for automatic brightness dimming
+static uint32_t last_advertisement_time = 0;
+static bool frequency_dimmed = false;
+
+static void check_advertisement_frequency(void) {
+    uint32_t current_time = k_uptime_get_32();
+    
+    if (last_advertisement_time == 0) {
+        last_advertisement_time = current_time;
+        return;
+    }
+    
+    uint32_t interval = current_time - last_advertisement_time;
+    last_advertisement_time = current_time;
+    
+    // Check if frequency dropped below threshold (keyboard went idle)
+    if (interval > CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_THRESHOLD_MS) {
+        if (!frequency_dimmed) {
+            LOG_INF("Advertisement frequency low (%dms interval), dimming to %d%%", 
+                    interval, CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS);
+            prospector_set_brightness(CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS);
+            frequency_dimmed = true;
+        }
+    } else {
+        // Frequency increased (keyboard became active), restore brightness
+        if (frequency_dimmed) {
+            LOG_INF("Advertisement frequency restored (%dms interval), resuming normal brightness", interval);
+            prospector_resume_brightness();
+            frequency_dimmed = false;
+        }
+    }
+}
+#endif // CONFIG_PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM
+
 // Scanner event callback for display updates
 static void update_display_from_scanner(struct zmk_status_scanner_event_data *event_data) {
     if (!device_name_label) {
@@ -122,6 +157,11 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
     }
     
     LOG_INF("Scanner event received: %d for keyboard %d", event_data->event, event_data->keyboard_index);
+    
+#if IS_ENABLED(CONFIG_PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM)
+    // Monitor advertisement frequency for automatic brightness adjustment
+    check_advertisement_frequency();
+#endif
     
     int active_count = zmk_status_scanner_get_active_count();
     
@@ -141,6 +181,12 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT) 
         // Scanner battery widget shows scanner's own status, not keyboard status
         // Don't reset it when keyboards disconnect - scanner battery is independent
+#endif
+        
+        // Reset advertisement frequency monitoring when no keyboards
+#if IS_ENABLED(CONFIG_PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM)
+        last_advertisement_time = 0;
+        frequency_dimmed = false;
 #endif
         
         // Reduce brightness when no keyboards are connected

@@ -138,6 +138,35 @@ config PROSPECTOR_SCANNER_IDLE_BRIGHTNESS_PERCENT
       Low brightness saves battery while maintaining visibility.
       Default is 20%. Range is 5-50%.
 
+config PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM
+    bool "Enable brightness dimming based on advertisement frequency"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Automatically dim display when keyboard advertisement frequency drops below 1Hz.
+      This provides immediate response to keyboard idle state changes.
+      Works independently of timeout-based dimming for better responsiveness.
+
+config PROSPECTOR_ADV_FREQUENCY_DIM_THRESHOLD_MS
+    int "Advertisement frequency threshold for dimming (milliseconds)"
+    range 1500 10000
+    default 2000
+    depends on PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM
+    help
+      Advertisement interval threshold above which display will dim.
+      Default is 2000ms (0.5Hz). When keyboard sends slower than this, display dims.
+      Should be longer than active interval but shorter than idle interval.
+
+config PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS
+    int "Brightness percentage when advertisement frequency is low"
+    range 5 60
+    default 25
+    depends on PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM
+    help
+      Display brightness when keyboard advertisement frequency is low.
+      Default is 25% for battery conservation while maintaining readability.
+      Range is 5-60%.
+
 config PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS
     int "Brightness fade duration in milliseconds"
     range 100 5000
