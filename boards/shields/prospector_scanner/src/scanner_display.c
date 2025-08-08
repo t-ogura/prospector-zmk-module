@@ -259,10 +259,19 @@ static void battery_periodic_update_handler(struct k_work *work) {
     LOG_INF("🔍 FINAL VALUES: Battery=%d%% USB=%s Charging=%s", 
             current_battery, current_usb ? "true" : "false", current_charging ? "true" : "false");
     
-    // Update debug widget with periodic investigation info (line 1)
+    // Update debug widget with comprehensive battery investigation (line 1)
     static char periodic_debug[128];
-    snprintf(periodic_debug, sizeof(periodic_debug), "PERIODIC#%d B:%d%% U:%s\nALS: Force Update", 
-             periodic_counter, current_battery, current_usb ? "Y" : "N");
+    
+    // Show both ZMK cached and hardware values for comparison
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    uint8_t zmk_only = zmk_battery_state_of_charge();
+#else
+    uint8_t zmk_only = 0;
+#endif
+    
+    snprintf(periodic_debug, sizeof(periodic_debug), "P#%d ZMK:%d%% HW:%d%% U:%s\nMethod: %s", 
+             periodic_counter, zmk_only, current_battery, current_usb ? "Y" : "N",
+             (current_battery != zmk_only) ? "HARDWARE" : "CACHED");
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
     }

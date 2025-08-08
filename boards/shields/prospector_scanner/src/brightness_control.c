@@ -384,14 +384,36 @@ static void update_brightness(void) {
             }
         }
         
-        // Show configuration values for diagnosis
+        // Show configuration values for diagnosis - with detailed condition checking
         uint8_t config_usb = 0, config_battery = 0;
-#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB > 0)
-        config_usb = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
+        
+        // Debug configuration reading
+        LOG_INF("🔍 CONFIG DEBUG:");
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB
+        LOG_INF("🔍   CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB defined = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB);
+        if (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB > 0) {
+            config_usb = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
+        }
+#else
+        LOG_INF("🔍   CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB NOT defined");
 #endif
-#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY > 0)
-        config_battery = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
+
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY  
+        LOG_INF("🔍   CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY defined = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY);
+        if (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY > 0) {
+            config_battery = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
+        }
+#else
+        LOG_INF("🔍   CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY NOT defined");
 #endif
+
+#ifdef CONFIG_PROSPECTOR_BATTERY_SUPPORT
+        LOG_INF("🔍   CONFIG_PROSPECTOR_BATTERY_SUPPORT = enabled");
+#else
+        LOG_INF("🔍   CONFIG_PROSPECTOR_BATTERY_SUPPORT = disabled");
+#endif
+
+        LOG_INF("🔍   Final config values: USB=%d, Battery=%d", config_usb, config_battery);
         
         snprintf(status_buf, sizeof(status_buf), "%s\nALS L%d→B%d%% M%d U%s C%d/%d", 
                  battery_line, light_level, brightness, pwm_max, usb_powered ? "Y" : "N", 
