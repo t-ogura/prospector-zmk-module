@@ -335,10 +335,27 @@ static void update_brightness(void) {
     // Also use printk for final result
     printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);
     
-    // Debug display: Show sensor status when enabled
+    // Debug display: Show sensor status when enabled (preserve battery info)
     if (IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)) {
-        char status_buf[64];
-        snprintf(status_buf, sizeof(status_buf), "ALS: L:%d B:%d%%", light_level, brightness);
+        static char status_buf[128];
+        static char battery_line[64] = "BAT: No Data";
+        
+        // Try to preserve existing battery info from first line
+        const char* current_text = lv_label_get_text(debug_widget.debug_label);
+        if (current_text && strstr(current_text, "BAT:")) {
+            // Extract first line with battery info
+            const char* newline = strchr(current_text, '\n');
+            if (newline) {
+                int len = newline - current_text;
+                if (len > 0 && len < 63) {
+                    strncpy(battery_line, current_text, len);
+                    battery_line[len] = '\0';
+                }
+            }
+        }
+        
+        snprintf(status_buf, sizeof(status_buf), "%s\nALS: L:%d B:%d%%", 
+                 battery_line, light_level, brightness);
         zmk_widget_debug_status_set_text(&debug_widget, status_buf);
         zmk_widget_debug_status_set_visible(&debug_widget, true);
     }

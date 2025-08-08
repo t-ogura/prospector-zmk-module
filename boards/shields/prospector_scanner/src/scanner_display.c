@@ -128,9 +128,9 @@ static void update_scanner_battery_widget(void) {
            battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
 #endif
 
-    // Update debug widget with battery monitoring info
-    static char debug_text[64];
-    snprintf(debug_text, sizeof(debug_text), "BAT:%d%% USB:%s #%d", 
+    // Update debug widget with battery monitoring info (line 1)
+    static char debug_text[128];
+    snprintf(debug_text, sizeof(debug_text), "BAT:%d%% USB:%s #%d\nALS: Monitor Active", 
              battery_level, usb_powered ? "Y" : "N", update_counter);
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, debug_text);
@@ -204,9 +204,9 @@ static void battery_periodic_update_handler(struct k_work *work) {
     LOG_INF("🔍 INVESTIGATION: Battery=%d%% USB=%s Charging=%s", 
             current_battery, current_usb ? "true" : "false", current_charging ? "true" : "false");
     
-    // Update debug widget with periodic investigation info  
-    static char periodic_debug[64];
-    snprintf(periodic_debug, sizeof(periodic_debug), "PERIODIC#%d B:%d%% U:%s", 
+    // Update debug widget with periodic investigation info (line 1)
+    static char periodic_debug[128];
+    snprintf(periodic_debug, sizeof(periodic_debug), "PERIODIC#%d B:%d%% U:%s\nALS: Force Update", 
              periodic_counter, current_battery, current_usb ? "Y" : "N");
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
