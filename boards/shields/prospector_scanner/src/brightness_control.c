@@ -415,11 +415,15 @@ static void update_brightness(void) {
 
         LOG_INF("🔍   Final config values: USB=%d, Battery=%d", config_usb, config_battery);
         
-        // Preserve existing battery debug info and append ALS info
+        // Don't update debug widget when in battery debug mode to avoid overwriting
+        // Battery debug has priority over ALS debug
+        #if !IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)
+        // Only update ALS debug info if battery debug is not enabled
         snprintf(status_buf, sizeof(status_buf), "%s\nALS L%d→B%d%% M%d C%d/%d", 
                  battery_line, light_level, brightness, pwm_max, config_usb, config_battery);
         zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-        zmk_widget_debug_status_set_visible(&debug_widget, true);
+        zmk_widget_debug_status_set_visible(&debug_widget, false);
+        #endif
     }
 }
 
