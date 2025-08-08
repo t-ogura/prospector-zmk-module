@@ -136,40 +136,78 @@ static void update_scanner_battery_widget(void) {
     zmk_battery_before = zmk_battery_state_of_charge();
 #endif
 
-    // BREAKTHROUGH: Call ZMK's battery update function directly
-    // This uses the same mechanism as keyboard-side implementation
+    // Alternative approach: Manual sensor reading with ZMK-style processing
 #if DT_HAS_CHOSEN(zmk_battery)
     const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
     const char *update_result = "N/A";
     
     if (device_is_ready(battery_dev)) {
-        LOG_INF("🔋 Calling ZMK battery update directly (keyboard-side approach)");
+        LOG_INF("🔋 Manual battery reading with ZMK-style processing");
         
-        // Use ZMK's own battery update function - same as keyboard implementation
-        extern int zmk_battery_update(const struct device *battery);
-        int ret = zmk_battery_update(battery_dev);
+        // Replicate ZMK's battery update logic manually
+        struct sensor_value state_of_charge;
+        int ret = -1;
         
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_STATE_OF_CHARGE)
+        // Try STATE_OF_CHARGE first (same as ZMK)
+        ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE);
         if (ret == 0) {
-            update_result = "SUCCESS";
-            LOG_INF("✅ ZMK battery update succeeded");
+            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, &state_of_charge);
+            if (ret == 0) {
+                update_result = "SOC_MODE";
+            }
+        }
+#elif IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_LITHIUM_VOLTAGE)
+        // Try LITHIUM_VOLTAGE mode (same as ZMK)
+        ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_VOLTAGE);
+        if (ret == 0) {
+            struct sensor_value voltage;
+            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
+            if (ret == 0) {
+                // ZMK's lithium_ion_mv_to_pct conversion
+                uint16_t mv = voltage.val1 * 1000 + (voltage.val2 / 1000);
+                if (mv >= 4200) {
+                    state_of_charge.val1 = 100;
+                } else if (mv <= 3450) {
+                    state_of_charge.val1 = 0;
+                } else {
+                    state_of_charge.val1 = mv * 2 / 15 - 459;
+                }
+                update_result = "VOLTAGE_MODE";
+            }
+        }
+#endif
+        
+        if (ret != 0) {
+            update_result = "SENSOR_FAIL";
+            LOG_ERR("❌ Battery sensor reading failed: %d", ret);
         } else {
-            update_result = "FAILED";
-            LOG_ERR("❌ ZMK battery update failed: %d", ret);
+            // Successfully read battery - use direct value instead of cache
+            battery_level = state_of_charge.val1;
+            LOG_INF("✅ Battery reading succeeded: %d%% (direct from sensor)", battery_level);
         }
     } else {
         update_result = "NOT_READY";
-        LOG_ERR("Battery device not ready for ZMK update");
+        LOG_ERR("Battery device not ready");
     }
 #else
     const char *update_result = "NO_DEVICE";
 #endif
 
+    // Get ZMK cache after our manual reading
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     zmk_battery_after = zmk_battery_state_of_charge();
 #endif
 
-    // Use the updated ZMK value
-    battery_level = zmk_battery_after;
+    // Use direct sensor value if available, otherwise ZMK cache
+    if (strcmp(update_result, "SOC_MODE") == 0 || strcmp(update_result, "VOLTAGE_MODE") == 0) {
+        // battery_level already set from direct sensor reading
+        LOG_INF("🎯 Using direct sensor reading: %d%%", battery_level);
+    } else {
+        // Fallback to ZMK cache
+        battery_level = zmk_battery_after;
+        LOG_INF("⚙️ Using ZMK cache fallback: %d%%", battery_level);
+    }
     
     LOG_INF("🔍 ZMK Battery Update: Before=%d%% After=%d%% Result=%s", 
             zmk_battery_before, zmk_battery_after, update_result);
