@@ -335,11 +335,13 @@ static void update_brightness(void) {
     // Also use printk for final result
     printk("BRIGHTNESS: %d -> %d%%\n", light_level, brightness);
     
-    // Debug display: Hide for production use
-    // char status_buf[64];
-    // snprintf(status_buf, sizeof(status_buf), "L:%d B:%d%%", light_level, brightness);
-    // zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-    zmk_widget_debug_status_set_visible(&debug_widget, false);
+    // Debug display: Show sensor status when enabled
+    if (IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)) {
+        char status_buf[64];
+        snprintf(status_buf, sizeof(status_buf), "ALS: L:%d B:%d%%", light_level, brightness);
+        zmk_widget_debug_status_set_text(&debug_widget, status_buf);
+        zmk_widget_debug_status_set_visible(&debug_widget, true);
+    }
 }
 
 static void brightness_work_handler(struct k_work *work) {
