@@ -144,6 +144,7 @@ static void update_scanner_battery_widget(void) {
     
     if (device_is_ready(battery_dev)) {
         struct sensor_value voltage;
+        // For vbatt type sensors, use simple fetch without channel
         int ret = sensor_sample_fetch(battery_dev);
         if (ret == 0) {
             // Try multiple channel types for battery sensors
@@ -159,6 +160,18 @@ static void update_scanner_battery_widget(void) {
                         hardware_battery = soc.val1;
                         voltage_mv = 3700 + (hardware_battery * 5); // Rough estimate
                         hw_error = "SOC_ONLY";
+                    } else {
+                        // For vbatt, try AMBIENT_TEMP channel which some ADC drivers use
+                        ret = sensor_channel_get(battery_dev, SENSOR_CHAN_AMBIENT_TEMP, &voltage);
+                        if (ret == 0) {
+                            hw_error = "TEMP_CH";
+                        } else {
+                            // Try channel 0 directly (some ADC drivers use raw channel numbers)
+                            ret = sensor_channel_get(battery_dev, (enum sensor_channel)0, &voltage);
+                            if (ret == 0) {
+                                hw_error = "CH0";
+                            }
+                        }
                     }
                 }
             }
