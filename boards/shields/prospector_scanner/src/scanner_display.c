@@ -144,37 +144,49 @@ static void update_scanner_battery_widget(void) {
     
     if (device_is_ready(battery_dev)) {
         struct sensor_value voltage;
-        // For vbatt type sensors, use simple fetch without channel
+        // For vbatt type sensors, try comprehensive channel testing
         int ret = sensor_sample_fetch(battery_dev);
         if (ret == 0) {
-            // Try multiple channel types for battery sensors
-            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
-            if (ret != 0) {
-                // Some battery drivers use GAUGE_VOLTAGE instead
-                ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_VOLTAGE, &voltage);
-                if (ret != 0) {
-                    // Try state of charge as last resort
-                    struct sensor_value soc;
-                    ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, &soc);
-                    if (ret == 0) {
-                        hardware_battery = soc.val1;
-                        voltage_mv = 3700 + (hardware_battery * 5); // Rough estimate
-                        hw_error = "SOC_ONLY";
-                    } else {
-                        // For vbatt, try AMBIENT_TEMP channel which some ADC drivers use
-                        ret = sensor_channel_get(battery_dev, SENSOR_CHAN_AMBIENT_TEMP, &voltage);
-                        if (ret == 0) {
-                            hw_error = "TEMP_CH";
-                        } else {
-                            // Try channel 0 directly (some ADC drivers use raw channel numbers)
-                            ret = sensor_channel_get(battery_dev, (enum sensor_channel)0, &voltage);
-                            if (ret == 0) {
-                                hw_error = "CH0";
-                            }
-                        }
-                    }
+            // Extensive channel compatibility testing for vbatt sensors
+            struct sensor_value test_channels[] = {
+                {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}  // Initialize 10 test values
+            };
+            
+            // Test all common sensor channels systematically
+            const enum sensor_channel channels[] = {
+                SENSOR_CHAN_VOLTAGE,                    // 0: Standard voltage channel
+                SENSOR_CHAN_GAUGE_VOLTAGE,             // 1: Gauge voltage (fuel gauge)
+                SENSOR_CHAN_GAUGE_STATE_OF_CHARGE,     // 2: State of charge percentage
+                SENSOR_CHAN_AMBIENT_TEMP,              // 3: ADC drivers sometimes use this
+                (enum sensor_channel)0,                 // 4: Raw channel 0
+                (enum sensor_channel)1,                 // 5: Raw channel 1
+                (enum sensor_channel)2,                 // 6: Raw channel 2
+                (enum sensor_channel)10,                // 7: Some drivers use channel 10
+                (enum sensor_channel)0x100,             // 8: Private channel range
+                (enum sensor_channel)0x200              // 9: Extended channel range
+            };
+            
+            const char* channel_names[] = {
+                "VOLTAGE", "G_VOLT", "SOC", "TEMP", 
+                "CH0", "CH1", "CH2", "CH10", "0x100", "0x200"
+            };
+            
+            bool found_working_channel = false;
+            
+            for (int i = 0; i < 10 && !found_working_channel; i++) {
+                ret = sensor_channel_get(battery_dev, channels[i], &test_channels[i]);
+                if (ret == 0) {
+                    // Found working channel
+                    voltage = test_channels[i];
+                    hw_error = channel_names[i];
+                    found_working_channel = true;
+                    LOG_INF("✅ SUCCESS: vbatt sensor responded to channel %s", channel_names[i]);
+                } else {
+                    LOG_DBG("❌ Channel %s failed: %d", channel_names[i], ret);
                 }
             }
+            
+            ret = found_working_channel ? 0 : -EIO;
             
             if (ret == 0 && hw_error == NULL) {
                 voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
@@ -254,26 +266,39 @@ static void update_scanner_battery_widget(void) {
     uint8_t zmk_cached = 0;
 #endif
     
-    // Expanded 4-line battery debug display with error diagnostics
-    const char* method = (battery_level == hardware_battery && hw_error == NULL) ? "HW" : "CACHE";
-    if (hw_error != NULL) {
-        snprintf(debug_text, sizeof(debug_text), 
-                 "BAT Z%d%% H%d%% #%d\n"
-                 "ERR: %s\n"
-                 "USB:%s CHG:%s %s\n"
-                 "V:%dmV D:%s", 
-                 zmk_battery, hardware_battery, update_counter,
-                 hw_error,
-                 usb_powered ? "Y" : "N", charging ? "Y" : "N", method,
-                 voltage_mv, battery_dev ? battery_dev->name : "NULL");
+    // Enhanced 4-line battery debug display with channel compatibility info
+    const char* method = (battery_level == hardware_battery && hw_error != NULL && strcmp(hw_error, "N/A") != 0) ? "HW" : "CACHE";
+    if (hw_error != NULL && strcmp(hw_error, "N/A") != 0) {
+        // Show which channel worked (or error)
+        if (strcmp(hw_error, "CH_GET_ERR") == 0) {
+            snprintf(debug_text, sizeof(debug_text), 
+                     "BAT Z%d%% H%d%% #%d\n"
+                     "ALL CHANNELS FAILED\n"
+                     "USB:%s CHG:%s\n"
+                     "D:%s V:%dmV", 
+                     zmk_battery, hardware_battery, update_counter,
+                     usb_powered ? "Y" : "N", charging ? "Y" : "N",
+                     battery_dev ? battery_dev->name : "NULL", voltage_mv);
+        } else {
+            // Show successful channel
+            snprintf(debug_text, sizeof(debug_text), 
+                     "BAT Z%d%% H%d%% #%d\n"
+                     "CH: %s = %dmV\n"
+                     "USB:%s CHG:%s %s\n"
+                     "D:%s", 
+                     zmk_battery, hardware_battery, update_counter,
+                     hw_error, voltage_mv,
+                     usb_powered ? "Y" : "N", charging ? "Y" : "N", method,
+                     battery_dev ? battery_dev->name : "NULL");
+        }
     } else {
+        // Fallback to cache only
         snprintf(debug_text, sizeof(debug_text), 
-                 "BAT Z%d%% H%d%% #%d\n"
-                 "OK: %s %dmV\n"
+                 "BAT Z%d%% CACHE #%d\n"
+                 "NO HW SENSOR\n"
                  "USB:%s CHG:%s\n"
                  "D:%s", 
-                 zmk_battery, hardware_battery, update_counter,
-                 method, voltage_mv,
+                 zmk_battery, update_counter,
                  usb_powered ? "Y" : "N", charging ? "Y" : "N",
                  battery_dev ? battery_dev->name : "NULL");
     }
