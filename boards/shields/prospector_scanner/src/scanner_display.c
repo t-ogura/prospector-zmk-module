@@ -146,8 +146,24 @@ static void update_scanner_battery_widget(void) {
         struct sensor_value voltage;
         int ret = sensor_sample_fetch(battery_dev);
         if (ret == 0) {
+            // Try multiple channel types for battery sensors
             ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
-            if (ret == 0) {
+            if (ret != 0) {
+                // Some battery drivers use GAUGE_VOLTAGE instead
+                ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_VOLTAGE, &voltage);
+                if (ret != 0) {
+                    // Try state of charge as last resort
+                    struct sensor_value soc;
+                    ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, &soc);
+                    if (ret == 0) {
+                        hardware_battery = soc.val1;
+                        voltage_mv = 3700 + (hardware_battery * 5); // Rough estimate
+                        hw_error = "SOC_ONLY";
+                    }
+                }
+            }
+            
+            if (ret == 0 && hw_error == NULL) {
                 voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
                 
                 // Validate voltage reading
@@ -181,7 +197,7 @@ static void update_scanner_battery_widget(void) {
                 }
             } else {
                 hw_error = "CH_GET_ERR";
-                LOG_ERR("sensor_channel_get failed: %d", ret);
+                LOG_ERR("sensor_channel_get failed: %d for all channels (VOLTAGE, GAUGE_VOLTAGE, SOC)", ret);
                 battery_level = zmk_battery; // Fallback to ZMK
             }
         } else {
@@ -226,27 +242,27 @@ static void update_scanner_battery_widget(void) {
 #endif
     
     // Expanded 4-line battery debug display with error diagnostics
-    const char* method = (battery_level == hardware_battery && hw_error == NULL) ? "HARDWARE" : "ZMK_CACHE";
+    const char* method = (battery_level == hardware_battery && hw_error == NULL) ? "HW" : "CACHE";
     if (hw_error != NULL) {
         snprintf(debug_text, sizeof(debug_text), 
-                 "BAT ZMK:%d%% HW:%d%% #%d\n"
-                 "METHOD: %s ERR:%s\n"
-                 "USB:%s CHARGING:%s\n"
-                 "VOLTAGE: %dmV", 
+                 "BAT Z%d%% H%d%% #%d\n"
+                 "ERR: %s\n"
+                 "USB:%s CHG:%s %s\n"
+                 "V:%dmV D:%s", 
                  zmk_battery, hardware_battery, update_counter,
-                 method, hw_error,
-                 usb_powered ? "YES" : "NO", charging ? "YES" : "NO",
-                 voltage_mv);
+                 hw_error,
+                 usb_powered ? "Y" : "N", charging ? "Y" : "N", method,
+                 voltage_mv, battery_dev ? battery_dev->name : "NULL");
     } else {
         snprintf(debug_text, sizeof(debug_text), 
-                 "BAT ZMK:%d%% HW:%d%% #%d\n"
-                 "METHOD: %s\n"
-                 "USB:%s CHARGING:%s\n"
-                 "VOLTAGE: %dmV (%d%%)", 
+                 "BAT Z%d%% H%d%% #%d\n"
+                 "OK: %s %dmV\n"
+                 "USB:%s CHG:%s\n"
+                 "D:%s", 
                  zmk_battery, hardware_battery, update_counter,
-                 method,
-                 usb_powered ? "YES" : "NO", charging ? "YES" : "NO",
-                 voltage_mv, hardware_battery);
+                 method, voltage_mv,
+                 usb_powered ? "Y" : "N", charging ? "Y" : "N",
+                 battery_dev ? battery_dev->name : "NULL");
     }
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, debug_text);

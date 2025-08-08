@@ -32,9 +32,9 @@ int zmk_widget_debug_status_init(struct zmk_widget_debug_status *widget, lv_obj_
     
     // Create debug text label
     widget->debug_label = lv_label_create(widget->obj);
-    lv_obj_set_style_text_font(widget->debug_label, &lv_font_montserrat_16, 0);  // Larger font for visibility
+    lv_obj_set_style_text_font(widget->debug_label, &lv_font_montserrat_12, 0);  // Smaller font to fit more text
     lv_obj_set_style_text_color(widget->debug_label, lv_color_hex(0xFF00FF), 0); // Magenta for high visibility
-    lv_obj_set_style_text_align(widget->debug_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_align(widget->debug_label, LV_TEXT_ALIGN_LEFT, 0);  // Left align for better readability
     lv_label_set_text(widget->debug_label, "DEBUG WIDGET VISIBLE");  // Test text to confirm visibility
     lv_obj_center(widget->debug_label);
     
