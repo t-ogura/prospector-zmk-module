@@ -8,6 +8,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/drivers/sensor.h>
 #include <zephyr/logging/log.h>
 #include <zmk/status_scanner.h>
 #include <zmk/events/battery_state_changed.h>
@@ -185,23 +186,77 @@ static void battery_periodic_update_handler(struct k_work *work) {
     
     LOG_INF("🔄 Periodic battery status update triggered (%ds interval)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
     
-    // CRITICAL INVESTIGATION: Direct hardware query bypass
+    // CRITICAL INVESTIGATION: Bypass ZMK battery cache - read from hardware directly
     uint8_t current_battery = 0;
     bool current_usb = false;
     bool current_charging = false;
     
+    // METHOD 1: ZMK API (may be cached)
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    current_battery = zmk_battery_state_of_charge();
-    LOG_INF("🔍 DIRECT API CALL: zmk_battery_state_of_charge() returned %d%%", current_battery);
+    uint8_t zmk_cached_battery = zmk_battery_state_of_charge();
+    LOG_INF("🔍 ZMK API CALL: zmk_battery_state_of_charge() returned %d%% (possibly cached)", zmk_cached_battery);
+    current_battery = zmk_cached_battery;
+#endif
+
+    // METHOD 2: Direct hardware sensor access
+#if DT_HAS_CHOSEN(zmk_battery)
+    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    if (device_is_ready(battery_dev)) {
+        struct sensor_value voltage;
+        int ret = sensor_sample_fetch(battery_dev);
+        if (ret == 0) {
+            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
+            if (ret == 0) {
+                // Convert voltage to percentage (rough estimation)
+                // Typical Li-Po: 3.0V (0%) to 4.2V (100%)
+                int32_t voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
+                
+                // Simple voltage-to-percentage mapping
+                uint8_t hardware_battery = 0;
+                if (voltage_mv >= 4200) {
+                    hardware_battery = 100;
+                } else if (voltage_mv >= 4000) {
+                    hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
+                } else if (voltage_mv >= 3700) {
+                    hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
+                } else if (voltage_mv >= 3000) {
+                    hardware_battery = ((voltage_mv - 3000) * 25) / 700;
+                } else {
+                    hardware_battery = 0;
+                }
+                
+                LOG_INF("🔍 HARDWARE SENSOR: Battery voltage %dmV -> %d%% (hardware calc)", voltage_mv, hardware_battery);
+                
+                // Compare ZMK cache vs hardware reading
+                if (zmk_cached_battery != hardware_battery) {
+                    LOG_WRN("⚠️  CACHE MISMATCH: ZMK cached=%d%% vs Hardware=%d%% (diff=%d%%)", 
+                            zmk_cached_battery, hardware_battery, abs(zmk_cached_battery - hardware_battery));
+                    // Use hardware reading if significantly different
+                    if (abs(zmk_cached_battery - hardware_battery) > 5) {
+                        current_battery = hardware_battery;
+                        LOG_INF("🎯 USING HARDWARE VALUE due to significant difference");
+                    }
+                } else {
+                    LOG_INF("✅ ZMK cache matches hardware reading");
+                }
+            } else {
+                LOG_WRN("Failed to read battery voltage from sensor: %d", ret);
+            }
+        } else {
+            LOG_WRN("Failed to sample battery sensor: %d", ret);
+        }
+    } else {
+        LOG_WRN("Battery sensor device not ready");
+    }
 #endif
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
     current_usb = zmk_usb_is_powered();
     current_charging = current_usb && (current_battery < 100);
-    LOG_INF("🔍 DIRECT API CALL: zmk_usb_is_powered() returned %s", current_usb ? "true" : "false");
+    LOG_INF("🔍 USB API CALL: zmk_usb_is_powered() returned %s", current_usb ? "true" : "false");
 #endif
 
-    LOG_INF("🔍 INVESTIGATION: Battery=%d%% USB=%s Charging=%s", 
+    LOG_INF("🔍 FINAL VALUES: Battery=%d%% USB=%s Charging=%s", 
             current_battery, current_usb ? "true" : "false", current_charging ? "true" : "false");
     
     // Update debug widget with periodic investigation info (line 1)
