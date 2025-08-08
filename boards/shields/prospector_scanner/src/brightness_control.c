@@ -37,20 +37,26 @@ static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 // Dynamic max brightness based on power source
 // Function to get current max brightness based on battery/USB status
 static uint8_t get_current_max_brightness_als(void) {
+    LOG_DBG("🔍 ALS MAX: Entering brightness calculation function");
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     // Check if we have separate battery/USB settings
 #if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY > 0)
 #if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB > 0)
     // Both battery and USB settings defined - use appropriate one
+    LOG_DBG("🔍 ALS MAX: Both battery and USB settings defined");
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
     bool usb_powered = zmk_usb_is_powered();
+    LOG_DBG("🔍 ALS MAX: USB powered = %s", usb_powered ? "true" : "false");
     if (usb_powered) {
+        LOG_DBG("🔍 ALS MAX: Using USB setting = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB);
         return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
     } else {
+        LOG_DBG("🔍 ALS MAX: Using battery setting = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY);
         return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
     }
 #else
     // No USB stack - assume battery powered
+    LOG_DBG("🔍 ALS MAX: No USB stack - using battery setting = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY);
     return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
 #endif
 #else
@@ -94,17 +100,23 @@ static uint8_t get_current_max_brightness_als(void) {
 #endif
 #else
     // No separate settings - use general setting or defaults
+    LOG_DBG("🔍 ALS MAX: No separate settings - using general or defaults");
 #ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+    LOG_DBG("🔍 ALS MAX: Using general setting = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS);
     return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
 #else
+    LOG_DBG("🔍 ALS MAX: Using default = 60");
     return 60;  // Default when battery support enabled
 #endif
 #endif
 #else
     // No battery support - use general setting or default
+    LOG_DBG("🔍 ALS MAX: No battery support - using general or default");
 #ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+    LOG_DBG("🔍 ALS MAX: Using general setting = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS);
     return CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
 #else
+    LOG_DBG("🔍 ALS MAX: Using default = 100");
     return 100;  // Default when no battery support
 #endif
 #endif
@@ -300,6 +312,24 @@ static void update_brightness(void) {
     // Get current max brightness based on power source
     uint8_t pwm_max = get_current_max_brightness_als();
     
+    // Debug: Check USB power state for brightness calculation
+    bool usb_powered = false;
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    usb_powered = zmk_usb_is_powered();
+#endif
+
+    // Enhanced debugging: Show which config path was taken for brightness calculation
+    LOG_INF("🔍 BRIGHTNESS DEBUG: USB=%s, MAX=%d", usb_powered ? "Y" : "N", pwm_max);
+#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB > 0)
+    LOG_INF("🔍 CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB);
+#endif
+#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY > 0)
+    LOG_INF("🔍 CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY);
+#endif
+#ifdef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+    LOG_INF("🔍 CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS = %d", CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS);
+#endif
+    
     // Original Prospector linear mapping function
     uint8_t brightness = PWM_MIN;  // Initialize to minimum brightness
     
@@ -354,8 +384,18 @@ static void update_brightness(void) {
             }
         }
         
-        snprintf(status_buf, sizeof(status_buf), "%s\nALS: L:%d B:%d%%", 
-                 battery_line, light_level, brightness);
+        // Show configuration values for diagnosis
+        uint8_t config_usb = 0, config_battery = 0;
+#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB > 0)
+        config_usb = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
+#endif
+#if IS_ENABLED(CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY) && (CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY > 0)
+        config_battery = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY;
+#endif
+        
+        snprintf(status_buf, sizeof(status_buf), "%s\nALS L%d→B%d%% M%d U%s C%d/%d", 
+                 battery_line, light_level, brightness, pwm_max, usb_powered ? "Y" : "N", 
+                 config_usb, config_battery);
         zmk_widget_debug_status_set_text(&debug_widget, status_buf);
         zmk_widget_debug_status_set_visible(&debug_widget, true);
     }
