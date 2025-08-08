@@ -139,45 +139,65 @@ static void update_scanner_battery_widget(void) {
     // Try direct hardware sensor access
 #if DT_HAS_CHOSEN(zmk_battery)
     const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    int32_t voltage_mv = 0;
+    const char *hw_error = "N/A";
+    
     if (device_is_ready(battery_dev)) {
         struct sensor_value voltage;
         int ret = sensor_sample_fetch(battery_dev);
         if (ret == 0) {
             ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
             if (ret == 0) {
-                int32_t voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
+                voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
                 
-                // Convert voltage to percentage
-                if (voltage_mv >= 4200) {
-                    hardware_battery = 100;
-                } else if (voltage_mv >= 4000) {
-                    hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
-                } else if (voltage_mv >= 3700) {
-                    hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
-                } else if (voltage_mv >= 3000) {
-                    hardware_battery = ((voltage_mv - 3000) * 25) / 700;
-                } else {
+                // Validate voltage reading
+                if (voltage_mv < 2000 || voltage_mv > 5000) {
+                    // Invalid voltage reading
+                    hw_error = "INVALID_V";
+                    LOG_ERR("Invalid voltage reading: %dmV", voltage_mv);
                     hardware_battery = 0;
+                } else {
+                    // Convert voltage to percentage
+                    if (voltage_mv >= 4200) {
+                        hardware_battery = 100;
+                    } else if (voltage_mv >= 4000) {
+                        hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
+                    } else if (voltage_mv >= 3700) {
+                        hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
+                    } else if (voltage_mv >= 3000) {
+                        hardware_battery = ((voltage_mv - 3000) * 25) / 700;
+                    } else {
+                        hardware_battery = 0;
+                    }
+                    hw_error = NULL; // Success
                 }
                 
-                // Use hardware value if significantly different
-                if (abs(zmk_battery - hardware_battery) > 3) {
+                // Use hardware value if valid and significantly different
+                if (hw_error == NULL && abs(zmk_battery - hardware_battery) > 3) {
                     battery_level = hardware_battery;
                     LOG_INF("🎯 USING HARDWARE: %dmV->%d%% (ZMK cached: %d%%)", voltage_mv, hardware_battery, zmk_battery);
                 } else {
                     battery_level = zmk_battery;
                 }
             } else {
+                hw_error = "CH_GET_ERR";
+                LOG_ERR("sensor_channel_get failed: %d", ret);
                 battery_level = zmk_battery; // Fallback to ZMK
             }
         } else {
+            hw_error = "FETCH_ERR";
+            LOG_ERR("sensor_sample_fetch failed: %d", ret);
             battery_level = zmk_battery; // Fallback to ZMK
         }
     } else {
+        hw_error = "NOT_READY";
+        LOG_ERR("Battery device not ready");
         battery_level = zmk_battery; // Fallback to ZMK
     }
 #else
     battery_level = zmk_battery; // No hardware sensor available
+    int32_t voltage_mv = 0;
+    const char *hw_error = "NO_HW";
 #endif
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
@@ -205,16 +225,29 @@ static void update_scanner_battery_widget(void) {
     uint8_t zmk_cached = 0;
 #endif
     
-    // Expanded 4-line battery debug display
-    const char* method = (battery_level == hardware_battery) ? "HARDWARE" : "ZMK_CACHE";
-    snprintf(debug_text, sizeof(debug_text), 
-             "BAT ZMK:%d%% HW:%d%% #%d\n"
-             "METHOD: %s\n"
-             "USB:%s CHARGING:%s\n"
-             "VOLTAGE: Reading...", 
-             zmk_battery, hardware_battery, update_counter,
-             method,
-             usb_powered ? "YES" : "NO", charging ? "YES" : "NO");
+    // Expanded 4-line battery debug display with error diagnostics
+    const char* method = (battery_level == hardware_battery && hw_error == NULL) ? "HARDWARE" : "ZMK_CACHE";
+    if (hw_error != NULL) {
+        snprintf(debug_text, sizeof(debug_text), 
+                 "BAT ZMK:%d%% HW:%d%% #%d\n"
+                 "METHOD: %s ERR:%s\n"
+                 "USB:%s CHARGING:%s\n"
+                 "VOLTAGE: %dmV", 
+                 zmk_battery, hardware_battery, update_counter,
+                 method, hw_error,
+                 usb_powered ? "YES" : "NO", charging ? "YES" : "NO",
+                 voltage_mv);
+    } else {
+        snprintf(debug_text, sizeof(debug_text), 
+                 "BAT ZMK:%d%% HW:%d%% #%d\n"
+                 "METHOD: %s\n"
+                 "USB:%s CHARGING:%s\n"
+                 "VOLTAGE: %dmV (%d%%)", 
+                 zmk_battery, hardware_battery, update_counter,
+                 method,
+                 usb_powered ? "YES" : "NO", charging ? "YES" : "NO",
+                 voltage_mv, hardware_battery);
+    }
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, debug_text);
     } else {
