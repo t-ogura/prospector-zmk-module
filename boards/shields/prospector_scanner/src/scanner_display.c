@@ -109,9 +109,56 @@ static void update_scanner_battery_widget(void) {
     LOG_DBG("Scanner battery DEMO MODE: %d%% USB=%s charging=%s", 
             battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
 #else
-    // Normal mode: Get real battery status
+    // Normal mode: Get real battery status with hardware bypass
+    uint8_t zmk_battery = 0;
+    uint8_t hardware_battery = 0;
+    
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    battery_level = zmk_battery_state_of_charge();
+    zmk_battery = zmk_battery_state_of_charge();
+#endif
+
+    // Try direct hardware sensor access
+#if DT_HAS_CHOSEN(zmk_battery)
+    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    if (device_is_ready(battery_dev)) {
+        struct sensor_value voltage;
+        int ret = sensor_sample_fetch(battery_dev);
+        if (ret == 0) {
+            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
+            if (ret == 0) {
+                int32_t voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
+                
+                // Convert voltage to percentage
+                if (voltage_mv >= 4200) {
+                    hardware_battery = 100;
+                } else if (voltage_mv >= 4000) {
+                    hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
+                } else if (voltage_mv >= 3700) {
+                    hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
+                } else if (voltage_mv >= 3000) {
+                    hardware_battery = ((voltage_mv - 3000) * 25) / 700;
+                } else {
+                    hardware_battery = 0;
+                }
+                
+                // Use hardware value if significantly different
+                if (abs(zmk_battery - hardware_battery) > 3) {
+                    battery_level = hardware_battery;
+                    LOG_INF("🎯 USING HARDWARE: %dmV->%d%% (ZMK cached: %d%%)", voltage_mv, hardware_battery, zmk_battery);
+                } else {
+                    battery_level = zmk_battery;
+                }
+            } else {
+                battery_level = zmk_battery; // Fallback to ZMK
+            }
+        } else {
+            battery_level = zmk_battery; // Fallback to ZMK
+        }
+    } else {
+        battery_level = zmk_battery; // Fallback to ZMK
+    }
+#else
+    battery_level = zmk_battery; // No hardware sensor available
 #endif
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
@@ -129,10 +176,20 @@ static void update_scanner_battery_widget(void) {
            battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
 #endif
 
-    // Update debug widget with battery monitoring info (line 1)
+    // Update debug widget with detailed battery investigation (line 1)
     static char debug_text[128];
-    snprintf(debug_text, sizeof(debug_text), "BAT:%d%% USB:%s #%d\nALS: Monitor Active", 
-             battery_level, usb_powered ? "Y" : "N", update_counter);
+    
+    // Get ZMK cached value for comparison
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    uint8_t zmk_cached = zmk_battery_state_of_charge();
+#else
+    uint8_t zmk_cached = 0;
+#endif
+    
+    snprintf(debug_text, sizeof(debug_text), "ZMK:%d%% HW:%d%% #%d\nUSE:%s USB:%s CHG:%s", 
+             zmk_battery, hardware_battery, update_counter,
+             (battery_level == hardware_battery) ? "HW" : "ZMK",
+             usb_powered ? "Y" : "N", charging ? "Y" : "N");
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, debug_text);
     } else {
@@ -269,9 +326,10 @@ static void battery_periodic_update_handler(struct k_work *work) {
     uint8_t zmk_only = 0;
 #endif
     
-    snprintf(periodic_debug, sizeof(periodic_debug), "P#%d ZMK:%d%% HW:%d%% U:%s\nMethod: %s", 
+    snprintf(periodic_debug, sizeof(periodic_debug), "P#%d ZMK:%d%% HW:%d%% U:%s\nMethod:%s Chg:%s", 
              periodic_counter, zmk_only, current_battery, current_usb ? "Y" : "N",
-             (current_battery != zmk_only) ? "HARDWARE" : "CACHED");
+             (current_battery != zmk_only) ? "HW" : "CACHE",
+             current_charging ? "Y" : "N");
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
     }
