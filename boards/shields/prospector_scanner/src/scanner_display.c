@@ -61,6 +61,11 @@ static void trigger_scanner_start(void);
 static void check_signal_timeout_handler(struct k_work *work);
 static void periodic_rx_update_handler(struct k_work *work);
 
+// Forward declaration for battery widget update
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+static void update_scanner_battery_widget(void);
+#endif
+
 // Work queue for periodic signal timeout checking
 static K_WORK_DELAYABLE_DEFINE(signal_timeout_work, check_signal_timeout_handler);
 
