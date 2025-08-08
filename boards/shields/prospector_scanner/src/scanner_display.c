@@ -67,6 +67,10 @@ static K_WORK_DELAYABLE_DEFINE(signal_timeout_work, check_signal_timeout_handler
 // Work queue for 1Hz RX periodic updates
 static K_WORK_DELAYABLE_DEFINE(rx_periodic_work, periodic_rx_update_handler);
 
+// Work queue for frequent battery debug updates (every 5 seconds for visibility)
+static void battery_debug_update_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(battery_debug_work, battery_debug_update_handler);
+
 // Periodic signal timeout check (every 5 seconds)
 static void check_signal_timeout_handler(struct k_work *work) {
     // Check signal widget for timeout
@@ -85,11 +89,21 @@ static void periodic_rx_update_handler(struct k_work *work) {
     k_work_schedule(&rx_periodic_work, K_SECONDS(1));
 }
 
+// Battery debug update handler - constant display for troubleshooting
+static void battery_debug_update_handler(struct k_work *work) {
+    // Force battery widget update for constant debug visibility
+    update_scanner_battery_widget();
+    
+    // Schedule next update in 5 seconds
+    k_work_schedule(&battery_debug_work, K_SECONDS(5));
+}
+
 // Start periodic signal monitoring
 static void start_signal_monitoring(void) {
     k_work_schedule(&signal_timeout_work, K_SECONDS(5));
     k_work_schedule(&rx_periodic_work, K_SECONDS(1));  // Start 1Hz updates
-    LOG_INF("Started periodic signal timeout monitoring (5s intervals) and 1Hz RX updates");
+    k_work_schedule(&battery_debug_work, K_SECONDS(2)); // Start battery debug updates (2s delay)
+    LOG_INF("Started periodic signal timeout monitoring (5s intervals), 1Hz RX updates, and 5s battery debug updates");
 }
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -186,10 +200,16 @@ static void update_scanner_battery_widget(void) {
     uint8_t zmk_cached = 0;
 #endif
     
-    snprintf(debug_text, sizeof(debug_text), "ZMK:%d%% HW:%d%% #%d\nUSE:%s USB:%s CHG:%s", 
+    // Expanded 4-line battery debug display
+    const char* method = (battery_level == hardware_battery) ? "HARDWARE" : "ZMK_CACHE";
+    snprintf(debug_text, sizeof(debug_text), 
+             "BAT ZMK:%d%% HW:%d%% #%d\n"
+             "METHOD: %s\n"
+             "USB:%s CHARGING:%s\n"
+             "VOLTAGE: Reading...", 
              zmk_battery, hardware_battery, update_counter,
-             (battery_level == hardware_battery) ? "HW" : "ZMK",
-             usb_powered ? "Y" : "N", charging ? "Y" : "N");
+             method,
+             usb_powered ? "YES" : "NO", charging ? "YES" : "NO");
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, debug_text);
     } else {

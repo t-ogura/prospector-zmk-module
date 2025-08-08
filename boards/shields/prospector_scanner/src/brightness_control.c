@@ -415,9 +415,9 @@ static void update_brightness(void) {
 
         LOG_INF("🔍   Final config values: USB=%d, Battery=%d", config_usb, config_battery);
         
-        snprintf(status_buf, sizeof(status_buf), "%s\nALS L%d→B%d%% M%d U%s C%d/%d", 
-                 battery_line, light_level, brightness, pwm_max, usb_powered ? "Y" : "N", 
-                 config_usb, config_battery);
+        // Preserve existing battery debug info and append ALS info
+        snprintf(status_buf, sizeof(status_buf), "%s\nALS L%d→B%d%% M%d C%d/%d", 
+                 battery_line, light_level, brightness, pwm_max, config_usb, config_battery);
         zmk_widget_debug_status_set_text(&debug_widget, status_buf);
         zmk_widget_debug_status_set_visible(&debug_widget, true);
     }
