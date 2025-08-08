@@ -406,7 +406,7 @@ static int brightness_control_init(void) {
         
         // Debug display: Show sensor not ready status (persistent)
         zmk_widget_debug_status_set_text(&debug_widget, "ALS: Device Not Ready");
-        zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
+        zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
         // No auto-hide - keep visible to show problem
         
         set_brightness_pwm(fixed_brightness);
@@ -445,7 +445,7 @@ static int brightness_control_init(void) {
             char status_buf[64];
             snprintf(status_buf, sizeof(status_buf), "ALS: OK (%d)", test_val.val1);
             zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-            zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
+            zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
         } else {
             LOG_WRN("Failed to get initial light value: %d", ret);
             printk("BRIGHTNESS: Failed to get light value, error %d\n", ret);
@@ -461,13 +461,13 @@ static int brightness_control_init(void) {
                 char status_buf[64];
                 snprintf(status_buf, sizeof(status_buf), "ALS: RED Ch (%d)", test_val.val1);
                 zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-                zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
+                zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
             } else {
                 // Debug display: Show channel read failed (persistent error)
                 char status_buf[64];
                 snprintf(status_buf, sizeof(status_buf), "ALS: Ch Read Fail (%d)", ret);
                 zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-                zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
+                zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
             }
         }
     } else {
@@ -479,7 +479,7 @@ static int brightness_control_init(void) {
         char status_buf[64];
         snprintf(status_buf, sizeof(status_buf), "ALS: I2C Fail (%d)", ret);
         zmk_widget_debug_status_set_text(&debug_widget, status_buf);
-        zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
+        zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
     }
     
     // Initialize work queues
@@ -493,7 +493,7 @@ static int brightness_control_init(void) {
     LOG_INF("🔧 About to access debug widget...");
     printk("BRIGHTNESS: Accessing debug widget\n");
     
-    zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
+    zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
     zmk_widget_debug_status_set_text(&debug_widget, "ALS: INIT TEST");
     LOG_INF("🎯 Forced debug widget visible with test message");
     
@@ -532,7 +532,7 @@ static int brightness_control_init(void) {
     // Test debug widget access even in fixed mode
     LOG_INF("🔧 Testing debug widget access in fixed mode...");
     zmk_widget_debug_status_set_text(&debug_widget, "ALS: DISABLED");
-    zmk_widget_debug_status_set_visible(&debug_widget, false);  // Hidden for production
+    zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
     LOG_INF("🔧 Debug widget should show ALS: DISABLED");
     
     return 0;

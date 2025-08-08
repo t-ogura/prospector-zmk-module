@@ -370,3 +370,13 @@ config PROSPECTOR_BATTERY_UPDATE_INTERVAL_S
       Default is 120 seconds (2 minutes). Range is 30 seconds to 5 minutes.
       Battery events will still trigger immediate updates.
       Note: This is a fallback mechanism - battery events should provide immediate updates.
+
+config PROSPECTOR_DEBUG_WIDGET
+    bool "Enable debug widget for diagnostics"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Enable debug status widget for diagnostics and troubleshooting.
+      Shows sensor status, battery monitoring info, and system debug messages.
+      Positioned in modifier area when no modifier keys are active.
+      ENABLE for development and debugging, DISABLE for production use.
