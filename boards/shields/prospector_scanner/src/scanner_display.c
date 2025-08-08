@@ -479,6 +479,13 @@ lv_obj_t *zmk_display_status_screen() {
     zmk_widget_debug_status_set_visible(&debug_widget, true);
     if (debug_widget.debug_label) {
         zmk_widget_debug_status_set_text(&debug_widget, "BATTERY DEBUG READY");
+        LOG_INF("✅ Debug widget initialized successfully - label exists");
+        
+        // Move to foreground to ensure visibility
+        lv_obj_move_foreground(debug_widget.obj);
+        
+        // Force immediate screen refresh
+        lv_obj_invalidate(screen);
     } else {
         LOG_ERR("Debug widget initialization failed - label is NULL!");
     }
