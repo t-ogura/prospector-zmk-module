@@ -48,6 +48,11 @@ struct zmk_widget_debug_status debug_widget;
 // Scanner's own battery status widget (top-right corner)
 static struct zmk_widget_scanner_battery_status scanner_battery_widget;
 
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+// Battery monitoring state - global to manage start/stop properly
+static bool battery_monitoring_active = false;
+#endif
+
 // Forward declaration
 static void trigger_scanner_start(void);
 
@@ -92,6 +97,8 @@ static void update_scanner_battery_widget(void) {
     uint8_t battery_level = 0;
     bool usb_powered = false;
     bool charging = false;
+    static uint32_t update_counter = 0;
+    update_counter++;
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_DEMO_MODE)
     // Demo mode: Show sample battery status for UI testing
@@ -121,14 +128,21 @@ static void update_scanner_battery_widget(void) {
            battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
 #endif
 
+    // Update debug widget with battery monitoring info
+    static char debug_text[64];
+    snprintf(debug_text, sizeof(debug_text), "BAT:%d%% USB:%s #%d", 
+             battery_level, usb_powered ? "Y" : "N", update_counter);
+    zmk_widget_debug_status_set_text(&debug_widget, debug_text);
+
     zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
                                             battery_level, usb_powered, charging);
 }
 
 // Battery state changed event handler
 static int scanner_battery_listener(const zmk_event_t *eh) {
-    if (as_zmk_battery_state_changed(eh)) {
-        LOG_DBG("Scanner battery state changed event received");
+    const struct zmk_battery_state_changed *ev = as_zmk_battery_state_changed(eh);
+    if (ev) {
+        LOG_INF("🔋 Scanner battery event: %d%% (state changed)", ev->state_of_charge);
         update_scanner_battery_widget();
         return 0;
     }
@@ -162,18 +176,65 @@ static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_ha
 
 // Periodic battery status update work
 static void battery_periodic_update_handler(struct k_work *work) {
-    LOG_DBG("Periodic battery status update triggered");
+    static uint32_t periodic_counter = 0;
+    periodic_counter++;
+    
+    LOG_INF("🔄 Periodic battery status update triggered (%ds interval)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
+    
+    // CRITICAL INVESTIGATION: Direct hardware query bypass
+    uint8_t current_battery = 0;
+    bool current_usb = false;
+    bool current_charging = false;
+    
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    current_battery = zmk_battery_state_of_charge();
+    LOG_INF("🔍 DIRECT API CALL: zmk_battery_state_of_charge() returned %d%%", current_battery);
+#endif
+
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    current_usb = zmk_usb_is_powered();
+    current_charging = current_usb && (current_battery < 100);
+    LOG_INF("🔍 DIRECT API CALL: zmk_usb_is_powered() returned %s", current_usb ? "true" : "false");
+#endif
+
+    LOG_INF("🔍 INVESTIGATION: Battery=%d%% USB=%s Charging=%s", 
+            current_battery, current_usb ? "true" : "false", current_charging ? "true" : "false");
+    
+    // Update debug widget with periodic investigation info  
+    static char periodic_debug[64];
+    snprintf(periodic_debug, sizeof(periodic_debug), "PERIODIC#%d B:%d%% U:%s", 
+             periodic_counter, current_battery, current_usb ? "Y" : "N");
+    zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
+    
+    // FORCE UPDATE regardless of cache - bypass the change detection in update_scanner_battery_widget()
+    LOG_INF("🔍 BYPASSING cache check - forcing widget update directly");
+    zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
+                                            current_battery, current_usb, current_charging);
+    
+    // Also call the original update method for comparison
     update_scanner_battery_widget();
     
     // Schedule next update
     k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
 }
 
-// Start periodic battery monitoring
+// Start periodic battery monitoring - only when keyboards are active
 static void start_battery_monitoring(void) {
     // Update battery status at configurable intervals for more responsive display
     k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
-    LOG_INF("Started periodic battery monitoring (%ds intervals)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
+    LOG_INF("Started periodic battery monitoring (%ds intervals) - ACTIVE MODE", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
+    
+    // Update debug widget to show monitoring started
+    zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STARTED");
+}
+
+// Stop battery monitoring when keyboards become inactive
+static void stop_battery_monitoring(void) {
+    k_work_cancel_delayable(&battery_periodic_work);
+    LOG_INF("Stopped periodic battery monitoring - INACTIVE MODE");
+    
+    // Update debug widget to show monitoring stopped
+    zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STOPPED");
 }
 #endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
 
@@ -243,6 +304,12 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT) 
         // Scanner battery widget shows scanner's own status, not keyboard status
         // Don't reset it when keyboards disconnect - scanner battery is independent
+        
+        // Stop battery monitoring when no keyboards are active
+        stop_battery_monitoring();
+        
+        // Reset battery monitoring state so it will restart when keyboards return
+        battery_monitoring_active = false;
 #endif
         
         // Reset advertisement frequency monitoring when no keyboards
@@ -279,6 +346,14 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 
                 // Resume normal brightness control when keyboard is connected
                 prospector_resume_brightness();
+                
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+                // Start battery monitoring when keyboards become active
+                if (!battery_monitoring_active) {
+                    start_battery_monitoring();
+                    battery_monitoring_active = true;
+                }
+#endif
                 
                 // Enhanced debug logging including modifier flags
                 LOG_INF("🔧 SCANNER: Raw keyboard data - modifier_flags=0x%02X", kbd->data.modifier_flags);
@@ -389,17 +464,18 @@ lv_obj_t *zmk_display_status_screen() {
     // Debug status widget (overlaps modifier area when no modifiers active)
     zmk_widget_debug_status_init(&debug_widget, screen);
     
-    // Debug widget hidden for production use
-    LOG_DBG("Debug widget initialized but hidden for production");
-    zmk_widget_debug_status_set_visible(&debug_widget, false);
+    // Debug widget enabled for battery monitoring investigation
+    LOG_DBG("Debug widget enabled for battery monitoring investigation");
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    zmk_widget_debug_status_set_text(&debug_widget, "BATTERY DEBUG READY");
     
     // Initialize scanner battery widget with current status
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     LOG_INF("Initializing scanner battery widget with current status");
     update_scanner_battery_widget();
     
-    // Start periodic battery monitoring for more responsive updates
-    start_battery_monitoring();
+    // NOTE: Battery monitoring will start automatically when keyboards become active
+    // This saves power when no keyboards are connected
 #endif
     
     // Start periodic signal timeout monitoring

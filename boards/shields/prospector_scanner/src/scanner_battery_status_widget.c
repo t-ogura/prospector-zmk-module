@@ -242,12 +242,21 @@ void zmk_widget_scanner_battery_status_update(struct zmk_widget_scanner_battery_
         return;
     }
 
+    // INVESTIGATION MODE: Log all update calls even if values haven't changed
+    LOG_INF("🔍 WIDGET UPDATE CALL: Battery=%d%% (was %d%%) USB=%s (was %s) Charging=%s (was %s)",
+            battery_level, widget->last_battery_level,
+            usb_powered ? "true" : "false", widget->last_usb_powered ? "true" : "false",
+            charging ? "true" : "false", widget->last_charging ? "true" : "false");
+    
     // Check for changes to minimize updates
     if (widget->last_battery_level == battery_level && 
         widget->last_usb_powered == usb_powered &&
         widget->last_charging == charging) {
+        LOG_INF("🔍 WIDGET SKIP: No changes detected - skipping visual update");
         return; // No changes
     }
+    
+    LOG_INF("🔍 WIDGET CHANGE DETECTED: Proceeding with visual update");
 
     LOG_DBG("Scanner battery status update: %d%% USB=%s charging=%s",
             battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
