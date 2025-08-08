@@ -17,9 +17,6 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Global debug widget for sensor status display
-extern struct zmk_widget_debug_status debug_widget;
-
 // LED driver for backlight control (following original Prospector approach)
 static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #define DISP_BL DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl))

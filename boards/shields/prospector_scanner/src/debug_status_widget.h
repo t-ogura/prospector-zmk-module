@@ -23,6 +23,9 @@ void zmk_widget_debug_status_set_text(struct zmk_widget_debug_status *widget, co
 void zmk_widget_debug_status_set_visible(struct zmk_widget_debug_status *widget, bool visible);
 lv_obj_t *zmk_widget_debug_status_obj(struct zmk_widget_debug_status *widget);
 
+// Global debug widget instance (defined in scanner_display.c)
+extern struct zmk_widget_debug_status debug_widget;
+
 #ifdef __cplusplus
 }
 #endif

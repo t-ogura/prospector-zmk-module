@@ -132,7 +132,11 @@ static void update_scanner_battery_widget(void) {
     static char debug_text[64];
     snprintf(debug_text, sizeof(debug_text), "BAT:%d%% USB:%s #%d", 
              battery_level, usb_powered ? "Y" : "N", update_counter);
-    zmk_widget_debug_status_set_text(&debug_widget, debug_text);
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, debug_text);
+    } else {
+        LOG_ERR("Debug widget not initialized!");
+    }
 
     zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
                                             battery_level, usb_powered, charging);
@@ -204,7 +208,9 @@ static void battery_periodic_update_handler(struct k_work *work) {
     static char periodic_debug[64];
     snprintf(periodic_debug, sizeof(periodic_debug), "PERIODIC#%d B:%d%% U:%s", 
              periodic_counter, current_battery, current_usb ? "Y" : "N");
-    zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
+    }
     
     // FORCE UPDATE regardless of cache - bypass the change detection in update_scanner_battery_widget()
     LOG_INF("🔍 BYPASSING cache check - forcing widget update directly");
@@ -225,7 +231,9 @@ static void start_battery_monitoring(void) {
     LOG_INF("Started periodic battery monitoring (%ds intervals) - ACTIVE MODE", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
     
     // Update debug widget to show monitoring started
-    zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STARTED");
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STARTED");
+    }
 }
 
 // Stop battery monitoring when keyboards become inactive
@@ -234,7 +242,9 @@ static void stop_battery_monitoring(void) {
     LOG_INF("Stopped periodic battery monitoring - INACTIVE MODE");
     
     // Update debug widget to show monitoring stopped
-    zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STOPPED");
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STOPPED");
+    }
 }
 #endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
 
@@ -467,7 +477,11 @@ lv_obj_t *zmk_display_status_screen() {
     // Debug widget enabled for battery monitoring investigation
     LOG_DBG("Debug widget enabled for battery monitoring investigation");
     zmk_widget_debug_status_set_visible(&debug_widget, true);
-    zmk_widget_debug_status_set_text(&debug_widget, "BATTERY DEBUG READY");
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, "BATTERY DEBUG READY");
+    } else {
+        LOG_ERR("Debug widget initialization failed - label is NULL!");
+    }
     
     // Initialize scanner battery widget with current status
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)

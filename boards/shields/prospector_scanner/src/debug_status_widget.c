@@ -16,8 +16,8 @@ int zmk_widget_debug_status_init(struct zmk_widget_debug_status *widget, lv_obj_
     widget->obj = lv_obj_create(parent);
     lv_obj_set_size(widget->obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     
-    // Position in modifier widget area (bottom center)
-    lv_obj_align(widget->obj, LV_ALIGN_BOTTOM_MID, 0, -70);
+    // Position in modifier widget area (center of screen, visible location)
+    lv_obj_align(widget->obj, LV_ALIGN_CENTER, 0, 40);  // Below layer display
     
     // Make container transparent
     lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);
@@ -26,8 +26,8 @@ int zmk_widget_debug_status_init(struct zmk_widget_debug_status *widget, lv_obj_
     
     // Create debug text label
     widget->debug_label = lv_label_create(widget->obj);
-    lv_obj_set_style_text_font(widget->debug_label, &lv_font_montserrat_12, 0);  // Use available font
-    lv_obj_set_style_text_color(widget->debug_label, lv_color_hex(0xFFFFFF), 0); // White text
+    lv_obj_set_style_text_font(widget->debug_label, &lv_font_montserrat_16, 0);  // Larger font for visibility
+    lv_obj_set_style_text_color(widget->debug_label, lv_color_hex(0xFF00FF), 0); // Magenta for high visibility
     lv_obj_set_style_text_align(widget->debug_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(widget->debug_label, "DEBUG READY");  // Test text to confirm visibility
     lv_obj_center(widget->debug_label);
