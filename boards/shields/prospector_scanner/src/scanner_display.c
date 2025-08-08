@@ -128,94 +128,51 @@ static void update_scanner_battery_widget(void) {
     LOG_DBG("Scanner battery DEMO MODE: %d%% USB=%s charging=%s", 
             battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
 #else
-    // Normal mode: Get real battery status with hardware bypass
-    uint8_t zmk_battery = 0;
-    uint8_t hardware_battery = 0;
+    // ZMK-native approach: Use ZMK's battery update function directly
+    uint8_t zmk_battery_before = 0;
+    uint8_t zmk_battery_after = 0;
     
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    zmk_battery = zmk_battery_state_of_charge();
+    zmk_battery_before = zmk_battery_state_of_charge();
 #endif
 
-    // Try direct hardware sensor access
+    // BREAKTHROUGH: Call ZMK's battery update function directly
+    // This uses the same mechanism as keyboard-side implementation
 #if DT_HAS_CHOSEN(zmk_battery)
     const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
-    int32_t voltage_mv = 0;
-    const char *hw_error = "N/A";
+    const char *update_result = "N/A";
     
     if (device_is_ready(battery_dev)) {
-        struct sensor_value voltage;
-        // Safe sensor channel testing - reduced memory usage
-        int ret = sensor_sample_fetch(battery_dev);
+        LOG_INF("🔋 Calling ZMK battery update directly (keyboard-side approach)");
+        
+        // Use ZMK's own battery update function - same as keyboard implementation
+        extern int zmk_battery_update(const struct device *battery);
+        int ret = zmk_battery_update(battery_dev);
+        
         if (ret == 0) {
-            // Test only the 3 most likely channels to avoid memory issues
-            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
-            if (ret == 0) {
-                hw_error = "VOLTAGE";
-            } else {
-                ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_VOLTAGE, &voltage);
-                if (ret == 0) {
-                    hw_error = "G_VOLT";
-                } else {
-                    // Try raw channel 0 as last resort
-                    ret = sensor_channel_get(battery_dev, (enum sensor_channel)0, &voltage);
-                    if (ret == 0) {
-                        hw_error = "CH0";
-                    }
-                }
-            }
-            
-            if (ret == 0 && hw_error == NULL) {
-                voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
-                
-                // Validate voltage reading
-                if (voltage_mv < 2000 || voltage_mv > 5000) {
-                    // Invalid voltage reading
-                    hw_error = "INVALID_V";
-                    LOG_ERR("Invalid voltage reading: %dmV", voltage_mv);
-                    hardware_battery = 0;
-                } else {
-                    // Convert voltage to percentage
-                    if (voltage_mv >= 4200) {
-                        hardware_battery = 100;
-                    } else if (voltage_mv >= 4000) {
-                        hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
-                    } else if (voltage_mv >= 3700) {
-                        hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
-                    } else if (voltage_mv >= 3000) {
-                        hardware_battery = ((voltage_mv - 3000) * 25) / 700;
-                    } else {
-                        hardware_battery = 0;
-                    }
-                    hw_error = NULL; // Success
-                }
-                
-                // Use hardware value if valid and significantly different
-                if (hw_error == NULL && abs(zmk_battery - hardware_battery) > 3) {
-                    battery_level = hardware_battery;
-                    LOG_INF("🎯 USING HARDWARE: %dmV->%d%% (ZMK cached: %d%%)", voltage_mv, hardware_battery, zmk_battery);
-                } else {
-                    battery_level = zmk_battery;
-                }
-            } else {
-                hw_error = "CH_GET_ERR";
-                LOG_ERR("sensor_channel_get failed: %d for all channels (VOLTAGE, GAUGE_VOLTAGE, SOC)", ret);
-                battery_level = zmk_battery; // Fallback to ZMK
-            }
+            update_result = "SUCCESS";
+            LOG_INF("✅ ZMK battery update succeeded");
         } else {
-            hw_error = "FETCH_ERR";
-            LOG_ERR("sensor_sample_fetch failed: %d", ret);
-            battery_level = zmk_battery; // Fallback to ZMK
+            update_result = "FAILED";
+            LOG_ERR("❌ ZMK battery update failed: %d", ret);
         }
     } else {
-        hw_error = "NOT_READY";
-        LOG_ERR("Battery device not ready");
-        battery_level = zmk_battery; // Fallback to ZMK
+        update_result = "NOT_READY";
+        LOG_ERR("Battery device not ready for ZMK update");
     }
 #else
-    battery_level = zmk_battery; // No hardware sensor available
-    int32_t voltage_mv = 0;
-    const char *hw_error = "NO_HW";
+    const char *update_result = "NO_DEVICE";
 #endif
+
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    zmk_battery_after = zmk_battery_state_of_charge();
+#endif
+
+    // Use the updated ZMK value
+    battery_level = zmk_battery_after;
+    
+    LOG_INF("🔍 ZMK Battery Update: Before=%d%% After=%d%% Result=%s", 
+            zmk_battery_before, zmk_battery_after, update_result);
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
     usb_powered = zmk_usb_is_powered();
@@ -242,24 +199,15 @@ static void update_scanner_battery_widget(void) {
     uint8_t zmk_cached = 0;
 #endif
     
-    // Simple 2-line battery debug display - reduced memory usage
-    if (hw_error != NULL && strcmp(hw_error, "N/A") != 0 && strcmp(hw_error, "CH_GET_ERR") != 0) {
-        // Show successful channel
-        snprintf(debug_text, sizeof(debug_text), 
-                 "BAT Z%d%% H%d%% #%d\n%s=%dmV USB:%s", 
-                 zmk_battery, hardware_battery, update_counter,
-                 hw_error, voltage_mv, usb_powered ? "Y" : "N");
-    } else {
-        // Show cache only or error
-        snprintf(debug_text, sizeof(debug_text), 
-                 "BAT Z%d%% CACHE #%d\nNO HW USB:%s CHG:%s", 
-                 zmk_battery, update_counter,
-                 usb_powered ? "Y" : "N", charging ? "Y" : "N");
+    // ZMK-native battery debug display
+    snprintf(debug_text, sizeof(debug_text), 
+             "ZMK %d%%->%d%% #%d\n%s USB:%s CHG:%s", 
+             zmk_battery_before, zmk_battery_after, update_counter,
+             update_result, usb_powered ? "Y" : "N", charging ? "Y" : "N");
+    // Debug widget re-enabled with safer ZMK-native approach
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, debug_text);
     }
-    // TEMPORARY: Debug widget updates disabled for display stability
-    // if (debug_widget.debug_label) {
-    //     zmk_widget_debug_status_set_text(&debug_widget, debug_text);
-    // }
 
     zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
                                             battery_level, usb_powered, charging);
@@ -661,9 +609,13 @@ lv_obj_t *zmk_display_status_screen() {
     // Debug status widget (overlaps modifier area when no modifiers active)
     zmk_widget_debug_status_init(&debug_widget, screen);
     
-    // TEMPORARY: Debug widget disabled to prevent display issues
-    LOG_INF("Debug widget temporarily disabled for display stability");
-    zmk_widget_debug_status_set_visible(&debug_widget, false);
+    // Debug widget re-enabled with ZMK-native battery approach
+    LOG_INF("Debug widget re-enabled with safer ZMK-native approach");
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, "ZMK NATIVE BATTERY TEST");
+        LOG_INF("✅ Debug widget re-initialized for ZMK battery testing");
+    }
     
     // Initialize scanner battery widget with current status
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
