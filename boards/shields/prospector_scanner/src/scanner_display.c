@@ -110,8 +110,13 @@ static void periodic_rx_update_handler(struct k_work *work) {
 
 // Battery debug update handler - constant display for troubleshooting
 static void battery_debug_update_handler(struct k_work *work) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     // Force battery widget update for constant debug visibility
     update_scanner_battery_widget();
+#else
+    // Battery support disabled - skip battery widget update
+    LOG_DBG("Battery debug update skipped - battery support disabled");
+#endif
     
     // Schedule next update in 5 seconds
     k_work_schedule(&battery_debug_work, K_SECONDS(5));
