@@ -373,7 +373,7 @@ config PROSPECTOR_BATTERY_UPDATE_INTERVAL_S
 
 config PROSPECTOR_DEBUG_WIDGET
     bool "Enable debug widget for diagnostics"
-    default y
+    default n
     depends on PROSPECTOR_MODE_SCANNER
     help
       Enable debug status widget for diagnostics and troubleshooting.

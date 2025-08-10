@@ -27,6 +27,15 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+// Backward compatibility: provide defaults for v1.1.0 configs if not defined
+#ifndef CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
+#define CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS 10  // 10% default
+#endif
+
+#ifndef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
+#define CONFIG_PROSPECTOR_FIXED_BRIGHTNESS 60   // 60% default
+#endif
+
 // External brightness control functions
 void prospector_set_brightness(uint8_t brightness_percent);
 void prospector_resume_brightness(void);
@@ -52,6 +61,11 @@ static struct zmk_widget_scanner_battery_status scanner_battery_widget;
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 // Battery monitoring state - global to manage start/stop properly
 static bool battery_monitoring_active = false;
+
+// Backward compatibility: provide default interval if not defined
+#ifndef CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S
+#define CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S 120  // 2 minutes default
+#endif
 #endif
 
 // Forward declaration
@@ -426,6 +440,15 @@ static void stop_battery_monitoring(void) {
 static uint32_t last_advertisement_time = 0;
 static bool frequency_dimmed = false;
 
+// Backward compatibility: provide defaults if not defined
+#ifndef CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS
+#define CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS 25  // 25% default
+#endif
+
+#ifndef CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_THRESHOLD_MS
+#define CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_THRESHOLD_MS 2000  // 2 seconds default
+#endif
+
 static void check_advertisement_frequency(void) {
     uint32_t current_time = k_uptime_get_32();
     
@@ -647,12 +670,13 @@ lv_obj_t *zmk_display_status_screen() {
     // Debug status widget (overlaps modifier area when no modifiers active)
     zmk_widget_debug_status_init(&debug_widget, screen);
     
-    // Debug widget re-enabled with ZMK-native battery approach
-    LOG_INF("Debug widget re-enabled with safer ZMK-native approach");
-    zmk_widget_debug_status_set_visible(&debug_widget, true);
-    if (debug_widget.debug_label) {
-        zmk_widget_debug_status_set_text(&debug_widget, "ZMK NATIVE BATTERY TEST");
-        LOG_INF("✅ Debug widget re-initialized for ZMK battery testing");
+    // Debug widget visibility controlled by CONFIG_PROSPECTOR_DEBUG_WIDGET
+    bool debug_enabled = IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET);
+    LOG_INF("Debug widget %s by CONFIG_PROSPECTOR_DEBUG_WIDGET", debug_enabled ? "ENABLED" : "DISABLED");
+    zmk_widget_debug_status_set_visible(&debug_widget, debug_enabled);
+    if (debug_widget.debug_label && debug_enabled) {
+        zmk_widget_debug_status_set_text(&debug_widget, "DEBUG: Scanner Ready");
+        LOG_INF("✅ Debug widget initialized for diagnostics");
     }
     
     // Initialize scanner battery widget with current status
