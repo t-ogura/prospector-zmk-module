@@ -406,14 +406,19 @@ config ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
 
 # Alias for common typo - prevents build errors in external configs
 config ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
-    int
+    int "WPM decay timeout (DEPRECATED - use ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS)"
     range 0 300
     default 0
     depends on ZMK_STATUS_ADVERTISEMENT
     help
-      Alias for ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS.
-      This handles common typo (WMP instead of WPM) in external configurations.
+      DEPRECATED: This is a typo alias for ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS.
       Please use ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS instead.
+      
+      This setting handles the common typo (WMP instead of WPM) found in external
+      keyboard configurations to prevent build errors.
+      
+      This alias will be removed in future versions. Please update your configuration
+      to use the correct setting name: ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
 
 config PROSPECTOR_DEBUG_WIDGET
     bool "Enable debug widget for diagnostics"

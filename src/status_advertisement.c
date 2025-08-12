@@ -47,8 +47,11 @@ static uint32_t wpm_window_keys = 0;    // Keys in current window
 #endif
 
 // Handle common typo: WMP instead of WPM
+// Priority: Use WPM if set, otherwise fallback to WMP if set, otherwise default
 #ifdef CONFIG_ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
-#ifndef CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
+#if CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS == 0 && CONFIG_ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS != 0
+// If WPM is default (0) but WMP has a value, use WMP value
+#undef CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
 #define CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS CONFIG_ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
 #endif
 #endif
