@@ -116,6 +116,7 @@ config PROSPECTOR_MAX_LAYERS
       Maximum number of layers to display in the layer status widget (layers 0 to N-1).
       Default is 6 layers (0-5). Increase if your keyboard has more layers.
       Range is 4-10 layers. Display shows layers 0 through (MAX_LAYERS-1).
+      This setting only applies to scanner mode and is ignored for keyboard builds.
 
 config PROSPECTOR_SCANNER_TIMEOUT_MS
     int "Scanner timeout in milliseconds"
@@ -402,6 +403,17 @@ config ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
       - 0: Auto-calculate (recommended) - 2x window size
       - 30: Manual 30-second timeout
       - 120: Manual 2-minute timeout
+
+# Alias for common typo - prevents build errors in external configs
+config ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
+    int
+    range 0 300
+    default 0
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Alias for ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS.
+      This handles common typo (WMP instead of WPM) in external configurations.
+      Please use ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS instead.
 
 config PROSPECTOR_DEBUG_WIDGET
     bool "Enable debug widget for diagnostics"

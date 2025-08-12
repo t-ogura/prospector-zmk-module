@@ -46,6 +46,13 @@ static uint32_t wpm_window_keys = 0;    // Keys in current window
 #define CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS 0  // Auto-calculate default
 #endif
 
+// Handle common typo: WMP instead of WPM
+#ifdef CONFIG_ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
+#ifndef CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
+#define CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS CONFIG_ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
+#endif
+#endif
+
 // Calculate window parameters from Kconfig
 #define WPM_WINDOW_MS (CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS * 1000)
 #define WPM_WINDOW_MULTIPLIER ((CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS > 0) ? \
