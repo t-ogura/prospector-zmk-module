@@ -33,6 +33,8 @@
 static uint32_t key_press_count = 0;
 static uint32_t wpm_start_time = 0;
 static uint8_t current_wpm = 0;
+static uint32_t wpm_window_start = 0;  // Rolling window start time
+static uint32_t wpm_window_keys = 0;    // Keys in current window
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -97,24 +99,38 @@ static int position_state_listener(const zmk_event_t *eh) {
             LOG_INF("⚡ ACTIVITY: Switched to ACTIVE mode - now using %dms intervals (10Hz)", ACTIVE_UPDATE_INTERVAL_MS);
         }
         
-        // Custom WPM calculation
+        // Custom WPM calculation with rolling window (60 second window)
         key_press_count++;
-        if (wpm_start_time == 0) {
-            wpm_start_time = now;
+        
+        // Initialize or reset rolling window if needed
+        if (wpm_window_start == 0 || (now - wpm_window_start) > 60000) {
+            wpm_window_start = now;
+            wpm_window_keys = 0;
         }
         
-        // Calculate WPM every 5 key presses for more responsive updates
-        if (key_press_count % 5 == 0 || (key_press_count % 2 == 0 && key_press_count <= 10)) {
-            uint32_t elapsed_ms = now - wpm_start_time;
-            if (elapsed_ms > 2000) { // At least 2 seconds of data for quicker response
-                // Correct WPM calculation: Words per minute (5 chars = 1 word)
-                // WPM = (key_presses ÷ 5 chars/word * 60_seconds) / elapsed_seconds
-                uint32_t elapsed_seconds = elapsed_ms / 1000;
-                if (elapsed_seconds > 0) {
-                    current_wpm = (key_press_count * 60) / (elapsed_seconds * 5); // Divide by 5 for words
-                    if (current_wpm > 255) current_wpm = 255; // Cap at 255
+        wpm_window_keys++;
+        
+        // Calculate WPM based on rolling 60-second window
+        uint32_t window_elapsed_ms = now - wpm_window_start;
+        if (window_elapsed_ms >= 2000) { // Need at least 2 seconds
+            // Calculate WPM: (keys * 60 seconds) / (elapsed_seconds * 5 chars/word)
+            // Simplified: (keys * 12) / elapsed_seconds
+            uint32_t window_elapsed_seconds = window_elapsed_ms / 1000;
+            if (window_elapsed_seconds > 0) {
+                // Use rolling window keys for more accurate recent WPM
+                uint32_t new_wpm = (wpm_window_keys * 12) / window_elapsed_seconds;
+                
+                // Smooth transition to avoid jumps
+                if (current_wpm == 0) {
+                    current_wpm = new_wpm;
+                } else {
+                    // Weighted average: 70% new, 30% old
+                    current_wpm = (new_wpm * 7 + current_wpm * 3) / 10;
                 }
-                LOG_DBG("📊 WPM calculated: %d (keys: %d, elapsed: %ds)", current_wpm, key_press_count, elapsed_seconds);
+                
+                if (current_wpm > 255) current_wpm = 255;
+                LOG_DBG("📊 WPM rolling window: %d (window keys: %d, elapsed: %ds)", 
+                        current_wpm, wpm_window_keys, window_elapsed_seconds);
             }
         }
         
@@ -280,45 +296,27 @@ static void build_manufacturer_payload(void) {
     // Build 26-byte structured manufacturer data
     memset(&manufacturer_data, 0, sizeof(manufacturer_data));
     
-    // Check if WPM should be reset (no activity for 3 minutes) or recalculated
+    // Apply WPM decay based on inactivity
     uint32_t now = k_uptime_get_32();
-    if (wpm_start_time > 0) {
-        if ((now - last_activity_time) > (3 * 60 * 1000)) {
-            // Reset WPM calculation after 3 minutes of inactivity
-            current_wpm = 0;
-            key_press_count = 0;
-            wpm_start_time = 0;
-            LOG_DBG("📊 WPM reset due to inactivity");
-        } else {
-            // Enhanced WPM calculation with aggressive decay during idle periods
-            uint32_t elapsed_ms = now - wpm_start_time;
-            uint32_t time_since_activity = now - last_activity_time;
-            
-            if (elapsed_ms > 2000) { // At least 2 seconds of data
-                uint32_t elapsed_seconds = elapsed_ms / 1000;
-                if (elapsed_seconds > 0) {
-                    // Calculate base WPM
-                    uint32_t base_wpm = (key_press_count * 60) / (elapsed_seconds * 5);
-                    
-                    // Apply aggressive decay for idle periods (much faster WPM decline)
-                    if (time_since_activity > 5000) {  // After 5 seconds of inactivity
-                        // Simple linear decay: drops to ~0 after 30 seconds of idle
-                        float idle_seconds = (time_since_activity - 5000) / 1000.0f;
-                        float decay_factor = 1.0f - (idle_seconds / 25.0f);  // Linear decay over 25s
-                        if (decay_factor < 0.0f) decay_factor = 0.0f;
-                        
-                        current_wpm = (uint8_t)(base_wpm * decay_factor);
-                        LOG_DBG("📊 WPM with decay: base=%d, idle=%.1fs, decay=%.3f, final=%d", 
-                                base_wpm, idle_seconds + 5.0f, decay_factor, current_wpm);
-                    } else {
-                        // Normal calculation when actively typing or recently active
-                        current_wpm = base_wpm;
-                        LOG_DBG("📊 WPM active: %d", current_wpm);
-                    }
-                    
-                    if (current_wpm > 255) current_wpm = 255;
-                }
-            }
+    uint32_t time_since_activity = now - last_activity_time;
+    
+    if (time_since_activity > (60 * 1000)) {
+        // Reset WPM after 60 seconds of complete inactivity
+        current_wpm = 0;
+        wpm_window_keys = 0;
+        wpm_window_start = 0;
+        LOG_DBG("📊 WPM reset due to 60s inactivity");
+    } else if (time_since_activity > 5000 && current_wpm > 0) {
+        // Apply smooth decay after 5 seconds of inactivity
+        float idle_seconds = (time_since_activity - 5000) / 1000.0f;
+        float decay_factor = 1.0f - (idle_seconds / 30.0f);  // Linear decay over 30s
+        if (decay_factor < 0.0f) decay_factor = 0.0f;
+        
+        // Apply decay to current WPM
+        uint8_t decayed_wpm = (uint8_t)(current_wpm * decay_factor);
+        if (decayed_wpm != current_wpm) {
+            LOG_DBG("📊 WPM decay: %d -> %d (idle: %.1fs)", current_wpm, decayed_wpm, idle_seconds + 5.0f);
+            current_wpm = decayed_wpm;
         }
     }
     
