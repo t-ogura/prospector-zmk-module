@@ -389,14 +389,19 @@ config ZMK_STATUS_ADV_WPM_WINDOW_SECONDS
 
 config ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
     int "WPM decay timeout in seconds"
-    range 30 300
+    range 0 300
     default 0
     depends on ZMK_STATUS_ADVERTISEMENT
     help
       Time after which WPM completely resets due to inactivity.
       Set to 0 to auto-calculate as 2x the window size (recommended).
-      Manual values: 30-300 seconds for custom timeout behavior.
+      Manual values: 10-300 seconds for custom timeout behavior.
       Default 0 = auto (60s for 30s window, 20s for 10s window, etc.)
+      
+      Examples:
+      - 0: Auto-calculate (recommended) - 2x window size
+      - 30: Manual 30-second timeout
+      - 120: Manual 2-minute timeout
 
 config PROSPECTOR_DEBUG_WIDGET
     bool "Enable debug widget for diagnostics"

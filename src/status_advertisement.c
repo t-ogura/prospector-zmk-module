@@ -48,10 +48,14 @@ static uint32_t wpm_window_keys = 0;    // Keys in current window
 
 // Calculate window parameters from Kconfig
 #define WPM_WINDOW_MS (CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS * 1000)
-#define WPM_WINDOW_MULTIPLIER (60 / CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS)  // Auto-calculate multiplier
+#define WPM_WINDOW_MULTIPLIER ((CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS > 0) ? \
+                              (60 / CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS) : 2)  // Auto-calculate multiplier, fallback to 2
+// Calculate decay timeout: auto (2x window) or manual
 #define WPM_DECAY_TIMEOUT_MS ((CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS == 0) ? \
                               (WPM_WINDOW_MS * 2) : \
-                              (CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS * 1000))
+                              ((CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS >= 10) ? \
+                               (CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS * 1000) : \
+                               (WPM_WINDOW_MS * 2)))
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
