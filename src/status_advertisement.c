@@ -36,6 +36,10 @@ static uint8_t current_wpm = 0;
 static uint32_t wpm_window_start = 0;  // Rolling window start time
 static uint32_t wpm_window_keys = 0;    // Keys in current window
 
+// WPM calculation window size in milliseconds (30 seconds = more responsive)
+#define WPM_WINDOW_MS 30000  // 30 seconds window
+#define WPM_WINDOW_MULTIPLIER 2  // Multiply by 2 for 30s window (60/30 = 2)
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
@@ -99,26 +103,26 @@ static int position_state_listener(const zmk_event_t *eh) {
             LOG_INF("⚡ ACTIVITY: Switched to ACTIVE mode - now using %dms intervals (10Hz)", ACTIVE_UPDATE_INTERVAL_MS);
         }
         
-        // Custom WPM calculation with rolling window (60 second window)
+        // Custom WPM calculation with rolling window (configurable window size)
         key_press_count++;
         
         // Initialize or reset rolling window if needed
-        if (wpm_window_start == 0 || (now - wpm_window_start) > 60000) {
+        if (wpm_window_start == 0 || (now - wpm_window_start) > WPM_WINDOW_MS) {
             wpm_window_start = now;
             wpm_window_keys = 0;
         }
         
         wpm_window_keys++;
         
-        // Calculate WPM based on rolling 60-second window
+        // Calculate WPM based on rolling window
         uint32_t window_elapsed_ms = now - wpm_window_start;
         if (window_elapsed_ms >= 2000) { // Need at least 2 seconds
             // Calculate WPM: (keys * 60 seconds) / (elapsed_seconds * 5 chars/word)
-            // Simplified: (keys * 12) / elapsed_seconds
+            // With window multiplier: (keys * 12 * multiplier) / elapsed_seconds
             uint32_t window_elapsed_seconds = window_elapsed_ms / 1000;
             if (window_elapsed_seconds > 0) {
                 // Use rolling window keys for more accurate recent WPM
-                uint32_t new_wpm = (wpm_window_keys * 12) / window_elapsed_seconds;
+                uint32_t new_wpm = (wpm_window_keys * 12 * WPM_WINDOW_MULTIPLIER) / window_elapsed_seconds;
                 
                 // Smooth transition to avoid jumps
                 if (current_wpm == 0) {
@@ -300,22 +304,24 @@ static void build_manufacturer_payload(void) {
     uint32_t now = k_uptime_get_32();
     uint32_t time_since_activity = now - last_activity_time;
     
-    if (time_since_activity > (60 * 1000)) {
-        // Reset WPM after 60 seconds of complete inactivity
+    if (time_since_activity > (WPM_WINDOW_MS * 2)) {
+        // Reset WPM after 2x window timeout of complete inactivity (60s for 30s window)
         current_wpm = 0;
         wpm_window_keys = 0;
         wpm_window_start = 0;
-        LOG_DBG("📊 WPM reset due to 60s inactivity");
+        LOG_DBG("📊 WPM reset due to %dms inactivity (2x window timeout)", WPM_WINDOW_MS * 2);
     } else if (time_since_activity > 5000 && current_wpm > 0) {
         // Apply smooth decay after 5 seconds of inactivity
         float idle_seconds = (time_since_activity - 5000) / 1000.0f;
-        float decay_factor = 1.0f - (idle_seconds / 30.0f);  // Linear decay over 30s
+        // Adjust decay rate for configurable window (faster decay for shorter window)
+        float decay_factor = 1.0f - (idle_seconds / (WPM_WINDOW_MS / 1000.0f));
         if (decay_factor < 0.0f) decay_factor = 0.0f;
         
         // Apply decay to current WPM
         uint8_t decayed_wpm = (uint8_t)(current_wpm * decay_factor);
         if (decayed_wpm != current_wpm) {
-            LOG_DBG("📊 WPM decay: %d -> %d (idle: %.1fs)", current_wpm, decayed_wpm, idle_seconds + 5.0f);
+            LOG_DBG("📊 WPM decay: %d -> %d (idle: %.1fs, window: %ds)", 
+                    current_wpm, decayed_wpm, idle_seconds + 5.0f, WPM_WINDOW_MS / 1000);
             current_wpm = decayed_wpm;
         }
     }
