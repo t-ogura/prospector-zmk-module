@@ -371,6 +371,33 @@ config PROSPECTOR_BATTERY_UPDATE_INTERVAL_S
       Battery events will still trigger immediate updates.
       Note: This is a fallback mechanism - battery events should provide immediate updates.
 
+# WPM (Words Per Minute) Configuration
+config ZMK_STATUS_ADV_WPM_WINDOW_SECONDS
+    int "WPM calculation window in seconds"
+    range 5 120
+    default 30
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Time window for WPM (Words Per Minute) calculation in seconds.
+      Shorter windows (5-15s) provide more responsive updates to current typing speed.
+      Longer windows (30-60s) provide more stable, averaged WPM values.
+      Default is 30 seconds. The multiplier is automatically calculated as (60 / window).
+      Examples:
+      - 10 seconds: Very responsive, 6x multiplier
+      - 30 seconds: Balanced, 2x multiplier (default)
+      - 60 seconds: Traditional 1-minute WPM, 1x multiplier
+
+config ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
+    int "WPM decay timeout in seconds"
+    range 30 300
+    default 0
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Time after which WPM completely resets due to inactivity.
+      Set to 0 to auto-calculate as 2x the window size (recommended).
+      Manual values: 30-300 seconds for custom timeout behavior.
+      Default 0 = auto (60s for 30s window, 20s for 10s window, etc.)
+
 config PROSPECTOR_DEBUG_WIDGET
     bool "Enable debug widget for diagnostics"
     default n

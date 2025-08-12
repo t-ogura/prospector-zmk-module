@@ -36,9 +36,22 @@ static uint8_t current_wpm = 0;
 static uint32_t wpm_window_start = 0;  // Rolling window start time
 static uint32_t wpm_window_keys = 0;    // Keys in current window
 
-// WPM calculation window size in milliseconds (30 seconds = more responsive)
-#define WPM_WINDOW_MS 30000  // 30 seconds window
-#define WPM_WINDOW_MULTIPLIER 2  // Multiply by 2 for 30s window (60/30 = 2)
+// WPM calculation configuration - using Kconfig settings
+// Backward compatibility: provide defaults if Kconfig values not defined
+#ifndef CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS
+#define CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS 30  // 30 seconds default
+#endif
+
+#ifndef CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
+#define CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS 0  // Auto-calculate default
+#endif
+
+// Calculate window parameters from Kconfig
+#define WPM_WINDOW_MS (CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS * 1000)
+#define WPM_WINDOW_MULTIPLIER (60 / CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS)  // Auto-calculate multiplier
+#define WPM_DECAY_TIMEOUT_MS ((CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS == 0) ? \
+                              (WPM_WINDOW_MS * 2) : \
+                              (CONFIG_ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS * 1000))
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -133,8 +146,9 @@ static int position_state_listener(const zmk_event_t *eh) {
                 }
                 
                 if (current_wpm > 255) current_wpm = 255;
-                LOG_DBG("📊 WPM rolling window: %d (window keys: %d, elapsed: %ds)", 
-                        current_wpm, wpm_window_keys, window_elapsed_seconds);
+                LOG_DBG("📊 WPM rolling window: %d (keys: %d, elapsed: %ds, window: %ds, mult: %dx)", 
+                        current_wpm, wpm_window_keys, window_elapsed_seconds,
+                        CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS, WPM_WINDOW_MULTIPLIER);
             }
         }
         
@@ -304,12 +318,14 @@ static void build_manufacturer_payload(void) {
     uint32_t now = k_uptime_get_32();
     uint32_t time_since_activity = now - last_activity_time;
     
-    if (time_since_activity > (WPM_WINDOW_MS * 2)) {
-        // Reset WPM after 2x window timeout of complete inactivity (60s for 30s window)
+    if (time_since_activity > WPM_DECAY_TIMEOUT_MS) {
+        // Reset WPM after configurable timeout of complete inactivity
         current_wpm = 0;
         wpm_window_keys = 0;
         wpm_window_start = 0;
-        LOG_DBG("📊 WPM reset due to %dms inactivity (2x window timeout)", WPM_WINDOW_MS * 2);
+        LOG_DBG("📊 WPM reset due to %dms inactivity (window: %ds, timeout: %ds)", 
+                WPM_DECAY_TIMEOUT_MS, CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS, 
+                WPM_DECAY_TIMEOUT_MS / 1000);
     } else if (time_since_activity > 5000 && current_wpm > 0) {
         // Apply smooth decay after 5 seconds of inactivity
         float idle_seconds = (time_since_activity - 5000) / 1000.0f;
@@ -320,8 +336,9 @@ static void build_manufacturer_payload(void) {
         // Apply decay to current WPM
         uint8_t decayed_wpm = (uint8_t)(current_wpm * decay_factor);
         if (decayed_wpm != current_wpm) {
-            LOG_DBG("📊 WPM decay: %d -> %d (idle: %.1fs, window: %ds)", 
-                    current_wpm, decayed_wpm, idle_seconds + 5.0f, WPM_WINDOW_MS / 1000);
+            LOG_DBG("📊 WPM decay: %d -> %d (idle: %.1fs, window: %ds, multiplier: %d)", 
+                    current_wpm, decayed_wpm, idle_seconds + 5.0f, 
+                    CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS, WPM_WINDOW_MULTIPLIER);
             current_wpm = decayed_wpm;
         }
     }
@@ -648,6 +665,12 @@ static int init_prospector_status(const struct device *dev) {
 #else
     LOG_INF("⚙️ PROSPECTOR: Fixed advertisement interval: %dms", CONFIG_ZMK_STATUS_ADV_INTERVAL_MS);
 #endif
+    
+    // Log WPM configuration
+    LOG_INF("📊 WPM: Window=%ds, Multiplier=%dx, Decay=%ds", 
+            CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS, 
+            WPM_WINDOW_MULTIPLIER, 
+            WPM_DECAY_TIMEOUT_MS / 1000);
     
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     LOG_INF("Prospector: Peripheral device - advertising disabled to preserve split communication");
