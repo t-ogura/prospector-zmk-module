@@ -14,7 +14,7 @@ extern "C" {
 #endif
 
 #define RSSI_SMOOTHING_SAMPLES 5  // Moving average window size for RSSI
-#define RATE_SMOOTHING_SAMPLES 3  // Reduced window size for faster response to rate changes
+#define RATE_SMOOTHING_SAMPLES 5  // Increased window size for more stable rate display
 
 struct zmk_widget_signal_status {
     lv_obj_t *obj;

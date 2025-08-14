@@ -145,8 +145,9 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
     if (widget->last_display_update > 0) {
         uint32_t interval_ms = now - widget->last_display_update;
         
-        // Update rate calculation if enough time has passed (500ms minimum for responsiveness)
-        if (interval_ms >= 500) {
+        // Update rate calculation with longer window for stability (5 seconds minimum)
+        // This provides more stable readings, especially in IDLE mode
+        if (interval_ms >= 5000) {
             if (widget->reception_count > 0) {
                 // Calculate average rate: receptions per second
                 current_rate_hz = (widget->reception_count * 1000.0f) / interval_ms;
@@ -160,7 +161,7 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
             widget->reception_count = 0; // Reset counter - this reception was already counted
             widget->last_display_update = now;
         }
-        // If less than 500ms, just increment reception count but don't recalculate rate
+        // If less than 5 seconds, just increment reception count but don't recalculate rate
     } else {
         // First reception - initialize more conservatively
         widget->last_rate_hz = 0.5f;  // Start with conservative 0.5Hz estimate
@@ -177,9 +178,9 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
     // Update RSSI value label with smoothed value
     lv_label_set_text_fmt(widget->rssi_label, "%ddBm", smoothed_rssi);
 
-    // Update reception rate label with actual rate (but limit display updates to 1Hz max)
+    // Update reception rate label with longer intervals for stability
     static uint32_t last_rate_display_update = 0;
-    if ((now - last_rate_display_update) >= 1000) {  // Limit rate display updates to 1Hz
+    if ((now - last_rate_display_update) >= 5000) {  // Limit rate display updates to 0.2Hz for stability
         if (widget->last_rate_hz > 0.1f) {  // Only show rate if > 0.1Hz
             char rate_text[16];
             int rate_int = (int)(widget->last_rate_hz * 10);  // Convert to tenths
@@ -349,8 +350,9 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
         // Always update rate calculation every second for accurate real-time display
         uint32_t time_since_last_calc = now - widget->last_display_update;
         
-        // Only update if at least 900ms has passed to avoid double counting
-        if (time_since_last_calc >= 900) {  // Slightly less than 1s to ensure we don't miss updates
+        // Update with 5-second window for balance of stability and responsiveness
+        // This reduces fluctuations while maintaining reasonable update speed
+        if (time_since_last_calc >= 5000) {  // 5-second calculation window
             if (widget->reception_count == 0) {
                 // No receptions in this period - IMMEDIATELY drop rate toward 0
                 // Use VERY aggressive decay for no reception periods (especially for IDLE mode)
@@ -366,7 +368,7 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
                 // Weight current measurement more heavily (80/20 instead of moving average)
                 widget->last_rate_hz = (current_rate * 0.8f) + (widget->last_rate_hz * 0.2f);
                 
-                LOG_INF("Periodic rate update: %d receptions in %dms = %.1fHz, smoothed to %.1fHz", 
+                LOG_INF("Periodic rate update (5s window): %d receptions in %dms = %.1fHz, smoothed to %.1fHz", 
                         widget->reception_count, time_since_last_calc, current_rate, widget->last_rate_hz);
             }
             
