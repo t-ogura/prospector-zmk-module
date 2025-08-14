@@ -346,21 +346,25 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
     
     // If signal is still active, check if we need to update rate calculation
     if (widget->signal_active) {
-        // Check if it's been more than 1 second since last rate calculation
+        // Always update rate calculation every second for accurate real-time display
         uint32_t time_since_last_calc = now - widget->last_display_update;
         
-        if (time_since_last_calc >= 1000) {  // 1 second or more
+        // Only update if at least 900ms has passed to avoid double counting
+        if (time_since_last_calc >= 900) {  // Slightly less than 1s to ensure we don't miss updates
             if (widget->reception_count == 0) {
-                // No receptions in this period - add 0.0Hz sample to drive rate toward 0
-                float zero_rate = 0.0f;
-                widget->last_rate_hz = calculate_smoothed_rate(widget, zero_rate);
+                // No receptions in this period - IMMEDIATELY drop rate toward 0
+                // Use a more aggressive decay for no reception periods
+                widget->last_rate_hz = widget->last_rate_hz * 0.3f;  // Quick decay when no reception
                 
-                LOG_INF("No reception in 1s interval - adding 0.0Hz sample, smoothed rate now %.1fHz", 
+                LOG_INF("No reception in 1s interval - decaying rate to %.1fHz", 
                         widget->last_rate_hz);
             } else {
                 // Calculate rate based on actual receptions in this period
                 float current_rate = (widget->reception_count * 1000.0f) / time_since_last_calc;
-                widget->last_rate_hz = calculate_smoothed_rate(widget, current_rate);
+                
+                // For non-zero rates, use less aggressive smoothing to be more responsive
+                // Weight current measurement more heavily (80/20 instead of moving average)
+                widget->last_rate_hz = (current_rate * 0.8f) + (widget->last_rate_hz * 0.2f);
                 
                 LOG_INF("Periodic rate update: %d receptions in %dms = %.1fHz, smoothed to %.1fHz", 
                         widget->reception_count, time_since_last_calc, current_rate, widget->last_rate_hz);
@@ -375,6 +379,7 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
             } else {
                 // Rate has declined to nearly zero
                 lv_label_set_text(widget->rate_label, "0.0Hz");
+                widget->last_rate_hz = 0.0f;  // Fully reset when reaching near-zero
             }
             
             // Reset for next measurement period
