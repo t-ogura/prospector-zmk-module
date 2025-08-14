@@ -129,10 +129,10 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
     // Calculate smoothed RSSI using moving average
     int8_t smoothed_rssi = calculate_smoothed_rssi(widget, rssi);
     
-    // Track reception for rate calculation
+    // Track reception for rate calculation (only count Prospector data receptions)
     widget->reception_count++;
     
-    // Track reception for rate calculation
+    // Track last update time for rate calculation
     widget->last_update_time = now;
     
     // Remove rate limiting - allow immediate display updates for responsive UI
@@ -160,10 +160,10 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
             widget->reception_count = 0; // Reset counter - this reception was already counted
             widget->last_display_update = now;
         }
-        // If less than 800ms, just increment reception count but don't recalculate rate
+        // If less than 500ms, just increment reception count but don't recalculate rate
     } else {
-        // First reception - initialize
-        widget->last_rate_hz = 1.0f;  // Assume 1Hz for first reception
+        // First reception - initialize more conservatively
+        widget->last_rate_hz = 0.5f;  // Start with conservative 0.5Hz estimate
         widget->reception_count = 1;  // Count this first reception
         widget->last_display_update = now;
     }
@@ -353,8 +353,8 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
         if (time_since_last_calc >= 900) {  // Slightly less than 1s to ensure we don't miss updates
             if (widget->reception_count == 0) {
                 // No receptions in this period - IMMEDIATELY drop rate toward 0
-                // Use a more aggressive decay for no reception periods
-                widget->last_rate_hz = widget->last_rate_hz * 0.3f;  // Quick decay when no reception
+                // Use VERY aggressive decay for no reception periods (especially for IDLE mode)
+                widget->last_rate_hz = widget->last_rate_hz * 0.1f;  // Very quick decay (90% reduction per second)
                 
                 LOG_INF("No reception in 1s interval - decaying rate to %.1fHz", 
                         widget->last_rate_hz);
@@ -371,7 +371,7 @@ void zmk_widget_signal_status_periodic_update(struct zmk_widget_signal_status *w
             }
             
             // Update rate display with current rate
-            if (widget->last_rate_hz > 0.1f) {
+            if (widget->last_rate_hz > 0.05f) {  // Lower threshold for better IDLE detection
                 char rate_text[16];
                 int rate_int = (int)(widget->last_rate_hz * 10);
                 snprintf(rate_text, sizeof(rate_text), "%d.%dHz", rate_int / 10, rate_int % 10);

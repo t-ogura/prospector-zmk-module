@@ -552,7 +552,13 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_connection_status_update(&connection_widget, kbd);
                 zmk_widget_layer_status_update(&layer_widget, kbd);
                 zmk_widget_modifier_status_update(&modifier_widget, kbd);
-                zmk_widget_signal_status_update(&signal_widget, kbd->rssi);
+                
+                // Only update signal/RX when we have valid Prospector data (WPM exists)
+                // This ensures RX rate reflects actual Prospector data reception, not all BLE traffic
+                if (kbd->data.wpm_value >= 0) {  // Valid WPM means we have Prospector data
+                    zmk_widget_signal_status_update(&signal_widget, kbd->rssi);
+                }
+                
                 zmk_widget_wpm_status_update(&wpm_widget, kbd);
                 
                 // Resume normal brightness control when keyboard is connected
