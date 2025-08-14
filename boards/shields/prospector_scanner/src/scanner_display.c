@@ -553,10 +553,28 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_layer_status_update(&layer_widget, kbd);
                 zmk_widget_modifier_status_update(&modifier_widget, kbd);
                 
-                // Only update signal/RX when we have valid Prospector data (WPM exists)
-                // This ensures RX rate reflects actual Prospector data reception, not all BLE traffic
-                if (kbd->data.wpm_value >= 0) {  // Valid WPM means we have Prospector data
+                // Only update signal/RX when we receive meaningful data updates
+                // Check if this is a real data update by monitoring multiple fields
+                // This prevents counting duplicate advertisements or scan responses
+                static uint8_t last_layer = 255;
+                static uint8_t last_wpm = 255;
+                static uint8_t last_battery = 255;
+                static uint8_t last_modifier = 255;
+                
+                bool data_changed = (kbd->data.active_layer != last_layer) ||
+                                   (kbd->data.wpm_value != last_wpm) ||
+                                   (kbd->data.battery_level != last_battery) ||
+                                   (kbd->data.modifier_flags != last_modifier);
+                
+                if (data_changed) {
+                    // Data actually changed - this is a real update from the keyboard
                     zmk_widget_signal_status_update(&signal_widget, kbd->rssi);
+                    
+                    // Remember last values for change detection
+                    last_layer = kbd->data.active_layer;
+                    last_wpm = kbd->data.wpm_value;
+                    last_battery = kbd->data.battery_level;
+                    last_modifier = kbd->data.modifier_flags;
                 }
                 
                 zmk_widget_wpm_status_update(&wpm_widget, kbd);

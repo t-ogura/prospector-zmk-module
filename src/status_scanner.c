@@ -130,8 +130,11 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
-    strncpy(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name) - 1);
-    keyboards[index].ble_name[sizeof(keyboards[index].ble_name) - 1] = '\0';
+    // Only update name if it changed
+    if (strncmp(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name)) != 0) {
+        strncpy(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name) - 1);
+        keyboards[index].ble_name[sizeof(keyboards[index].ble_name) - 1] = '\0';
+    }
     
     // Debug: Print current active slots
     if (is_new) {
@@ -198,6 +201,17 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
                index, role_str, keyboard_id);
     }
     
+    // Check if data actually changed (to avoid duplicate update events)
+    bool actual_data_change = false;
+    if (!is_new) {
+        // Compare key fields to detect actual changes
+        actual_data_change = (keyboards[index].data.battery_level != adv_data->battery_level) ||
+                            (keyboards[index].data.active_layer != adv_data->active_layer) ||
+                            (keyboards[index].data.wpm_value != adv_data->wpm_value) ||
+                            (keyboards[index].data.modifier_flags != adv_data->modifier_flags) ||
+                            (keyboards[index].data.profile_slot != adv_data->profile_slot);
+    }
+    
     // Update keyboard status
     keyboards[index].active = true;
     keyboards[index].last_seen = now;
@@ -228,7 +242,8 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
         printk("*** PROSPECTOR SCANNER: New %s device found: %s (slot %d) ***\n", role_str, adv_data->layer_name, index);
         LOG_INF("New %s device found: %s (slot %d)", role_str, adv_data->layer_name, index);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
-    } else {
+    } else if (actual_data_change) {
+        // Only notify if data actually changed
         const char *role_str = "UNKNOWN";
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL"; 
@@ -237,6 +252,9 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
         printk("*** PROSPECTOR SCANNER: %s device updated: %s, battery: %d%% ***\n", 
                role_str, adv_data->layer_name, adv_data->battery_level);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
+    } else {
+        // Data unchanged - just update last_seen timestamp silently
+        printk("*** SCANNER: Heartbeat from %s (no data change) ***\n", adv_data->layer_name);
     }
 }
 
