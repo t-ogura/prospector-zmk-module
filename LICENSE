@@ -1,6 +1,7 @@
 MIT License
 
-Copyright (c) 2024 carrefinho
+Copyright (c) 2024 carrefinho (Original Prospector Module)
+Copyright (c) 2025 Prospector ZMK Module Contributors (Enhanced Version)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +20,53 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+
+THIRD-PARTY COMPONENTS AND ATTRIBUTIONS
+
+This project includes or is inspired by the following third-party components:
+
+1. Original Prospector Hardware Platform by carrefinho
+   - Inspiration: Community-driven ZMK dongle/display platform
+   - Hardware Concept: Seeeduino XIAO BLE + Waveshare 1.69" LCD
+   - License: MIT License
+   - Usage: Hardware platform concept and initial display driver foundation
+
+2. YADS (Yet Another Dongle Screen)
+   - Copyright (c) 2024 Jan Fischer and contributors
+   - License: MIT License
+   - Source: https://github.com/janpfischer/zmk-dongle-screen
+   - Usage: UI widget design patterns, NerdFont symbol mappings, LVGL implementation inspiration
+
+3. ZMK Firmware
+   - Copyright (c) 2020-2024 The ZMK Contributors
+   - License: MIT License
+   - Source: https://github.com/zmkfirmware/zmk
+   - Usage: Core firmware platform, BLE APIs, configuration system
+
+4. NerdFonts
+   - Copyright (c) 2014-2024 Ryan L McIntyre and contributors
+   - License: MIT License
+   - Source: https://www.nerdfonts.com/
+   - Usage: Modifier key symbols (󰘴󰘶󰘵󰘳)
+
+5. Montserrat Font
+   - Copyright (c) 2011-2019 Julieta Ulanovsky and contributors
+   - License: SIL Open Font License 1.1
+   - Usage: Display typography
+
+6. Unscii Font
+   - Copyright: Public Domain
+   - Usage: Retro-style display typography
+
+================================================================================
+
+DEVELOPMENT ATTRIBUTION
+
+Lead Development: OpenAI Claude (Sonnet)
+Hardware Integration: Community feedback and real hardware validation
+Documentation: Comprehensive user guides and technical specifications
+
+This project represents significant independent development while respecting
+and acknowledging the innovative work of the broader ZMK and Prospector communities.
