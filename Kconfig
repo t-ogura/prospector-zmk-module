@@ -6,22 +6,14 @@ config PROSPECTOR_ROTATE_DISPLAY_180
     bool "Rotate the display 180 degrees"
     default n
 
-config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
-    bool "Use ambient light sensor for auto brightness"
-    default y
-
-config PROSPECTOR_FIXED_BRIGHTNESS
-    int "Fixed display brightness"
-    default 50
-    range 1 100
-    depends on !PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+# Old ALS configurations removed - moved to bottom of file with proper dependencies
 
 # New configuration options for Scanner Mode
 
 config ZMK_STATUS_ADVERTISEMENT
     bool "Enable ZMK Status Advertisement"
     default n
-    depends on BT
+    depends on ZMK_BLE
     help
       Enable broadcasting of keyboard status information via BLE Advertisement.
       This allows external devices to receive status updates without establishing
@@ -43,6 +35,54 @@ config ZMK_STATUS_ADV_KEYBOARD_NAME
     help
       Name to identify this keyboard in status advertisements.
       Limited to 8 characters including null terminator.
+
+config ZMK_STATUS_ADV_ACTIVITY_BASED
+    bool "Enable activity-based advertisement intervals"
+    default y
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Enable dynamic advertisement intervals based on keyboard activity.
+      High frequency during key presses, low frequency during idle periods.
+
+config ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS
+    int "Active advertisement interval in milliseconds"
+    range 100 1000
+    default 200
+    depends on ZMK_STATUS_ADV_ACTIVITY_BASED
+    help
+      Advertisement interval when keyboard is active (keys being pressed).
+      200ms = 5Hz for responsive status updates.
+
+config ZMK_STATUS_ADV_IDLE_INTERVAL_MS
+    int "Idle advertisement interval in milliseconds" 
+    range 500 300000
+    default 30000
+    depends on ZMK_STATUS_ADV_ACTIVITY_BASED
+    help
+      Advertisement interval when keyboard is idle.
+      30000ms (30 seconds) default for significant battery conservation.
+      Can be set up to 300000ms (5 minutes) for maximum battery saving.
+      Scanner timeout should be set longer than this value.
+
+config ZMK_STATUS_ADV_ACTIVITY_TIMEOUT_MS
+    int "Activity timeout in milliseconds"
+    range 1000 300000
+    default 5000
+    depends on ZMK_STATUS_ADV_ACTIVITY_BASED
+    help
+      Time to wait before switching from active to idle mode.
+      Can be set up to 300000ms (5 minutes) for extended active periods.
+      5000ms = 5 seconds default prevents frequent mode switching during brief pauses.
+
+config ZMK_STATUS_ADV_CENTRAL_SIDE
+    string "Physical side of central device in split keyboard"
+    default "RIGHT"
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Specify which physical side the central device is on.
+      RIGHT: Central is on the right side (default - most split keyboards)
+      LEFT: Central is on the left side (e.g. some keyboards like Sweep)
+      This determines the battery display position in scanner devices.
 
 config PROSPECTOR_MODE_SCANNER
     bool "Enable Prospector Scanner Mode"
@@ -66,3 +106,326 @@ config PROSPECTOR_MAX_KEYBOARDS
     depends on PROSPECTOR_MULTI_KEYBOARD
     help
       Maximum number of keyboards that can be tracked simultaneously.
+
+config PROSPECTOR_MAX_LAYERS
+    int "Maximum number of layers to display"
+    range 4 10
+    default 6
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Maximum number of layers to display in the layer status widget (layers 0 to N-1).
+      Default is 6 layers (0-5). Increase if your keyboard has more layers.
+      Range is 4-10 layers. Display shows layers 0 through (MAX_LAYERS-1).
+      This setting only applies to scanner mode and is ignored for keyboard builds.
+
+config PROSPECTOR_SCANNER_TIMEOUT_MS
+    int "Scanner timeout in milliseconds"
+    range 10000 600000
+    default 480000
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Time in milliseconds to wait before considering a keyboard as lost.
+      Default is 480000ms (8 minutes) - should be longer than keyboard idle interval.
+      Range is 10-600 seconds (10min max).
+
+config PROSPECTOR_SCANNER_IDLE_BRIGHTNESS_MS
+    int "Time before dimming display when no keyboard activity"
+    range 60000 600000
+    default 120000
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Time in milliseconds before dimming display when keyboard is idle.
+      Scanner will reduce brightness when no activity is detected.
+      Default is 120000ms (2 minutes). Range is 1-10 minutes.
+      Only applies when battery support is enabled.
+
+config PROSPECTOR_SCANNER_IDLE_BRIGHTNESS_PERCENT
+    int "Display brightness during scanner idle mode"
+    range 5 50
+    default 20
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Brightness percentage when scanner detects prolonged keyboard idle.
+      Low brightness saves battery while maintaining visibility.
+      Default is 20%. Range is 5-50%.
+
+config PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM
+    bool "Enable brightness dimming based on advertisement frequency"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Automatically dim display when keyboard advertisement frequency drops below 1Hz.
+      This provides immediate response to keyboard idle state changes.
+      Works independently of timeout-based dimming for better responsiveness.
+
+config PROSPECTOR_ADV_FREQUENCY_DIM_THRESHOLD_MS
+    int "Advertisement frequency threshold for dimming (milliseconds)"
+    range 1500 10000
+    default 2000
+    depends on PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM
+    help
+      Advertisement interval threshold above which display will dim.
+      Default is 2000ms (0.5Hz). When keyboard sends slower than this, display dims.
+      Should be longer than active interval but shorter than idle interval.
+
+config PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS
+    int "Brightness percentage when advertisement frequency is low"
+    range 5 60
+    default 25
+    depends on PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM
+    help
+      Display brightness when keyboard advertisement frequency is low.
+      Default is 25% for battery conservation while maintaining readability.
+      Range is 5-60%.
+
+config PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS
+    int "Brightness fade duration in milliseconds"
+    range 100 5000
+    default 1000
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Duration for smooth brightness transitions in milliseconds.
+      Default is 1000ms (1 second). Range is 100ms to 5 seconds.
+      Shorter duration = faster fade, longer duration = smoother fade.
+
+config PROSPECTOR_BRIGHTNESS_FADE_STEPS
+    int "Number of brightness fade steps"
+    range 5 50
+    default 10
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Number of intermediate steps for brightness fade transitions.
+      More steps = smoother fade but more CPU usage.
+      Default is 10 steps. Range is 5-50 steps.
+
+# Ambient Light Sensor Settings
+config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    bool "Enable ambient light sensor for automatic brightness"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Enable APDS9960 ambient light sensor for automatic brightness adjustment.
+      If disabled, uses fixed brightness mode.
+      Requires APDS9960 sensor connected to I2C pins (SDA=D4, SCL=D5).
+      Note: You must also enable SENSOR=y, APDS9960=y, and I2C=y in your config.
+
+config PROSPECTOR_ALS_MIN_BRIGHTNESS
+    int "Minimum brightness percentage"
+    range 1 95
+    default 10
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      Minimum brightness level in percentage (1-95%).
+      Display will never go darker than this value.
+      Default is 10% to keep display readable in darkness.
+
+config PROSPECTOR_ALS_MAX_BRIGHTNESS
+    int "Maximum brightness percentage"
+    range 10 100
+    default 60 if PROSPECTOR_BATTERY_SUPPORT
+    default 100
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      Maximum brightness level in percentage (10-100%).
+      Display will never go brighter than this value.
+      Default is 60% when battery operation enabled (to preserve battery life),
+      100% when USB powered only for maximum visibility in bright light.
+      Note: For separate battery/USB max values, use the options below instead.
+
+config PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY
+    int "Maximum brightness percentage when on battery power"
+    range 0 100
+    default 0
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Maximum brightness when running on battery power (0=disabled, 10-100%).
+      Set to 0 to use PROSPECTOR_ALS_MAX_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general max brightness for battery operation.
+      Example: Set to 50 for min-50% range when on battery.
+
+config PROSPECTOR_ALS_MAX_BRIGHTNESS_USB
+    int "Maximum brightness percentage when on USB power"
+    range 0 100
+    default 0
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Maximum brightness when running on USB power (0=disabled, 10-100%).
+      Set to 0 to use PROSPECTOR_ALS_MAX_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general max brightness for USB operation.
+      Example: Set to 90 for min-90% range when on USB power.
+
+config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
+    int "Ambient light sensor update interval in milliseconds"
+    range 500 10000
+    default 2000
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      How often to read the ambient light sensor in milliseconds.
+      Lower values = more responsive but higher power consumption.
+      Default is 2000ms (2 seconds). Range is 0.5-10 seconds.
+
+config PROSPECTOR_ALS_SENSOR_THRESHOLD
+    int "Light sensor threshold for maximum brightness"
+    range 50 500
+    default 100
+    depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    help
+      Light sensor value at which display reaches maximum brightness.
+      Lower values = more sensitive (reach 100% brightness sooner).
+      Higher values = less sensitive (need brighter light for 100%).
+      Default is 100. Try 150-200 if sensor seems too sensitive.
+
+config PROSPECTOR_FIXED_BRIGHTNESS
+    int "Fixed brightness percentage (when ALS disabled)"
+    range 10 100
+    default 60 if PROSPECTOR_BATTERY_SUPPORT
+    default 80
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Fixed brightness level when ambient light sensor is disabled.
+      Also used as fallback brightness when ALS sensor fails.
+      Default is 60% when battery operation enabled (to preserve battery life),
+      80% when USB powered only for good visibility.
+      Range is 10-100%.
+      Note: For separate battery/USB fixed values, use the options below instead.
+
+config PROSPECTOR_FIXED_BRIGHTNESS_BATTERY
+    int "Fixed brightness percentage when on battery power (ALS disabled)"
+    range 0 100
+    default 0
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Fixed brightness when running on battery power and ALS is disabled (0=disabled, 10-100%).
+      Set to 0 to use PROSPECTOR_FIXED_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general fixed brightness for battery operation.
+      Example: Set to 40 for constant 40% when on battery and ALS disabled.
+
+config PROSPECTOR_FIXED_BRIGHTNESS_USB
+    int "Fixed brightness percentage when on USB power (ALS disabled)"
+    range 0 100
+    default 0
+    depends on PROSPECTOR_MODE_SCANNER && PROSPECTOR_BATTERY_SUPPORT
+    help
+      Fixed brightness when running on USB power and ALS is disabled (0=disabled, 10-100%).
+      Set to 0 to use PROSPECTOR_FIXED_BRIGHTNESS setting instead.
+      When set to non-zero, overrides the general fixed brightness for USB operation.
+      Example: Set to 85 for constant 85% when on USB and ALS disabled.
+
+# Scanner Battery Support Configuration
+config PROSPECTOR_BATTERY_SUPPORT
+    bool "Enable scanner battery operation support"
+    default n
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Enable battery operation for Prospector scanner device.
+      Automatically detects battery presence via device tree.
+      Safe to enable even without battery hardware - will auto-hide if not detected.
+      Displays battery level and charging status in top-right corner.
+      Note: Requires ZMK_BATTERY_REPORTING and USB_DEVICE_STACK to be enabled separately.
+
+config PROSPECTOR_BATTERY_WIDGET_POSITION
+    string "Battery widget screen position"
+    default "TOP_RIGHT"
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Screen position for battery status widget.
+      Options: TOP_RIGHT, TOP_LEFT, BOTTOM_RIGHT, BOTTOM_LEFT
+      Default TOP_RIGHT for minimal UI disruption.
+
+config PROSPECTOR_BATTERY_WIDGET_HIDE_WHEN_FULL
+    bool "Hide battery widget when USB powered and fully charged"
+    default n
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Hide battery widget when USB connected and battery is 100% charged.
+      Shows charging icon during charging, hides when charging complete.
+      Keeps UI clean when external powered.
+
+config PROSPECTOR_BATTERY_SHOW_PERCENTAGE
+    bool "Show battery percentage text"
+    default y
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Show numerical percentage (e.g., "85%") next to battery icon.
+      Disable for minimal UI or space constraints.
+      Icon color coding still indicates battery level.
+
+config PROSPECTOR_BATTERY_DEMO_MODE
+    bool "Enable battery widget demo mode (no hardware required)"
+    default n
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      Force display battery widget even without battery hardware.
+      Shows demo battery status (75%, USB powered) for UI testing.
+      Useful for testing widget appearance and positioning.
+      DISABLE for production use.
+
+config PROSPECTOR_BATTERY_UPDATE_INTERVAL_S
+    int "Battery status update interval in seconds"
+    range 30 300
+    default 120
+    depends on PROSPECTOR_BATTERY_SUPPORT
+    help
+      How often to refresh battery status from hardware in seconds.
+      Lower values provide more responsive display but use more CPU.
+      Default is 120 seconds (2 minutes). Range is 30 seconds to 5 minutes.
+      Battery events will still trigger immediate updates.
+      Note: This is a fallback mechanism - battery events should provide immediate updates.
+
+# WPM (Words Per Minute) Configuration
+config ZMK_STATUS_ADV_WPM_WINDOW_SECONDS
+    int "WPM calculation window in seconds"
+    range 5 120
+    default 30
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Time window for WPM (Words Per Minute) calculation in seconds.
+      Shorter windows (5-15s) provide more responsive updates to current typing speed.
+      Longer windows (30-60s) provide more stable, averaged WPM values.
+      Default is 30 seconds. The multiplier is automatically calculated as (60 / window).
+      Examples:
+      - 10 seconds: Very responsive, 6x multiplier
+      - 30 seconds: Balanced, 2x multiplier (default)
+      - 60 seconds: Traditional 1-minute WPM, 1x multiplier
+
+config ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
+    int "WPM decay timeout in seconds"
+    range 0 300
+    default 0
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Time after which WPM completely resets due to inactivity.
+      Set to 0 to auto-calculate as 2x the window size (recommended).
+      Manual values: 10-300 seconds for custom timeout behavior.
+      Default 0 = auto (60s for 30s window, 20s for 10s window, etc.)
+      
+      Examples:
+      - 0: Auto-calculate (recommended) - 2x window size
+      - 30: Manual 30-second timeout
+      - 120: Manual 2-minute timeout
+
+# Alias for common typo - prevents build errors in external configs
+config ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
+    int "WPM decay timeout (DEPRECATED - use ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS)"
+    range 0 300
+    default 0
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      DEPRECATED: This is a typo alias for ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS.
+      Please use ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS instead.
+      
+      This setting handles the common typo (WMP instead of WPM) found in external
+      keyboard configurations to prevent build errors.
+      
+      This alias will be removed in future versions. Please update your configuration
+      to use the correct setting name: ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
+
+config PROSPECTOR_DEBUG_WIDGET
+    bool "Enable debug widget for diagnostics"
+    default n
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Enable debug status widget for diagnostics and troubleshooting.
+      Shows sensor status, battery monitoring info, and system debug messages.
+      Positioned in modifier area when no modifier keys are active.
+      ENABLE for development and debugging, DISABLE for production use.

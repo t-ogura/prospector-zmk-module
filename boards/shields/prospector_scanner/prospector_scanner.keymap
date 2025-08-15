@@ -12,10 +12,7 @@
         compatible = "zmk,keymap";
 
         default_layer {
-            // Scanner device with minimal input - single button for settings/display toggle
-            bindings = <
-                &kp C_AC_SETTINGS  // Settings key for scanner control
-            >;
+            bindings = <&none>;
         };
     };
 };

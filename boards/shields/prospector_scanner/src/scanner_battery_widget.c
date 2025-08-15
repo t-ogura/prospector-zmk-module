@@ -19,34 +19,54 @@ static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool conne
     if (!bar || !num || !nc_bar || !nc_num) return;
     
     if (connected) {
-        // Show battery bar and percentage
-        lv_obj_fade_out(nc_bar, 150, 0);
-        lv_obj_fade_out(nc_num, 150, 0);
-        lv_obj_fade_in(bar, 150, 250);
-        lv_obj_fade_in(num, 150, 250);
+        // Show battery bar and percentage (no animation to prevent flickering)
+        lv_obj_set_style_opa(nc_bar, 0, 0);
+        lv_obj_set_style_opa(nc_num, 0, 0);
+        lv_obj_set_style_opa(bar, 255, 0);
+        lv_obj_set_style_opa(num, 255, 0);
         
-        // Update battery level
-        lv_bar_set_value(bar, level, LV_ANIM_ON);
+        // Update battery level without animation
+        lv_bar_set_value(bar, level, LV_ANIM_OFF);
         lv_label_set_text_fmt(num, "%d", level);
         
-        // Set colors based on battery level
-        if (level < 20) {
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0xD3900F), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xE8AC11), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0x6E4E07), LV_PART_MAIN);
-            lv_obj_set_style_text_color(num, lv_color_hex(0xFFB802), 0);
+        // 5-level color-coded battery visualization (enhanced scheme)
+        if (level >= 80) {
+            // 80%+ Green
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x00CC66), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0x00FF66), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x003311), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0x00FF66), 0);
+        } else if (level >= 60) {
+            // 60-79% Light Green
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x66CC00), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0x99FF33), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x223300), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0x99FF33), 0);
+        } else if (level >= 40) {
+            // 40-59% Yellow
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0xFFCC00), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFFDD33), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x332200), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0xFFDD33), 0);
+        } else if (level >= 20) {
+            // 20-39% Orange (new level)
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFF9933), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x331100), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0xFF9933), 0);
         } else {
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0x202020), LV_PART_MAIN);
-            lv_obj_set_style_text_color(num, lv_color_hex(0xFFFFFF), 0);
+            // <20% Red (critical level)
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0xFF3333), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFF6666), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(0x330000), LV_PART_MAIN);
+            lv_obj_set_style_text_color(num, lv_color_hex(0xFF6666), 0);
         }
     } else {
-        // Show disconnected state
-        lv_obj_fade_out(bar, 150, 0);
-        lv_obj_fade_out(num, 150, 0);
-        lv_obj_fade_in(nc_bar, 150, 250);
-        lv_obj_fade_in(nc_num, 150, 250);
+        // Show disconnected state (no animation)
+        lv_obj_set_style_opa(bar, 0, 0);
+        lv_obj_set_style_opa(num, 0, 0);
+        lv_obj_set_style_opa(nc_bar, 255, 0);
+        lv_obj_set_style_opa(nc_num, 255, 0);
     }
 }
 
@@ -113,6 +133,8 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     lv_obj_set_style_pad_bottom(widget->obj, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(widget->obj, 16, LV_PART_MAIN);
     
+    // Central/Peripheral labels removed - cleaner display without positioning issues
+    
     // Create containers for Central and Peripheral devices
     // For now, create 2 containers (Central + 1 Peripheral)
     // This can be expanded later for more peripherals
@@ -132,24 +154,64 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
         return;
     }
     
-    LOG_INF("Updating scanner battery widget - device_role: %d, battery: %d%%", 
-            status->data.device_role, status->data.battery_level);
+    LOG_DBG("Battery widget update - Role:%d, Central:%d%%, Peripheral:[%d,%d,%d]", 
+            status->data.device_role, status->data.battery_level,
+            status->data.peripheral_battery[0], status->data.peripheral_battery[1], 
+            status->data.peripheral_battery[2]);
     
-    // Determine which container to update based on device role
-    int container_index = -1;
+    // Handle split keyboard display - check if any peripheral is connected
+    bool has_peripheral = (status->data.peripheral_battery[0] > 0 || 
+                          status->data.peripheral_battery[1] > 0 || 
+                          status->data.peripheral_battery[2] > 0);
     
-    if (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL || 
-        status->data.device_role == ZMK_DEVICE_ROLE_STANDALONE) {
-        container_index = 0; // First container for Central/Standalone
-    } else if (status->data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) {
-        container_index = 1; // Second container for Peripheral
+    if (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && has_peripheral) {
+        // Split keyboard: show both Central and Peripheral batteries
+        
+        // Container 0: Peripheral (Left side) - Left display for Left keyboard
+        lv_obj_t *peripheral_container = lv_obj_get_child(widget->obj, 0);
+        if (peripheral_container) {
+            set_battery_bar_value(peripheral_container, status->data.peripheral_battery[0], true);
+            // peripheral_battery[0] is always LEFT keyboard according to protocol
+            LOG_INF("✅ Split mode: Left=%d%%, Right=%d%%", 
+               status->data.peripheral_battery[0], status->data.battery_level);
+        }
+        
+        // Container 1: Central (Right side) - Right display for Right keyboard  
+        lv_obj_t *central_container = lv_obj_get_child(widget->obj, 1);
+        if (central_container) {
+            set_battery_bar_value(central_container, status->data.battery_level, true);
+        }
+    } else {
+        // Single device or Central without connected peripherals
+        LOG_INF("⚠️  Single mode: Central only %d%% (no peripheral connected)", 
+               status->data.battery_level);
+        
+        // Use first container for Central device
+        lv_obj_t *main_container = lv_obj_get_child(widget->obj, 0);
+        if (main_container) {
+            set_battery_bar_value(main_container, status->data.battery_level, true);
+        }
+        
+        // Clear the second container
+        lv_obj_t *other_container = lv_obj_get_child(widget->obj, 1);
+        if (other_container) {
+            set_battery_bar_value(other_container, 0, false);
+        }
+    }
+}
+
+void zmk_widget_scanner_battery_reset(struct zmk_widget_scanner_battery *widget) {
+    if (!widget || !widget->obj) {
+        return;
     }
     
-    if (container_index >= 0 && container_index < 2) {
-        lv_obj_t *container = lv_obj_get_child(widget->obj, container_index);
+    LOG_INF("Battery widget reset - clearing all displays");
+    
+    // Clear both containers (Central and Peripheral)
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *container = lv_obj_get_child(widget->obj, i);
         if (container) {
-            set_battery_bar_value(container, status->data.battery_level, true);
-            LOG_INF("Updated battery container %d with %d%%", container_index, status->data.battery_level);
+            set_battery_bar_value(container, 0, false);
         }
     }
 }
