@@ -369,10 +369,10 @@ CONFIG_ZMK_LOG_LEVEL_DBG=y
 ### Original Inspiration
 This project builds upon the innovative **Prospector** hardware platform:
 
-- **Original Prospector Project**: Community-driven ZMK dongle/display platform
+- **Original Prospector Project**: [prospector](https://github.com/carrefinho/prospector) by carrefinho
+- **Original Firmware**: [prospector-zmk-module](https://github.com/carrefinho/prospector-zmk-module)
 - **Hardware Design**: Seeeduino XIAO BLE + Waveshare 1.69" Round LCD concept
 - **Community**: ZMK ecosystem contributors and hardware designers
-- **Find Original Projects**: [GitHub Search - "prospector zmk"](https://github.com/search?q=prospector+zmk&type=repositories)
 
 ### Key Third-Party Integrations
 
