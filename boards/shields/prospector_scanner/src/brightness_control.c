@@ -469,6 +469,8 @@ static int brightness_control_init(void) {
     // APDS9960 is defined in the board overlay at I2C address 0x39
     printk("BRIGHTNESS: Looking for APDS9960 device in device tree...\n");
     
+    // Check if APDS9960 is actually compiled in
+#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
     // Use original Prospector method: get by compatible string
     als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
@@ -479,6 +481,13 @@ static int brightness_control_init(void) {
         set_brightness_pwm(fixed_brightness);
         return 0;
     }
+#else
+    LOG_WRN("APDS9960 not present in device tree - using fixed brightness");
+    uint8_t fixed_brightness = get_current_fixed_brightness();
+    LOG_WRN("Using fixed brightness: %d%% (power-aware)", fixed_brightness);
+    set_brightness_pwm(fixed_brightness);
+    return 0;
+#endif
     
     printk("BRIGHTNESS: APDS9960 device found, checking if ready...\n");
     

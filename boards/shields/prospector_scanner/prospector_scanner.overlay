@@ -54,8 +54,8 @@
             label = "Display Backlight";
         };
     };
-
-    // Ambient light sensor (optional)
+    
+    // Optional ambient light sensor alias
     aliases {
         als = &apds9960;
     };
@@ -152,19 +152,20 @@ disp_spi: &spi3 {
 };
 
 // I2C configuration with correct Prospector pinouts
+// I2C is always enabled for potential sensor support
 &i2c0 {
     status = "okay";
     pinctrl-0 = <&i2c0_default>;
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
     clock-frequency = <I2C_BITRATE_STANDARD>; // 100kHz - most compatible speed
-
+    
+    // APDS9960 sensor node - defined but runtime detection determines usage
+    // The sensor driver will be compiled in but won't fail if hardware is missing
     apds9960: apds9960@39 {
         compatible = "avago,apds9960";
-        status = "okay";
+        status = "okay";  // Keep as okay - runtime detection handles missing hardware
         reg = <0x39>;
-        // Remove interrupt pin - might cause issues if not connected
-        // int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 };
 
