@@ -2,6 +2,36 @@
 
 All notable changes to the prospector-zmk-module will be documented in this file.
 
+## [v1.1.1] - 2025-08-26
+
+### 🔒 Critical Safety Fixes
+- **BREAKING**: Fixed startup failures when APDS9960 sensor hardware is not connected
+- Added runtime sensor detection with graceful fallback to fixed brightness mode
+- Improved Kconfig conditional compilation to prevent driver initialization errors
+- Enhanced Device Tree configuration for optional hardware components
+
+### 🧹 Repository Optimization  
+- Removed 56,927 lines of unnecessary files (3D models, images, test files, CI/CD)
+- Eliminated GitHub Actions workflows (ZMK modules don't need independent builds)
+- Cleaned module structure to contain only essential ZMK functionality
+- Removed development documentation files (CLAUDE.md, ATTRIBUTION.md, etc.)
+
+### ⚙️ Technical Improvements
+- Added compile-time hardware detection using `DT_HAS_COMPAT_STATUS_OKAY`
+- Implemented safe fallback mechanisms for missing hardware
+- Enhanced error handling with comprehensive logging
+- Improved module structure following ZMK best practices
+
+### 📋 Breaking Changes
+- Default `CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n` for safety
+- Removed test configurations and build scripts
+- Repository structure significantly simplified
+
+### 🔧 Migration Guide
+- Users without APDS9960 hardware: No action needed (automatic safe mode)
+- Users with APDS9960 hardware: Set `CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y` in config
+- Update west.yml to point to v1.1.1 for the latest safety fixes
+
 ## [v1.1.0] - 2025-01-30
 
 ### Added
