@@ -1,12 +1,21 @@
 # Prospector ZMK Module
 
-**Version**: 1.1.0  
+**Version**: 1.1.1 - **CRITICAL SAFETY UPDATE**  
 **License**: MIT  
-**Status**: Stable Release  
+**Status**: Production Ready - Critical Fix Release  
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![ZMK Compatible](https://img.shields.io/badge/ZMK-compatible-blue)](https://zmk.dev/)
-[![Version](https://img.shields.io/badge/version-v1.1.0-brightgreen)](https://github.com/t-ogura/prospector-zmk-module/releases)
+[![Version](https://img.shields.io/badge/version-v1.1.1-critical-red)](https://github.com/t-ogura/prospector-zmk-module/releases)
+
+## 🚨 **URGENT: v1.1.1 Critical Safety Update**
+
+**⚠️ IMMEDIATE UPGRADE RECOMMENDED**: v1.1.0 users experiencing startup failures should upgrade immediately.
+
+**Issue Fixed**: Scanner devices without APDS9960 ambient light sensor were failing to boot.
+**Solution**: Automatic hardware detection with safe fallback modes implemented.
+
+👉 **[See Release Notes for Upgrade Instructions →](https://github.com/t-ogura/zmk-config-prospector/blob/main/docs/RELEASES.md#v111---critical-safety-update-2025-08-26)**
 
 **Prospector ZMK Module** provides advanced status monitoring capabilities for ZMK keyboards, enabling real-time BLE advertisement of keyboard status and professional scanner-based display functionality.
 
@@ -82,7 +91,7 @@ manifest:
       import: app/west.yml
     - name: prospector-zmk-module
       remote: prospector
-      revision: v1.1.0
+      revision: feature/v1.1.1-safety-fix
       path: modules/prospector-zmk-module
 ```
 
@@ -205,7 +214,12 @@ CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING=y
 # Core scanner features
 CONFIG_PROSPECTOR_MODE_SCANNER=y
 CONFIG_PROSPECTOR_MAX_KEYBOARDS=2
-CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+
+# v1.1.1 SAFETY: Ambient light sensor (disabled by default)
+# Only enable if you have APDS9960 hardware connected
+# CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+# CONFIG_SENSOR=y
+# CONFIG_APDS9960=y
 
 # Display customization
 CONFIG_PROSPECTOR_FIXED_BRIGHTNESS=80
