@@ -137,40 +137,10 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C configuration - always include for compilation compatibility
-// Runtime behavior controlled by CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+// I2C configuration - DISABLED by default to prevent boot failure
+// This ensures safe startup on devices without sensor hardware
 &i2c0 {
-    status = "okay";
-    pinctrl-0 = <&i2c0_default>;
-    pinctrl-1 = <&i2c0_sleep>;
-    pinctrl-names = "default", "sleep";
-    clock-frequency = <I2C_BITRATE_STANDARD>;
-    
-    // APDS9960 sensor always in device tree for compilation
-    apds9960: apds9960@39 {
-        compatible = "avago,apds9960";
-        status = "okay";
-        reg = <0x39>;
-        int-gpios = <&gpio0 28 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-    };
-};
-
-// I2C pinctrl configuration
-&pinctrl {
-    i2c0_default: i2c0_default {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL
-        };
-    };
-
-    i2c0_sleep: i2c0_sleep {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL
-            low-power-enable;
-        };
-    };
+    status = "disabled";  // Safe default - prevent forced I2C initialization
 };
 
 // PWM1 configuration for backlight (Pin 6 = P1.11)
