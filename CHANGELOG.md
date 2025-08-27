@@ -21,6 +21,10 @@ All notable changes to the prospector-zmk-module will be documented in this file
 - Implemented safe fallback mechanisms for missing hardware
 - Enhanced error handling with comprehensive logging
 - Improved module structure following ZMK best practices
+- **CRITICAL FIX (commit 2d4caae)**: Fixed boot failure on sensor-less devices
+  - Removed I2C force-enable from seeeduino_xiao_ble.overlay
+  - Moved I2C configuration to conditional sensor-specific overlay
+  - Ensures I2C is only initialized when sensor support is explicitly enabled
 
 ### 📋 Breaking Changes
 - Default `CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n` for safety
