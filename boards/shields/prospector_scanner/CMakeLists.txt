@@ -10,13 +10,9 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # Add include directory for fonts.h
   zephyr_library_include_directories(include)
   
-  # Conditional sensor overlay loading based on configuration
-  if(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
-    message(STATUS "Prospector: Ambient light sensor enabled - loading sensor overlay")
-    set(DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/seeeduino_xiao_ble-sensor.overlay")
-  else()
-    message(STATUS "Prospector: Ambient light sensor disabled - safe mode without I2C")
-  endif()
+  # Note: All overlay files in boards/ are automatically loaded by ZMK
+  # Sensor overlay (seeeduino_xiao_ble-sensor.overlay) provides I2C and sensor configuration
+  # Main overlay provides safe defaults with I2C disabled
   
   # Essential scanner sources
   zephyr_library_sources(src/scanner_display.c)

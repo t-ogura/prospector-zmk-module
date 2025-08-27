@@ -137,11 +137,8 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C configuration - EXPLICITLY DISABLED by default for safety  
-// This prevents I2C initialization failures when no sensor hardware is present
-&i2c0 {
-    status = "disabled";  // Explicitly disabled - prevents boot failure without sensor
-};
+// I2C configuration - board-specific overlay will override based on sensor config
+// Default is disabled for safety, sensor overlay enables conditionally
 
 // PWM1 configuration for backlight (Pin 6 = P1.11)
 &pwm1 {

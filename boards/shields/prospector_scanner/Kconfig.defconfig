@@ -67,17 +67,17 @@ config PWM
 config LED
     default y
 
-# I2C - only enabled when sensor support is requested AND sensor exists in device tree
+# I2C - only enabled when sensor support is requested
 config I2C
-    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR && DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-# Sensor driver support - conditionally enabled based on user config AND device tree
+# Sensor driver support - conditionally enabled based on user config
 config SENSOR
-    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR && DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-# APDS9960 driver - conditionally enabled based on user config AND device tree
+# APDS9960 driver - conditionally enabled based on user config
 config APDS9960
-    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR && DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
 # Ambient light sensor and brightness settings moved to main Kconfig
 # PROSPECTOR_MAX_LAYERS now defined in main Kconfig

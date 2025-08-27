@@ -41,9 +41,10 @@
     };
 };
 
-// Enable I2C with correct Prospector pinouts
+// Conditionally enable I2C based on user configuration
 &i2c0 {
-    status = "okay";
+    // Only enable I2C when sensor support is explicitly requested
+    status = IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR) ? "okay" : "disabled";
     pinctrl-0 = <&i2c0_default>;
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
@@ -52,7 +53,8 @@
     // APDS9960 ambient light sensor
     apds9960: apds9960@39 {
         compatible = "avago,apds9960";
-        status = "okay";
+        // Only enable sensor when support is requested
+        status = IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR) ? "okay" : "disabled";
         reg = <0x39>;
         int-gpios = <&gpio0 28 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; // Optional interrupt on D2
     };
