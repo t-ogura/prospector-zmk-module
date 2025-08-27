@@ -657,6 +657,7 @@ static void delayed_init_work_handler(struct k_work *work) {
 #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
     LOG_INF("🔧 ALS mode detected in delayed work");
     
+#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
     // Try to get APDS9960 device
     const struct device *als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
@@ -759,6 +760,11 @@ static void delayed_init_work_handler(struct k_work *work) {
     zmk_widget_debug_status_set_text(&debug_widget, success_buf);
     LOG_INF("✅ APDS9960 working: %d", als_val.val1);
     
+#else
+    LOG_WRN("APDS9960 not available in device tree - using fixed brightness");
+    zmk_widget_debug_status_set_text(&debug_widget, "ALS: No DT");
+#endif
+
 #else
     LOG_INF("🔧 Fixed brightness mode detected in delayed work");
     zmk_widget_debug_status_set_text(&debug_widget, "ALS: Disabled");

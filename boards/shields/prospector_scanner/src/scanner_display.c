@@ -56,7 +56,9 @@ static struct zmk_widget_wpm_status wpm_widget;
 struct zmk_widget_debug_status debug_widget;
 
 // Scanner's own battery status widget (top-right corner)
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 static struct zmk_widget_scanner_battery_status scanner_battery_widget;
+#endif
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 // Battery monitoring state - global to manage start/stop properly
