@@ -55,10 +55,8 @@
         };
     };
     
-    // Optional ambient light sensor alias
-    aliases {
-        als = &apds9960;
-    };
+    // Ambient light sensor alias - only defined by sensor overlay
+    // Default: no ALS alias to prevent device tree conflicts
 };
 
 // Disable default SPI2 to avoid conflicts
@@ -99,20 +97,8 @@
         };
     };
 
-    i2c0_default: i2c0_default {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
-        };
-    };
-
-    i2c0_sleep: i2c0_sleep {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
-            low-power-enable;
-        };
-    };
+    // I2C pinctrl moved to sensor-specific overlay
+    // Only defined when sensor support is enabled to prevent conflicts
 };
 
 // Use SPI3 with custom pinctrl (matches original adapter)
@@ -151,22 +137,10 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C configuration with correct Prospector pinouts
-// I2C is always enabled for potential sensor support
+// I2C configuration - EXPLICITLY DISABLED by default for safety  
+// This prevents I2C initialization failures when no sensor hardware is present
 &i2c0 {
-    status = "okay";
-    pinctrl-0 = <&i2c0_default>;
-    pinctrl-1 = <&i2c0_sleep>;
-    pinctrl-names = "default", "sleep";
-    clock-frequency = <I2C_BITRATE_STANDARD>; // 100kHz - most compatible speed
-    
-    // APDS9960 sensor node - defined but runtime detection determines usage
-    // The sensor driver will be compiled in but won't fail if hardware is missing
-    apds9960: apds9960@39 {
-        compatible = "avago,apds9960";
-        status = "okay";  // Keep as okay - runtime detection handles missing hardware
-        reg = <0x39>;
-    };
+    status = "disabled";  // Explicitly disabled - prevents boot failure without sensor
 };
 
 // PWM1 configuration for backlight (Pin 6 = P1.11)

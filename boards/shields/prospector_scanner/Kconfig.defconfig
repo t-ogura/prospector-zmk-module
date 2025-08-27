@@ -67,11 +67,11 @@ config PWM
 config LED
     default y
 
-# I2C is always enabled for sensor support
+# I2C - only enabled when sensor support is requested
 config I2C
-    default y
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-# Sensor driver support - always enabled for runtime detection
+# Sensor driver support - conditionally enabled based on user config
 config SENSOR
     default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 

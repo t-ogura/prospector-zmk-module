@@ -79,16 +79,11 @@ disp_spi: &spi3 {
    };
 };
 
-&i2c0 {
-   status = "okay";
-
-   apds9960: apds9960@39 {
-       compatible = "avago,apds9960";
-       status = "okay";
-       reg = <0x39>;
-       int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-   };
-};
+// I2C and sensor configuration moved to conditional overlay
+// seeeduino_xiao_ble-sensor.overlay for sensor-enabled builds only
+//
+// This file now only contains basic board configuration without I2C
+// to prevent boot failures when no sensor hardware is connected
 
 &pwm1 {
   status = "okay";
