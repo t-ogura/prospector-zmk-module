@@ -3,18 +3,38 @@
  *
  * SPDX-License-Identifier: MIT
  * 
- * Simple and Safe Brightness Control for Prospector v1.1.1
- * - CONFIG=n: Fixed brightness mode (safe, no sensor required)
- * - CONFIG=y: APDS9960 sensor mode (requires sensor connection!)
- * - Clear separation to prevent Device Tree linking issues
+ * Brightness Control DISABLED for v1.1.1 Safety Release
+ * - All brightness control features temporarily disabled
+ * - Prevents Device Tree linking issues
+ * - Restores v1.0.0 stability
+ * - Will be re-enabled in future version with better implementation
  */
 
+// BRIGHTNESS CONTROL COMPLETELY DISABLED
+// This file is compiled but all functions are no-ops
+// Prevents linking errors while maintaining build compatibility
+
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/led.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+// ========================================================================
+// BRIGHTNESS CONTROL COMPLETELY DISABLED FOR v1.1.1
+// ========================================================================
+// All brightness functionality is disabled to prevent Device Tree issues
+// Future versions will implement this safely
+
+static int brightness_control_init(void) {
+    LOG_INF("⚠️  Brightness Control: DISABLED in v1.1.1 for safety");
+    LOG_INF("✅ Display will use hardware default brightness");
+    LOG_INF("📝 Brightness control will return in future update");
+    return 0;  // Always succeed
+}
+
+SYS_INIT(brightness_control_init, APPLICATION, 99);
+
+#if 0  // DISABLE ALL BRIGHTNESS CODE
 
 // Fixed brightness mode implementation (safe default)
 #if !IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
@@ -139,3 +159,5 @@ static int brightness_control_init(void) {
 SYS_INIT(brightness_control_init, APPLICATION, 99); // Very low priority - init after everything else
 
 #endif // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+
+#endif // End of disabled brightness code
