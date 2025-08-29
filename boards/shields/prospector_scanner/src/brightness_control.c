@@ -22,14 +22,17 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static int brightness_control_init(void) {
     LOG_INF("🔆 Prospector Brightness: Fixed Mode");
     
-    // Get PWM LEDs device at runtime (safe)
-    const struct device *pwm_dev = device_get_binding("PWM_LEDS");
-    if (!pwm_dev) {
-        pwm_dev = device_get_binding("pwm_leds");
-    }
+    // Get PWM LEDs device safely with conditional Device Tree access
+    const struct device *pwm_dev = NULL;
+    
+#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+#endif
+    
     if (!pwm_dev || !device_is_ready(pwm_dev)) {
         LOG_ERR("PWM LEDs device not found or not ready");
-        return -ENODEV;
+        // Continue without brightness control - don't fail initialization
+        return 0;  // Return success to prevent boot failure
     }
     
     // Set fixed brightness
@@ -48,7 +51,7 @@ static int brightness_control_init(void) {
     return 0;
 }
 
-SYS_INIT(brightness_control_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(brightness_control_init, APPLICATION, 99); // Very low priority - init after everything else
 
 #else // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
 
@@ -59,27 +62,31 @@ SYS_INIT(brightness_control_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAU
 static struct k_work_delayable brightness_work;
 
 static void update_brightness(void) {
-    // Get devices at runtime - safe approach without Device Tree dependencies
-    const struct device *pwm_dev = device_get_binding("PWM_LEDS");
+    // Get devices with safe conditional Device Tree access
+    const struct device *pwm_dev = NULL;
+    const struct device *als_dev = NULL;
+    
+#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+#endif
+
+#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
+    als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
+#endif
+
     if (!pwm_dev) {
-        pwm_dev = device_get_binding("pwm_leds");
-    }
-    if (!pwm_dev) {
-        LOG_ERR("PWM LEDs device not found");
+        LOG_WRN("PWM LEDs device not found - skipping brightness update");
         return;
     }
     
-    // Try to find APDS9960 sensor by name - safe runtime approach
-    const struct device *als_dev = device_get_binding("APDS9960");
-    if (!als_dev) {
-        als_dev = device_get_binding("apds9960");
-    }
     if (!als_dev) {
         LOG_WRN("APDS9960 sensor not found - using fixed brightness");
         // Fallback to fixed brightness
-        int ret = led_set_brightness(pwm_dev, 0, 80);
-        if (ret < 0) {
-            LOG_ERR("Failed to set fixed brightness: %d", ret);
+        if (device_is_ready(pwm_dev)) {
+            int ret = led_set_brightness(pwm_dev, 0, 80);
+            if (ret < 0) {
+                LOG_ERR("Failed to set fixed brightness: %d", ret);
+            }
         }
         return;
     }
@@ -118,17 +125,17 @@ static void brightness_work_handler(struct k_work *work) {
 
 static int brightness_control_init(void) {
     LOG_INF("🌞 Prospector Brightness: Sensor Mode");
-    LOG_WRN("⚠️  SENSOR MODE: APDS9960 must be connected or device may not boot!");
     
-    // Initialize work
+    // Initialize work queue safely
     k_work_init_delayable(&brightness_work, brightness_work_handler);
     
-    // Start after delay
+    // Start brightness control with delay - non-blocking approach
     k_work_schedule(&brightness_work, K_SECONDS(3));
     
-    return 0;
+    LOG_INF("✅ Sensor mode brightness control initialized successfully");
+    return 0;  // Always return success - never fail boot
 }
 
-SYS_INIT(brightness_control_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(brightness_control_init, APPLICATION, 99); // Very low priority - init after everything else
 
 #endif // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
