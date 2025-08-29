@@ -18,11 +18,11 @@
 #include "debug_status_widget.h"
 // External debug widget from scanner_display.c
 extern struct zmk_widget_debug_status debug_widget;
-#define DEBUG_WIDGET_SET_TEXT(widget, text) zmk_widget_debug_status_set_text(widget, text)
-#define DEBUG_WIDGET_SET_VISIBLE(widget, visible) zmk_widget_debug_status_set_visible(widget, visible)
+#define DEBUG_WIDGET_SET_TEXT(text) zmk_widget_debug_status_set_text(&debug_widget, text)
+#define DEBUG_WIDGET_SET_VISIBLE(visible) zmk_widget_debug_status_set_visible(&debug_widget, visible)
 #else
-#define DEBUG_WIDGET_SET_TEXT(widget, text) do {} while(0)
-#define DEBUG_WIDGET_SET_VISIBLE(widget, visible) do {} while(0)
+#define DEBUG_WIDGET_SET_TEXT(text) do {} while(0)
+#define DEBUG_WIDGET_SET_VISIBLE(visible) do {} while(0)
 #endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -435,8 +435,8 @@ static void update_brightness(void) {
         // Only update ALS debug info if battery debug is not enabled
         snprintf(status_buf, sizeof(status_buf), "%s\nALS L%d→B%d%% M%d C%d/%d", 
                  battery_line, light_level, brightness, pwm_max, config_usb, config_battery);
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, status_buf);
-        DEBUG_WIDGET_SET_VISIBLE(&debug_widget, false);
+        DEBUG_WIDGET_SET_TEXT(status_buf);
+        DEBUG_WIDGET_SET_VISIBLE(false);
         #endif
     }
 }
@@ -513,8 +513,8 @@ static int brightness_control_init(void) {
         printk("BRIGHTNESS: Check hardware connections - SDA to D4, SCL to D5, VCC to 3.3V, GND to GND\n");
         
         // Debug display: Show sensor not ready status (persistent)
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: Device Not Ready");
-        DEBUG_WIDGET_SET_VISIBLE(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
+        DEBUG_WIDGET_SET_TEXT("ALS: Device Not Ready");
+        DEBUG_WIDGET_SET_VISIBLE(IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
         // No auto-hide - keep visible to show problem
         
         set_brightness_pwm(fixed_brightness);
@@ -552,8 +552,8 @@ static int brightness_control_init(void) {
             // Debug display: Show sensor working status (will update continuously)
             char status_buf[64];
             snprintf(status_buf, sizeof(status_buf), "ALS: OK (%d)", test_val.val1);
-            DEBUG_WIDGET_SET_TEXT(&debug_widget, status_buf);
-            DEBUG_WIDGET_SET_VISIBLE(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
+            DEBUG_WIDGET_SET_TEXT(status_buf);
+            DEBUG_WIDGET_SET_VISIBLE(IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
         } else {
             LOG_WRN("Failed to get initial light value: %d", ret);
             printk("BRIGHTNESS: Failed to get light value, error %d\n", ret);
@@ -568,14 +568,14 @@ static int brightness_control_init(void) {
                 // Debug display: Show fallback channel working
                 char status_buf[64];
                 snprintf(status_buf, sizeof(status_buf), "ALS: RED Ch (%d)", test_val.val1);
-                DEBUG_WIDGET_SET_TEXT(&debug_widget, status_buf);
-                DEBUG_WIDGET_SET_VISIBLE(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
+                DEBUG_WIDGET_SET_TEXT(status_buf);
+                DEBUG_WIDGET_SET_VISIBLE(IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
             } else {
                 // Debug display: Show channel read failed (persistent error)
                 char status_buf[64];
                 snprintf(status_buf, sizeof(status_buf), "ALS: Ch Read Fail (%d)", ret);
-                DEBUG_WIDGET_SET_TEXT(&debug_widget, status_buf);
-                DEBUG_WIDGET_SET_VISIBLE(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
+                DEBUG_WIDGET_SET_TEXT(status_buf);
+                DEBUG_WIDGET_SET_VISIBLE(IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
             }
         }
     } else {
@@ -586,8 +586,8 @@ static int brightness_control_init(void) {
         // Debug display: Show I2C communication failed (persistent critical error)
         char status_buf[64];
         snprintf(status_buf, sizeof(status_buf), "ALS: I2C Fail (%d)", ret);
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, status_buf);
-        DEBUG_WIDGET_SET_VISIBLE(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
+        DEBUG_WIDGET_SET_TEXT(status_buf);
+        DEBUG_WIDGET_SET_VISIBLE(IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
     }
     
     // Initialize work queues
@@ -601,8 +601,8 @@ static int brightness_control_init(void) {
     LOG_INF("🔧 About to access debug widget...");
     printk("BRIGHTNESS: Accessing debug widget\n");
     
-    DEBUG_WIDGET_SET_VISIBLE(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
-    DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: INIT TEST");
+    DEBUG_WIDGET_SET_VISIBLE(IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
+    DEBUG_WIDGET_SET_TEXT("ALS: INIT TEST");
     LOG_INF("🎯 Forced debug widget visible with test message");
     
     // Start brightness monitoring with delay to ensure display is ready
@@ -639,8 +639,8 @@ static int brightness_control_init(void) {
             
     // Test debug widget access even in fixed mode
     LOG_INF("🔧 Testing debug widget access in fixed mode...");
-    DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: DISABLED");
-    DEBUG_WIDGET_SET_VISIBLE(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
+    DEBUG_WIDGET_SET_TEXT("ALS: DISABLED");
+    DEBUG_WIDGET_SET_VISIBLE(IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
     LOG_INF("🔧 Debug widget should show ALS: DISABLED");
     
     return 0;
@@ -663,7 +663,7 @@ static void delayed_init_work_handler(struct k_work *work) {
     
     // Check PWM device
     if (!device_is_ready(pwm_leds_dev)) {
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, "PWM NOT READY");
+        DEBUG_WIDGET_SET_TEXT("PWM NOT READY");
         LOG_ERR("PWM LEDs device not ready in delayed work");
         return;
     }
@@ -675,7 +675,7 @@ static void delayed_init_work_handler(struct k_work *work) {
     // Try to get APDS9960 device
     const struct device *als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: No Device");
+        DEBUG_WIDGET_SET_TEXT("ALS: No Device");
         LOG_ERR("APDS9960 device not found");
         return;
     }
@@ -687,13 +687,13 @@ static void delayed_init_work_handler(struct k_work *work) {
 #if DT_NODE_EXISTS(DT_NODELABEL(i2c0))
         const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
         if (!i2c_dev) {
-            DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: No I2C Bus");
+            DEBUG_WIDGET_SET_TEXT("ALS: No I2C Bus");
             LOG_ERR("I2C0 bus device not found");
             return;
         }
         
         if (!device_is_ready(i2c_dev)) {
-            DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: I2C Not Ready");
+            DEBUG_WIDGET_SET_TEXT("ALS: I2C Not Ready");
             LOG_ERR("I2C0 bus not ready");
             return;
         }
@@ -724,7 +724,7 @@ static void delayed_init_work_handler(struct k_work *work) {
         
         if (!found_any_device) {
             LOG_WRN("❌ No I2C devices found on bus - possible hardware issue");
-            DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: No I2C Devices");
+            DEBUG_WIDGET_SET_TEXT("ALS: No I2C Devices");
         } else {
             // Try specific APDS9960 register read (WHO_AM_I register at 0x92)
             uint8_t who_am_i = 0;
@@ -733,22 +733,22 @@ static void delayed_init_work_handler(struct k_work *work) {
             if (who_ret == 0) {
                 LOG_INF("✅ APDS9960 WHO_AM_I register: 0x%02X (expected: 0xAB)", who_am_i);
                 if (who_am_i == 0xAB) {
-                    DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: ID OK, Init Fail");
+                    DEBUG_WIDGET_SET_TEXT("ALS: ID OK, Init Fail");
                 } else {
                     char id_buf[32];
                     snprintf(id_buf, sizeof(id_buf), "ALS: Wrong ID 0x%02X", who_am_i);
-                    DEBUG_WIDGET_SET_TEXT(&debug_widget, id_buf);
+                    DEBUG_WIDGET_SET_TEXT(id_buf);
                 }
             } else {
                 LOG_INF("❌ Failed to read APDS9960 WHO_AM_I register: %d", who_ret);
-                DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: Reg Read Fail");
+                DEBUG_WIDGET_SET_TEXT("ALS: Reg Read Fail");
             }
         }
         
         LOG_INF("Hardware check complete - device_is_ready() failed");
         return;
 #else
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: I2C Not Compiled");
+        DEBUG_WIDGET_SET_TEXT("ALS: I2C Not Compiled");
         LOG_ERR("I2C0 not compiled in - sensor support disabled");
         return;
 #endif
@@ -759,7 +759,7 @@ static void delayed_init_work_handler(struct k_work *work) {
     if (ret < 0) {
         char error_buf[32];
         snprintf(error_buf, sizeof(error_buf), "ALS: I2C Err %d", ret);
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, error_buf);
+        DEBUG_WIDGET_SET_TEXT(error_buf);
         LOG_ERR("APDS9960 sample fetch failed: %d", ret);
         return;
     }
@@ -769,7 +769,7 @@ static void delayed_init_work_handler(struct k_work *work) {
     if (ret < 0) {
         char error_buf[32];
         snprintf(error_buf, sizeof(error_buf), "ALS: Ch Err %d", ret);
-        DEBUG_WIDGET_SET_TEXT(&debug_widget, error_buf);
+        DEBUG_WIDGET_SET_TEXT(error_buf);
         LOG_ERR("APDS9960 channel get failed: %d", ret);
         return;
     }
@@ -777,17 +777,17 @@ static void delayed_init_work_handler(struct k_work *work) {
     // Success! Show sensor value
     char success_buf[32];
     snprintf(success_buf, sizeof(success_buf), "ALS: OK (%d)", als_val.val1);
-    DEBUG_WIDGET_SET_TEXT(&debug_widget, success_buf);
+    DEBUG_WIDGET_SET_TEXT(success_buf);
     LOG_INF("✅ APDS9960 working: %d", als_val.val1);
     
 #else
     LOG_WRN("APDS9960 not available in device tree - using fixed brightness");
-    DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: No DT");
+    DEBUG_WIDGET_SET_TEXT("ALS: No DT");
 #endif
 
 #else
     LOG_INF("🔧 Fixed brightness mode detected in delayed work");
-    DEBUG_WIDGET_SET_TEXT(&debug_widget, "ALS: Disabled");
+    DEBUG_WIDGET_SET_TEXT("ALS: Disabled");
 #endif
 }
 
