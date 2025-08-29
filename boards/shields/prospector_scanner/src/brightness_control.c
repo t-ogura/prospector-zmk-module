@@ -23,9 +23,12 @@ static int brightness_control_init(void) {
     LOG_INF("🔆 Prospector Brightness: Fixed Mode");
     
     // Get PWM LEDs device at runtime (safe)
-    const struct device *pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
-    if (!device_is_ready(pwm_dev)) {
-        LOG_ERR("PWM LEDs device not ready");
+    const struct device *pwm_dev = device_get_binding("PWM_LEDS");
+    if (!pwm_dev) {
+        pwm_dev = device_get_binding("pwm_leds");
+    }
+    if (!pwm_dev || !device_is_ready(pwm_dev)) {
+        LOG_ERR("PWM LEDs device not found or not ready");
         return -ENODEV;
     }
     
@@ -56,9 +59,30 @@ SYS_INIT(brightness_control_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAU
 static struct k_work_delayable brightness_work;
 
 static void update_brightness(void) {
-    // Get devices at runtime
-    const struct device *pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
-    const struct device *als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
+    // Get devices at runtime - safe approach without Device Tree dependencies
+    const struct device *pwm_dev = device_get_binding("PWM_LEDS");
+    if (!pwm_dev) {
+        pwm_dev = device_get_binding("pwm_leds");
+    }
+    if (!pwm_dev) {
+        LOG_ERR("PWM LEDs device not found");
+        return;
+    }
+    
+    // Try to find APDS9960 sensor by name - safe runtime approach
+    const struct device *als_dev = device_get_binding("APDS9960");
+    if (!als_dev) {
+        als_dev = device_get_binding("apds9960");
+    }
+    if (!als_dev) {
+        LOG_WRN("APDS9960 sensor not found - using fixed brightness");
+        // Fallback to fixed brightness
+        int ret = led_set_brightness(pwm_dev, 0, 80);
+        if (ret < 0) {
+            LOG_ERR("Failed to set fixed brightness: %d", ret);
+        }
+        return;
+    }
     
     if (!device_is_ready(pwm_dev) || !device_is_ready(als_dev)) {
         LOG_ERR("Devices not ready - pwm:%s als:%s", 
