@@ -203,11 +203,20 @@ config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     bool "Enable ambient light sensor for automatic brightness"
     default y
     depends on PROSPECTOR_MODE_SCANNER
+    select I2C
+    select SENSOR  
+    select APDS9960
     help
       Enable APDS9960 ambient light sensor for automatic brightness adjustment.
-      If disabled, uses fixed brightness mode.
-      Requires APDS9960 sensor connected to I2C pins (SDA=D4, SCL=D5).
-      Note: You must also enable SENSOR=y, APDS9960=y, and I2C=y in your config.
+      When enabled, automatically enables I2C, SENSOR framework, and APDS9960 driver.
+      When disabled, uses fixed brightness mode.
+      
+      Hardware connection (when enabled):
+      - SDA = D4 (P0.04)
+      - SCL = D5 (P0.05) 
+      - VCC = 3.3V, GND = GND
+      
+      User-friendly: Only this one setting needs to be changed!
 
 config PROSPECTOR_ALS_MIN_BRIGHTNESS
     int "Minimum brightness percentage"
