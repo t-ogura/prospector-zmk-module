@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 // Use Kconfig setting for maximum layers, fallback to 7 if not configured
+// Supports 4-10 layers (0-3 to 0-9) with automatic centering
 #ifdef CONFIG_PROSPECTOR_MAX_LAYERS
 #define MAX_LAYER_DISPLAY CONFIG_PROSPECTOR_MAX_LAYERS
 #else
@@ -23,7 +24,7 @@ extern "C" {
 struct zmk_widget_layer_status {
     lv_obj_t *obj;
     lv_obj_t *layer_title;                    // "Layer" title label
-    lv_obj_t *layer_labels[MAX_LAYER_DISPLAY]; // Individual layer number labels (0-6)
+    lv_obj_t *layer_labels[MAX_LAYER_DISPLAY]; // Individual layer number labels (0-9 max)
 };
 
 int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_t *parent);

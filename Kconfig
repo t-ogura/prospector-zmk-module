@@ -110,12 +110,13 @@ config PROSPECTOR_MAX_KEYBOARDS
 config PROSPECTOR_MAX_LAYERS
     int "Maximum number of layers to display"
     range 4 10
-    default 6
+    default 7
     depends on PROSPECTOR_MODE_SCANNER
     help
       Maximum number of layers to display in the layer status widget (layers 0 to N-1).
-      Default is 6 layers (0-5). Increase if your keyboard has more layers.
+      Default is 7 layers (0-6). For 10-layer support set to 10 (0-9).
       Range is 4-10 layers. Display shows layers 0 through (MAX_LAYERS-1).
+      Automatically centers when fewer layers are configured.
       This setting only applies to scanner mode and is ignored for keyboard builds.
 
 config PROSPECTOR_SCANNER_TIMEOUT_MS

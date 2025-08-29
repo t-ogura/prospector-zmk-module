@@ -12,7 +12,7 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Stylish pastel colors for layers - expandable array
+// Stylish pastel colors for 0-9 layers (10 total) - full support
 static lv_color_t get_layer_color(int layer) {
     switch (layer) {
         case 0: return lv_color_make(0xFF, 0x9B, 0x9B);  // Layer 0: Soft Coral Pink
@@ -72,21 +72,27 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     lv_obj_set_style_text_opa(widget->layer_title, LV_OPA_70, 0);
     lv_obj_align(widget->layer_title, LV_ALIGN_TOP_MID, 0, -5); // Above the numbers
     
-    // Create layer number labels (0-6) in horizontal layout with pastel colors
+    // Create layer number labels (0-9) in horizontal layout with dynamic centering
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
         widget->layer_labels[i] = lv_label_create(widget->obj);
         
         // Set larger font for better visibility  
         lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_28, 0);  // Large numbers (enabled via config)
         
-        // Set layer number text
-        char layer_text[2];
+        // Set layer number text (support 0-9)
+        char layer_text[3];  // Support double digits
         snprintf(layer_text, sizeof(layer_text), "%d", i);
         lv_label_set_text(widget->layer_labels[i], layer_text);
         
-        // Position horizontally with spacing
-        int spacing = 25; // Space between layer numbers
-        int start_x = -85; // Start position to center the row
+        // Dynamic positioning - center the row based on actual layer count
+        int spacing = (MAX_LAYER_DISPLAY <= 4) ? 35 :    // Wide spacing for 4 layers
+                      (MAX_LAYER_DISPLAY <= 7) ? 25 :    // Medium spacing for 5-7 layers
+                                                 18;     // Tight spacing for 8-10 layers
+        
+        // Calculate start position to center the entire row
+        int total_width = (MAX_LAYER_DISPLAY - 1) * spacing;
+        int start_x = -(total_width / 2);
+        
         lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), 5); // Below title
         
         // Initialize with much darker gray color (barely visible)
@@ -98,7 +104,7 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     lv_obj_set_style_text_color(widget->layer_labels[0], get_layer_color(0), 0);
     lv_obj_set_style_text_opa(widget->layer_labels[0], LV_OPA_COVER, 0);
     
-    LOG_INF("Stylish layer status widget initialized with %d pastel-colored layers", MAX_LAYER_DISPLAY);
+    LOG_INF("✨ Layer widget initialized: %d layers (0-%d) with dynamic centering", MAX_LAYER_DISPLAY, MAX_LAYER_DISPLAY-1);
     return 0;
 }
 
