@@ -3,33 +3,11 @@
  *
  * SPDX-License-Identifier: MIT
  * 
- * Board-specific overlay for Seeeduino XIAO BLE with Prospector Scanner
- * This overlay is automatically applied when using seeeduino_xiao_ble board
- * Contains conditional sensor configuration
+ * REMOVED: Board-specific conditional overlay approach caused I2C bus reference errors
+ * Reverting to pure Kconfig-controlled compilation approach for safety
+ * 
+ * This file intentionally left minimal to avoid Device Tree conflicts
  */
 
-// Conditional I2C and sensor configuration
-// Only applied when user explicitly enables CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
-
-#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
-
-// Override I2C disabled state from main overlay when sensor is configured
-&i2c0 {
-    status = "okay";
-    
-    // APDS9960 sensor configuration
-    apds9960: apds9960@39 {
-        compatible = "avago,apds9960";
-        reg = <0x39>;
-        status = "okay";  // Enable sensor when CONFIG is set
-    };
-};
-
-#else
-
-// Keep I2C disabled when no sensor configured (safety default)
-&i2c0 {
-    status = "disabled";
-};
-
-#endif
+// This overlay is intentionally minimal to prevent build issues
+// All I2C/sensor configuration is controlled by main overlay + Kconfig

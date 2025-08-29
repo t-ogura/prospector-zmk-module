@@ -55,10 +55,7 @@
         };
     };
     
-    // Ambient light sensor alias - defined but points to disabled sensor
-    aliases {
-        als = &apds9960;
-    };
+    // Ambient light sensor alias removed - pure Kconfig control
 };
 
 // Disable default SPI2 to avoid conflicts
@@ -99,20 +96,7 @@
         };
     };
 
-    i2c0_default: i2c0_default {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
-        };
-    };
-
-    i2c0_sleep: i2c0_sleep {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
-            low-power-enable;
-        };
-    };
+    // I2C pinctrl removed - controlled by board-level I2C configuration when needed
 };
 
 // Use SPI3 with custom pinctrl (matches original adapter)
@@ -151,22 +135,13 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C and APDS9960 configuration - Available in device tree but disabled by default for safety
-&i2c0 {
-    status = "disabled";  // I2C disabled by default - safe for sensor-less devices
-    pinctrl-0 = <&i2c0_default>;
-    pinctrl-1 = <&i2c0_sleep>;
-    pinctrl-names = "default", "sleep";
-    
-    // APDS9960 sensor defined but disabled by default
-    // This allows DEVICE_DT_GET_ONE() and DT_HAS_COMPAT_STATUS_OKAY() to work
-    // But prevents hardware initialization on sensor-less devices
-    apds9960: apds9960@39 {
-        compatible = "avago,apds9960";
-        reg = <0x39>;
-        status = "disabled";  // Disabled by default - only enabled when ALS config is set
-    };
-};
+// I2C and APDS9960 configuration - COMPLETELY REMOVED from Device Tree
+// All I2C and sensor nodes are controlled by Kconfig compilation only
+// This prevents any Device Tree bus reference errors
+
+// I2C configuration removed - controlled purely by Kconfig
+// When CONFIG_I2C=y, ZMK will automatically configure I2C from board files
+// When CONFIG_I2C=n, no I2C nodes are compiled
 
 // PWM1 configuration for backlight (Pin 6 = P1.11)
 &pwm1 {

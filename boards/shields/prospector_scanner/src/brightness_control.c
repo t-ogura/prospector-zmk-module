@@ -669,7 +669,8 @@ static void delayed_init_work_handler(struct k_work *work) {
     if (!device_is_ready(als_dev)) {
         LOG_ERR("APDS9960 device not ready - investigating I2C status");
         
-        // Check I2C bus status
+        // Check I2C bus status (only if I2C is configured)
+#if DT_NODE_EXISTS(DT_NODELABEL(i2c0))
         const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
         if (!i2c_dev) {
             zmk_widget_debug_status_set_text(&debug_widget, "ALS: No I2C Bus");
@@ -732,6 +733,11 @@ static void delayed_init_work_handler(struct k_work *work) {
         
         LOG_INF("Hardware check complete - device_is_ready() failed");
         return;
+#else
+        zmk_widget_debug_status_set_text(&debug_widget, "ALS: I2C Not Compiled");
+        LOG_ERR("I2C0 not compiled in - sensor support disabled");
+        return;
+#endif
     }
     
     // Test sensor reading
