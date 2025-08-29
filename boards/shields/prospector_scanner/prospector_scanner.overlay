@@ -116,12 +116,12 @@ disp_spi: &spi3 {
         width = <240>;
         height = <280>;
         x-offset = <0>;
-        y-offset = <0>;
+        y-offset = <20>;
         vcom = <0x19>;
         gctrl = <0x35>;
         vrhs = <0x12>;
         vdvs = <0x20>;
-        mdac = <0x60>;
+        mdac = <0x00>;
         gamma = <0x01>;
         colmod = <0x05>;
         lcm = <0x2c>;
