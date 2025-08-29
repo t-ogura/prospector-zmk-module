@@ -477,7 +477,7 @@ static int brightness_control_init(void) {
     printk("BRIGHTNESS: Looking for APDS9960 device in device tree...\n");
     
     // Check if APDS9960 is actually compiled in
-#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
+#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960) && IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
     // Use original Prospector method: get by compatible string
     als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
@@ -664,7 +664,7 @@ static void delayed_init_work_handler(struct k_work *work) {
 #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
     LOG_INF("🔧 ALS mode detected in delayed work");
     
-#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
+#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960) && IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
     // Try to get APDS9960 device
     const struct device *als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
