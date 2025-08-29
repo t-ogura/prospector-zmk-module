@@ -3,45 +3,15 @@
  *
  * SPDX-License-Identifier: MIT
  * 
- * Board-level I2C and sensor configuration for Seeeduino XIAO BLE
- * This overlay provides the necessary Device Tree nodes when sensors are enabled
- * Only included when CONFIG_I2C=y and CONFIG_APDS9960=y
+ * Board-level configuration for Seeeduino XIAO BLE (Prospector Scanner)
+ * 
+ * SENSOR SUPPORT REMOVED: This overlay no longer includes sensor configurations
+ * to prevent Device Tree linking errors when sensors are not enabled.
+ * 
+ * For sensor support (APDS9960), users must:
+ * 1. Enable CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+ * 2. Enable CONFIG_APDS9960=y 
+ * 3. Add custom overlay with I2C and sensor Device Tree nodes
+ * 
+ * This change ensures v1.1.1 boots safely on all hardware configurations.
  */
-
-// I2C0 configuration for ambient light sensor
-// Only applied when CONFIG_I2C=y
-&i2c0 {
-    compatible = "nordic,nrf-twim";
-    status = "okay";
-    pinctrl-0 = <&i2c0_default>;
-    pinctrl-1 = <&i2c0_sleep>;
-    pinctrl-names = "default", "sleep";
-    clock-frequency = <I2C_BITRATE_STANDARD>;
-
-    // APDS9960 ambient light sensor
-    // Only applied when CONFIG_APDS9960=y
-    apds9960: apds9960@39 {
-        compatible = "avago,apds9960";
-        reg = <0x39>;
-        status = "okay";
-        int-gpios = <&gpio0 28 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; // D2 = P0.28
-    };
-};
-
-// Required pinctrl configurations
-&pinctrl {
-    i2c0_default: i2c0_default {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL
-        };
-    };
-
-    i2c0_sleep: i2c0_sleep {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL
-            low-power-enable;
-        };
-    };
-};

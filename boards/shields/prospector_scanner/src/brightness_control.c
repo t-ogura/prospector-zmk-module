@@ -57,17 +57,25 @@ static int brightness_control_init(void) {
     LOG_INF("⚠️  Sensor mode requires APDS9960 hardware and CONFIG_APDS9960=y");
     LOG_INF("⚠️  This is advanced functionality - ensure hardware is properly connected");
     
-    // Get devices
-    const struct device *pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
-    const struct device *sensor_dev = DEVICE_DT_GET_ONE(avago_apds9960);
+    // Get PWM device safely
+    const struct device *pwm_dev = NULL;
+#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+#endif
     
-    if (!device_is_ready(pwm_dev)) {
+    if (!pwm_dev || !device_is_ready(pwm_dev)) {
         LOG_ERR("PWM device not ready");
         return 0;
     }
     
-    if (!device_is_ready(sensor_dev)) {
-        LOG_WRN("APDS9960 sensor not ready - check hardware connection");
+    // Get sensor device safely - only if both Device Tree and driver are available
+    const struct device *sensor_dev = NULL;
+#if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960) && IS_ENABLED(CONFIG_APDS9960)
+    sensor_dev = DEVICE_DT_GET_ONE(avago_apds9960);
+#endif
+    
+    if (!sensor_dev || !device_is_ready(sensor_dev)) {
+        LOG_WRN("APDS9960 sensor not ready - check hardware connection and CONFIG_APDS9960=y");
         // Set fallback brightness
         led_set_brightness(pwm_dev, 0, 80);
         return 0;

@@ -68,17 +68,15 @@ config LED
     default y
 
 # I2C, Sensor, and APDS9960 drivers - COMPLETELY DISABLED by default
-# Safe: Drivers only compiled when user explicitly enables sensor support AND provides Device Tree nodes
-# CRITICAL: APDS9960 driver requires Device Tree instance - disabled for safety
+# Safe: All sensor-related drivers disabled to prevent Device Tree linking errors
+# Users must manually enable sensors AND provide Device Tree overlay when needed
 
-# I2C enabled conditionally but requires proper Device Tree setup by user
 config I2C
-    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    default n
 
 config SENSOR  
-    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    default n
 
-# APDS9960 driver DISABLED by default - prevents compile errors when no DT nodes
 config APDS9960
     default n
 
