@@ -661,18 +661,19 @@ lv_obj_t *zmk_display_status_screen() {
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0); // Retro pixel font style
+    lv_obj_set_width(device_name_label, 200); // Limit width to prevent right edge overflow
     lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25); // Back to center
     lv_label_set_text(device_name_label, "Initializing...");
     
     // Scanner battery status widget in top right corner (above connection status)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, 10, 0);
+    lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, -10, 0);  // Fixed: -10 to stay within screen
 #endif
     
     // Connection status widget in top right - moved down to make room for battery
     zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45); // Original position
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -10, 45); // Fixed: -10 to match battery position
     
     // Layer status widget in the center (horizontal layer display) - moved down 10px
     zmk_widget_layer_status_init(&layer_widget, screen);
@@ -695,7 +696,7 @@ lv_obj_t *zmk_display_status_screen() {
     
     // Signal status widget (RSSI + reception rate) at the very bottom with full width space
     zmk_widget_signal_status_init(&signal_widget, screen);
-    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -5, -5); // More space from edge
+    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -10, -5); // More space from edge to prevent overflow
     
     // Debug status widget (overlaps modifier area when no modifiers active)
     zmk_widget_debug_status_init(&debug_widget, screen);
