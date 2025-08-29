@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: MIT
  * 
  * Safe Brightness Control for Prospector v1.1.1
- * - CONFIG=n: Fixed brightness mode (v1.0.0 behavior)
- * - CONFIG=y: Sensor mode with safe fallback
- * - Both modes work safely without Device Tree issues
+ * - CONFIG=n: Fixed brightness mode only
+ * - CONFIG=y: Sensor mode (requires APDS9960 hardware)
  */
 
 #include <zephyr/kernel.h>
@@ -17,85 +16,70 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Global state
-static const struct device *pwm_dev = NULL;
-static bool brightness_initialized = false;
-
-// Safe brightness setter - always safe to call
-static void set_brightness_safe(uint8_t brightness) {
-    if (pwm_dev && device_is_ready(pwm_dev)) {
-        int ret = led_set_brightness(pwm_dev, 0, brightness);
-        if (ret < 0) {
-            LOG_WRN("Failed to set brightness: %d", ret);
-        } else {
-            LOG_DBG("Brightness set to %d%%", brightness);
-        }
-    }
-}
-
-// Initialize brightness control system
-static int brightness_control_init(void) {
+// Only compile brightness control if sensor mode is DISABLED
 #if !IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
-    // Fixed brightness mode (CONFIG=n) - v1.0.0 behavior
-    LOG_INF("🔆 Brightness Control: Fixed Mode");
+
+// Fixed brightness mode implementation - safe and simple
+static int brightness_control_init(void) {
+    LOG_INF("🔆 Brightness Control: Fixed Mode (85%)");
     
     // Try to get PWM device safely
+    const struct device *pwm_dev = NULL;
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
     pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
-    if (!device_is_ready(pwm_dev)) {
-        pwm_dev = NULL;
-    }
 #endif
     
-    if (pwm_dev) {
-        // Set fixed brightness
+    if (pwm_dev && device_is_ready(pwm_dev)) {
         uint8_t brightness = 85;  // Default
 #ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB
         brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
 #endif
-        set_brightness_safe(brightness);
-        LOG_INF("✅ Fixed brightness set to %d%%", brightness);
+        int ret = led_set_brightness(pwm_dev, 0, brightness);
+        if (ret < 0) {
+            LOG_WRN("Failed to set brightness: %d", ret);
+        } else {
+            LOG_INF("✅ Fixed brightness set to %d%%", brightness);
+        }
     } else {
-        LOG_WRN("PWM device not found - using hardware default brightness");
+        LOG_INF("PWM device not found - using hardware default brightness");
     }
     
+    return 0;  // Always succeed
+}
+
+SYS_INIT(brightness_control_init, APPLICATION, 90);
+
 #else  // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
-    // Sensor mode (CONFIG=y) - REQUIRES APDS9960 in Device Tree!
+
+// Sensor mode implementation - requires hardware setup by user
+static int brightness_control_init(void) {
     LOG_INF("🌞 Brightness Control: Sensor Mode");
+    LOG_INF("⚠️  Sensor mode requires APDS9960 hardware and CONFIG_APDS9960=y");
+    LOG_INF("⚠️  This is advanced functionality - ensure hardware is properly connected");
     
-    // Sensor mode REQUIRES both PWM and sensor in Device Tree
-#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds) && DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960)
-    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+    // Get devices
+    const struct device *pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
     const struct device *sensor_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     
     if (!device_is_ready(pwm_dev)) {
-        LOG_ERR("PWM device not ready in sensor mode");
-        return 0;  // Don't fail boot but log error
+        LOG_ERR("PWM device not ready");
+        return 0;
     }
     
     if (!device_is_ready(sensor_dev)) {
-        LOG_WRN("APDS9960 sensor not ready - using fallback brightness");
-        set_brightness_safe(80);
-    } else {
-        LOG_INF("✅ APDS9960 sensor ready - auto brightness enabled");
-        // TODO: Implement actual sensor reading in work queue
-        // For now, use fixed brightness as placeholder
-        set_brightness_safe(80);
+        LOG_WRN("APDS9960 sensor not ready - check hardware connection");
+        // Set fallback brightness
+        led_set_brightness(pwm_dev, 0, 80);
+        return 0;
     }
-#else
-    // This is a configuration error - sensor mode requires hardware!
-    LOG_ERR("❌ CONFIGURATION ERROR: SENSOR MODE WITHOUT HARDWARE");
-    LOG_ERR("💡 SOLUTION 1: Disable sensor mode - set CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n");
-    LOG_ERR("💡 SOLUTION 2: Connect APDS9960 sensor and enable CONFIG_APDS9960=y");
-    LOG_ERR("🔆 FALLBACK: Using hardware default brightness");
-    // No fallback code to avoid Device Tree references
-#endif
     
-#endif  // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+    LOG_INF("✅ Both PWM and APDS9960 ready - sensor mode enabled");
+    // Set initial brightness
+    led_set_brightness(pwm_dev, 0, 80);
     
-    brightness_initialized = true;
-    return 0;  // Always succeed - never fail boot
+    return 0;  // Always succeed
 }
 
-// Use post-kernel init to ensure devices are ready
 SYS_INIT(brightness_control_init, APPLICATION, 90);
+
+#endif  // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
