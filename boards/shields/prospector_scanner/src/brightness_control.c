@@ -35,7 +35,7 @@ static int brightness_control_init(void) {
     brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
 #endif
     
-    int ret = led_set_brightness(pwm_dev, DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl)), brightness);
+    int ret = led_set_brightness(pwm_dev, 0, brightness); // Fixed channel 0 for backlight
     if (ret < 0) {
         LOG_ERR("Failed to set brightness: %d", ret);
         return ret;
@@ -81,7 +81,7 @@ static void update_brightness(void) {
     if (brightness < 20) brightness = 20;
     
     // Set brightness
-    int ret = led_set_brightness(pwm_dev, DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl)), brightness);
+    int ret = led_set_brightness(pwm_dev, 0, brightness); // Fixed channel 0 for backlight
     if (ret >= 0) {
         LOG_DBG("Brightness: %d%% (light: %d)", brightness, light.val1);
     }

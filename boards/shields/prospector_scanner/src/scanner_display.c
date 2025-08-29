@@ -36,9 +36,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define CONFIG_PROSPECTOR_FIXED_BRIGHTNESS 60   // 60% default
 #endif
 
-// External brightness control functions
-void prospector_set_brightness(uint8_t brightness_percent);
-void prospector_resume_brightness(void);
+// Brightness control functions removed in v1.1.1 simplification
+// External brightness control is handled by brightness_control.c
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
@@ -472,14 +471,14 @@ static void check_advertisement_frequency(void) {
         if (!frequency_dimmed) {
             LOG_INF("Advertisement frequency low (%dms interval), dimming to %d%%", 
                     interval, CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS);
-            prospector_set_brightness(CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS);
+            // prospector_set_brightness(CONFIG_PROSPECTOR_ADV_FREQUENCY_DIM_BRIGHTNESS);
             frequency_dimmed = true;
         }
     } else {
         // Frequency increased (keyboard became active), restore brightness
         if (frequency_dimmed) {
             LOG_INF("Advertisement frequency restored (%dms interval), resuming normal brightness", interval);
-            prospector_resume_brightness();
+            // prospector_resume_brightness(); // Function removed in v1.1.1
             frequency_dimmed = false;
         }
     }
@@ -534,10 +533,10 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         // Reduce brightness when no keyboards are connected
 #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
         // When ALS is enabled, set to minimum brightness
-        prospector_set_brightness(CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS);
+        // prospector_set_brightness(CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS);
 #else
         // When ALS is disabled, reduce to 20% of configured brightness
-        prospector_set_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS / 5);
+        // prospector_set_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS / 5);
 #endif
         
         LOG_INF("Display updated: No keyboards - all widgets reset, brightness reduced");
@@ -582,7 +581,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_wpm_status_update(&wpm_widget, kbd);
                 
                 // Resume normal brightness control when keyboard is connected
-                prospector_resume_brightness();
+                // prospector_resume_brightness(); // Function removed in v1.1.1
                 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
                 // Start battery monitoring when keyboards become active
