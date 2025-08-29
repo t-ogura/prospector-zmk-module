@@ -1,0 +1,46 @@
+/*
+ * Copyright (c) 2024 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ * 
+ * Board-level I2C and sensor configuration for Seeeduino XIAO BLE
+ * This overlay provides the necessary Device Tree nodes when sensors are enabled
+ * Only included when CONFIG_I2C=y and CONFIG_APDS9960=y
+ */
+
+// I2C0 configuration for ambient light sensor
+// Only applied when CONFIG_I2C=y
+&i2c0 {
+    compatible = "nordic,nrf-twim";
+    status = "okay";
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
+    clock-frequency = <I2C_BITRATE_STANDARD>;
+
+    // APDS9960 ambient light sensor
+    // Only applied when CONFIG_APDS9960=y
+    apds9960: apds9960@39 {
+        compatible = "avago,apds9960";
+        reg = <0x39>;
+        status = "okay";
+    };
+};
+
+// Required pinctrl configurations
+&pinctrl {
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL
+            low-power-enable;
+        };
+    };
+};
