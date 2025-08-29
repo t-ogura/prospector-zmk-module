@@ -21,8 +21,8 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // LED driver for backlight control (following original Prospector approach)
-static const struct device *pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
-#define DISP_BL DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl))
+static const struct device *pwm_leds_dev;
+static int disp_bl_index;
 
 // APDS9960 sensor value range (configurable threshold)
 #define SENSOR_MIN      0       // Minimum sensor reading
@@ -245,7 +245,7 @@ static void fade_work_handler(struct k_work *work) {
     
     // Apply brightness via LED API
     if (device_is_ready(pwm_leds_dev)) {
-        int ret = led_set_brightness(pwm_leds_dev, DISP_BL, current_brightness);
+        int ret = led_set_brightness(pwm_leds_dev, disp_bl_index, current_brightness);
         if (ret >= 0) {
             LOG_DBG("🔄 Fade step: %d%% → target: %d%%", current_brightness, target_brightness);
         }
@@ -449,6 +449,10 @@ static int brightness_control_init(void) {
     LOG_INF("🚀 brightness_control_init STARTED (ALS enabled)");
     printk("BRIGHTNESS: brightness_control_init called (ALS mode)\n");
     
+    // Initialize PWM device dynamically
+    pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
+    disp_bl_index = DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl));
+    
     // Initialize PWM LEDs device (using LED API)
     if (!device_is_ready(pwm_leds_dev)) {
         LOG_ERR("PWM LEDs device not ready");
@@ -610,6 +614,10 @@ static int brightness_control_init(void) {
     LOG_INF("🚀 brightness_control_init STARTED (Fixed brightness mode)");
     printk("BRIGHTNESS: brightness_control_init called (Fixed mode)\n");
     
+    // Initialize PWM device dynamically
+    pwm_leds_dev = DEVICE_DT_GET_ONE(pwm_leds);
+    disp_bl_index = DT_NODE_CHILD_IDX(DT_NODELABEL(disp_bl));
+    
     // Initialize PWM LEDs device (using LED API)
     if (!device_is_ready(pwm_leds_dev)) {
         LOG_ERR("PWM LEDs device not ready");
@@ -677,7 +685,7 @@ static void delayed_init_work_handler(struct k_work *work) {
         LOG_ERR("APDS9960 device not ready - investigating I2C status");
         
         // Check I2C bus status (only if I2C is configured)
-#if DT_NODE_EXISTS(DT_NODELABEL(i2c0))
+#if DT_NODE_EXISTS(DT_NODELABEL(i2c0)) && IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
         const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
         if (!i2c_dev) {
             DEBUG_WIDGET_SET_TEXT("ALS: No I2C Bus");
