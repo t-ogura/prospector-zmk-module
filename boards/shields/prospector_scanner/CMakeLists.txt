@@ -10,8 +10,8 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # Add include directory for fonts.h
   zephyr_library_include_directories(include)
   
-  # Note: All overlay files in boards/ are automatically loaded by ZMK
-  # Sensor overlay (seeeduino_xiao_ble-sensor.overlay) provides I2C and sensor configuration
+  # Note: Board-specific overlay (boards/seeeduino_xiao_ble.overlay) automatically loaded
+  # Contains conditional I2C/sensor configuration based on CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
   # Main overlay provides safe defaults with I2C disabled
   
   # Essential scanner sources

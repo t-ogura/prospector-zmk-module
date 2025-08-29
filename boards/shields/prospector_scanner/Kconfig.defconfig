@@ -67,16 +67,16 @@ config PWM
 config LED
     default y
 
-# I2C, Sensor, and APDS9960 drivers DISABLED by default for safety
-# Users must explicitly enable sensor support if they have hardware
-# config I2C
-#     default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+# I2C, Sensor, and APDS9960 drivers - Conditionally enabled for sensor support
+# Safe: Only enabled when user explicitly configures sensor support
+config I2C
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-# config SENSOR
-#     default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+config SENSOR
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
-# config APDS9960
-#     default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+config APDS9960
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
 # Ambient light sensor and brightness settings moved to main Kconfig
 # PROSPECTOR_MAX_LAYERS now defined in main Kconfig

@@ -55,8 +55,10 @@
         };
     };
     
-    // Ambient light sensor alias - only defined by sensor overlay
-    // Default: no ALS alias to prevent device tree conflicts
+    // Ambient light sensor alias - defined but points to disabled sensor
+    aliases {
+        als = &apds9960;
+    };
 };
 
 // Disable default SPI2 to avoid conflicts
@@ -97,8 +99,20 @@
         };
     };
 
-    // I2C pinctrl moved to sensor-specific overlay
-    // Only defined when sensor support is enabled to prevent conflicts
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
+            low-power-enable;
+        };
+    };
 };
 
 // Use SPI3 with custom pinctrl (matches original adapter)
@@ -137,10 +151,21 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C configuration - DISABLED by default to prevent boot failure
-// This ensures safe startup on devices without sensor hardware
+// I2C and APDS9960 configuration - Available in device tree but disabled by default for safety
 &i2c0 {
-    status = "disabled";  // Safe default - prevent forced I2C initialization
+    status = "disabled";  // I2C disabled by default - safe for sensor-less devices
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
+    
+    // APDS9960 sensor defined but disabled by default
+    // This allows DEVICE_DT_GET_ONE() and DT_HAS_COMPAT_STATUS_OKAY() to work
+    // But prevents hardware initialization on sensor-less devices
+    apds9960: apds9960@39 {
+        compatible = "avago,apds9960";
+        reg = <0x39>;
+        status = "disabled";  // Disabled by default - only enabled when ALS config is set
+    };
 };
 
 // PWM1 configuration for backlight (Pin 6 = P1.11)
