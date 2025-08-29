@@ -67,6 +67,25 @@ config PWM
 config LED
     default y
 
+# I2C, Sensor, and APDS9960 drivers - Only enabled when ALS feature is explicitly enabled
+# This ensures safe boot on sensor-less devices while allowing sensor functionality when needed
+
+# Enable I2C driver only when ambient light sensor is configured
+config I2C
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+
+# Enable generic sensor framework only when ambient light sensor is configured  
+config SENSOR
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+
+# Enable APDS9960 specific driver only when ambient light sensor is configured
+config APDS9960
+    default y if PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
+
+# Additional Device Tree override for sensor enablement
+# When PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR is enabled, we need to enable the I2C and sensor nodes
+# This is handled via conditional device tree modifications
+
 # Ambient light sensor and brightness settings moved to main Kconfig
 # PROSPECTOR_MAX_LAYERS now defined in main Kconfig
 

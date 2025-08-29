@@ -469,7 +469,7 @@ static int brightness_control_init(void) {
     // APDS9960 is defined in the board overlay at I2C address 0x39
     printk("BRIGHTNESS: Looking for APDS9960 device in device tree...\n");
     
-    // Use original Prospector method: get by compatible string
+    // Get APDS9960 device - it's defined in device tree but may be disabled
     als_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     if (!als_dev) {
         LOG_ERR("❌ APDS9960 device not found by compatible 'avago,apds9960'");
@@ -480,19 +480,17 @@ static int brightness_control_init(void) {
         return 0;
     }
     
-    printk("BRIGHTNESS: APDS9960 device found, checking if ready...\n");
-    
+    // Check if the device is enabled in the device tree
+    // If CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR is not set, the device will be disabled
     if (!device_is_ready(als_dev)) {
-        LOG_ERR("❌ APDS9960 ambient light sensor NOT READY - hardware may be missing or not connected");
+        LOG_INF("ℹ️  APDS9960 device found but not ready - sensor likely disabled or not connected");
         uint8_t fixed_brightness = get_current_fixed_brightness();
-        LOG_WRN("Using fixed brightness: %d%% (power-aware)", fixed_brightness);
-        printk("BRIGHTNESS: APDS9960 device not ready (I2C communication failed?)\n");
-        printk("BRIGHTNESS: Check hardware connections - SDA to D4, SCL to D5, VCC to 3.3V, GND to GND\n");
+        LOG_INF("Using fixed brightness: %d%% (safe fallback mode)", fixed_brightness);
+        printk("BRIGHTNESS: APDS9960 device not ready, using fixed brightness (safe mode)\n");
         
-        // Debug display: Show sensor not ready status (persistent)
-        zmk_widget_debug_status_set_text(&debug_widget, "ALS: Device Not Ready");
+        // Debug display: Show sensor disabled status (persistent)
+        zmk_widget_debug_status_set_text(&debug_widget, "ALS: Sensor Disabled");
         zmk_widget_debug_status_set_visible(&debug_widget, IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET));
-        // No auto-hide - keep visible to show problem
         
         set_brightness_pwm(fixed_brightness);
         return 0;

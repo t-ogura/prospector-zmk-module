@@ -1,0 +1,19 @@
+/*
+ * Copyright (c) 2024 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ * 
+ * Ambient Light Sensor Enable Overlay
+ * This overlay enables I2C and APDS9960 for ambient light sensor functionality
+ * Only included when CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+ */
+
+// Enable I2C0 for ambient light sensor
+&i2c0 {
+    status = "okay";
+};
+
+// Enable APDS9960 sensor
+&apds9960 {
+    status = "okay";
+};

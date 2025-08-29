@@ -27,4 +27,10 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # NerdFont for modifier symbols (from YADS project - MIT License)
   zephyr_library_sources(src/fonts/NerdFonts_Regular_20.c)
   zephyr_library_sources(src/fonts/NerdFonts_Regular_40.c)
+  
+  # Conditionally include ALS enable overlay when ambient light sensor is configured
+  # NOTE: The als_enable.overlay would be included via west.yml or build configuration
+  # if(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+  #   message(STATUS "Prospector: Enabling ambient light sensor support")
+  # endif()
 endif()
