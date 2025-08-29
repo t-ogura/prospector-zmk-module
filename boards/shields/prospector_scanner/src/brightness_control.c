@@ -32,7 +32,7 @@ static int brightness_control_init(void) {
     return 0;  // Always succeed
 }
 
-SYS_INIT(brightness_control_init, APPLICATION, 99);
+SYS_INIT(brightness_control_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY_DEFAULT);
 
 #if 0  // DISABLE ALL BRIGHTNESS CODE
 
@@ -71,7 +71,7 @@ static int brightness_control_init(void) {
     return 0;
 }
 
-SYS_INIT(brightness_control_init, APPLICATION, 99); // Very low priority - init after everything else
+SYS_INIT(brightness_control_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY_DEFAULT); // Very low priority - init after everything else
 
 #else // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
 
@@ -156,7 +156,7 @@ static int brightness_control_init(void) {
     return 0;  // Always return success - never fail boot
 }
 
-SYS_INIT(brightness_control_init, APPLICATION, 99); // Very low priority - init after everything else
+SYS_INIT(brightness_control_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY_DEFAULT); // Very low priority - init after everything else
 
 #endif // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
 
