@@ -13,23 +13,10 @@
 #include <zephyr/logging/log.h>
 #include <math.h>
 #include <zmk/usb.h>
-// Debug widget support - completely safe conditional compilation
-#if IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
-#include "debug_status_widget.h"
-// External debug widget from scanner_display.c
-extern struct zmk_widget_debug_status debug_widget;
-static inline void safe_debug_widget_set_text(const char* text) {
-    zmk_widget_debug_status_set_text(&debug_widget, text);
-}
-static inline void safe_debug_widget_set_visible(bool visible) {
-    zmk_widget_debug_status_set_visible(&debug_widget, visible);
-}
-#define DEBUG_WIDGET_SET_TEXT(text) safe_debug_widget_set_text(text)
-#define DEBUG_WIDGET_SET_VISIBLE(visible) safe_debug_widget_set_visible(visible)
-#else
+// Debug widget completely disabled for v1.1.1 safety
+// All debug widget functionality removed to prevent Device Tree linking issues
 #define DEBUG_WIDGET_SET_TEXT(text) do {} while(0)
 #define DEBUG_WIDGET_SET_VISIBLE(visible) do {} while(0)
-#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
