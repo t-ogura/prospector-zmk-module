@@ -28,6 +28,11 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 // Only compile brightness control if sensor mode is DISABLED
 #if !IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
 
+// Delayed debug message function for fixed mode
+static void delayed_debug_msg(struct k_work *work) {
+    zmk_widget_debug_status_set_text(&debug_widget, "🔆 FIXED MODE ACTIVE");
+}
+
 // Fixed brightness mode implementation - safe and simple
 static int brightness_control_init(void) {
     LOG_INF("🔆 Brightness Control: Fixed Mode (85%)");
@@ -36,9 +41,6 @@ static int brightness_control_init(void) {
     
     // Schedule a delayed message to avoid being overwritten
     static struct k_work_delayable debug_msg_work;
-    static void delayed_debug_msg(struct k_work *work) {
-        zmk_widget_debug_status_set_text(&debug_widget, "🔆 FIXED MODE ACTIVE");
-    }
     k_work_init_delayable(&debug_msg_work, delayed_debug_msg);
     k_work_schedule(&debug_msg_work, K_MSEC(3000));  // Show after 3 seconds
     
@@ -75,6 +77,10 @@ static const struct device *pwm_dev;
 static const struct device *sensor_dev;
 static struct k_work_delayable brightness_update_work;
 static struct k_work_delayable fade_work;
+
+// Forward declarations for delayed debug functions
+static void delayed_sensor_msg(struct k_work *work);
+static void delayed_error_msg(struct k_work *work);
 
 // Fade state tracking
 static uint8_t current_brightness = 50;
@@ -211,6 +217,15 @@ reschedule:
     k_work_schedule(&brightness_update_work, K_MSEC(CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS));
 }
 
+// Delayed debug message functions
+static void delayed_sensor_msg(struct k_work *work) {
+    zmk_widget_debug_status_set_text(&debug_widget, "✅ SENSOR MODE ACTIVE");
+}
+
+static void delayed_error_msg(struct k_work *work) {
+    zmk_widget_debug_status_set_text(&debug_widget, "❌ SENSOR INIT FAILED");
+}
+
 static int brightness_control_init(void) {
     LOG_INF("🌞 Brightness Control: Sensor Mode (4-pin connector, polling mode)");
     LOG_INF("📡 Using APDS9960 in polling mode - no INT pin required");
@@ -254,9 +269,6 @@ static int brightness_control_init(void) {
         
         // Schedule a delayed message to avoid being overwritten
         static struct k_work_delayable error_debug_work;
-        static void delayed_error_msg(struct k_work *work) {
-            zmk_widget_debug_status_set_text(&debug_widget, "❌ SENSOR INIT FAILED");
-        }
         k_work_init_delayable(&error_debug_work, delayed_error_msg);
         k_work_schedule(&error_debug_work, K_MSEC(3000));  // Show after 3 seconds
         
@@ -270,9 +282,6 @@ static int brightness_control_init(void) {
     
     // Schedule a delayed message to avoid being overwritten
     static struct k_work_delayable sensor_debug_work;
-    static void delayed_sensor_msg(struct k_work *work) {
-        zmk_widget_debug_status_set_text(&debug_widget, "✅ SENSOR MODE ACTIVE");
-    }
     k_work_init_delayable(&sensor_debug_work, delayed_sensor_msg);
     k_work_schedule(&sensor_debug_work, K_MSEC(3000));  // Show after 3 seconds
     
