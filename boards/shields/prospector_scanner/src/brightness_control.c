@@ -233,31 +233,21 @@ static int brightness_control_init(void) {
     // IMMEDIATE debug message - should show right away
     zmk_widget_debug_status_set_text(&debug_widget, "🌞 SENSOR INIT STARTED");
     
-    // Schedule multiple repeated messages to fight overwriting
-    static struct k_work_delayable immediate_debug_work;
-    static struct k_work_delayable repeat_debug_work1;
-    static struct k_work_delayable repeat_debug_work2;
-    
-    k_work_init_delayable(&immediate_debug_work, delayed_sensor_msg);
-    k_work_init_delayable(&repeat_debug_work1, delayed_sensor_msg);
-    k_work_init_delayable(&repeat_debug_work2, delayed_sensor_msg);
-    
-    k_work_schedule(&immediate_debug_work, K_MSEC(100));   // 100ms
-    k_work_schedule(&repeat_debug_work1, K_MSEC(1000));    // 1 second
-    k_work_schedule(&repeat_debug_work2, K_MSEC(5000));    // 5 seconds
-    
-    // Get PWM device safely with crash protection
-    zmk_widget_debug_status_set_text(&debug_widget, "🔍 Getting PWM device...");
+    // IMMEDIATE step 1: PWM device check
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 PWM: Starting check...");
+    k_msleep(50);  // Allow display update
     
     pwm_dev = NULL;
     bool pwm_available = false;
     
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
     zmk_widget_debug_status_set_text(&debug_widget, "🔍 PWM: DT check OK");
+    k_msleep(50);  // Allow display update
     
     // Try to get PWM device with protection
     pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
     zmk_widget_debug_status_set_text(&debug_widget, "🔍 PWM: Got device ptr");
+    k_msleep(50);  // Allow display update
     
     if (pwm_dev && device_is_ready(pwm_dev)) {
         pwm_available = true;
@@ -265,6 +255,7 @@ static int brightness_control_init(void) {
     } else {
         zmk_widget_debug_status_set_text(&debug_widget, "❌ PWM NOT READY");
     }
+    k_msleep(50);  // Allow display update
 #else
     zmk_widget_debug_status_set_text(&debug_widget, "❌ PWM: No DT");
 #endif
@@ -277,21 +268,26 @@ static int brightness_control_init(void) {
     
     // Get sensor device safely with crash protection
     zmk_widget_debug_status_set_text(&debug_widget, "🔍 Getting APDS9960...");
+    k_msleep(50);  // Allow display update
     
     sensor_dev = NULL;
     bool sensor_available = false;
     
 #if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960) && IS_ENABLED(CONFIG_APDS9960)
     zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: DT check OK");
+    k_msleep(50);  // Allow display update
     
     LOG_DBG("🔍 Device tree has APDS9960 definition, getting device...");
     sensor_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Got device ptr");
+    k_msleep(50);  // Allow display update
     
     LOG_DBG("🔍 Sensor device pointer: %p", sensor_dev);
     
     if (sensor_dev) {
         zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Checking Ready...");
+        k_msleep(50);  // Allow display update
+        
         if (device_is_ready(sensor_dev)) {
             sensor_available = true;
             zmk_widget_debug_status_set_text(&debug_widget, "🎉 SENSOR SUCCESS!");
@@ -301,6 +297,7 @@ static int brightness_control_init(void) {
     } else {
         zmk_widget_debug_status_set_text(&debug_widget, "❌ APDS9960: NULL Device");
     }
+    k_msleep(50);  // Allow display update
 #else
     LOG_WRN("🔍 No APDS9960 device tree definition or CONFIG_APDS9960 disabled");
     zmk_widget_debug_status_set_text(&debug_widget, "❌ No APDS9960 in DT");
