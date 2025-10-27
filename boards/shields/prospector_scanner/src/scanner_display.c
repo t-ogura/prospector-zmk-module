@@ -401,9 +401,10 @@ static void battery_periodic_update_handler(struct k_work *work) {
              periodic_counter, zmk_only, current_battery, current_usb ? "Y" : "N",
              (current_battery != zmk_only) ? "HW" : "CACHE",
              current_charging ? "Y" : "N");
-    if (debug_widget.debug_label) {
-        zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
-    }
+    // TEMPORARILY DISABLED: debug widget updates to avoid overwriting brightness_control messages
+    // if (debug_widget.debug_label) {
+    //     zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
+    // }
     
     // FORCE UPDATE regardless of cache - bypass the change detection in update_scanner_battery_widget()
     LOG_INF("🔍 BYPASSING cache check - forcing widget update directly");
@@ -706,10 +707,11 @@ lv_obj_t *zmk_display_status_screen() {
     bool debug_enabled = IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET);
     LOG_INF("Debug widget %s by CONFIG_PROSPECTOR_DEBUG_WIDGET", debug_enabled ? "ENABLED" : "DISABLED");
     zmk_widget_debug_status_set_visible(&debug_widget, debug_enabled);
-    if (debug_widget.debug_label && debug_enabled) {
-        zmk_widget_debug_status_set_text(&debug_widget, "DEBUG: Scanner Ready");
-        LOG_INF("✅ Debug widget initialized for diagnostics");
-    }
+    // TEMPORARILY DISABLED: initial debug message to avoid overwriting brightness_control
+    // if (debug_widget.debug_label && debug_enabled) {
+    //     zmk_widget_debug_status_set_text(&debug_widget, "DEBUG: Scanner Ready");
+    //     LOG_INF("✅ Debug widget initialized for diagnostics");
+    // }
     
     // Initialize scanner battery widget with current status
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)

@@ -233,10 +233,18 @@ static int brightness_control_init(void) {
     // IMMEDIATE debug message - should show right away
     zmk_widget_debug_status_set_text(&debug_widget, "🌞 SENSOR INIT STARTED");
     
-    // Also schedule immediate repeated message
+    // Schedule multiple repeated messages to fight overwriting
     static struct k_work_delayable immediate_debug_work;
+    static struct k_work_delayable repeat_debug_work1;
+    static struct k_work_delayable repeat_debug_work2;
+    
     k_work_init_delayable(&immediate_debug_work, delayed_sensor_msg);
-    k_work_schedule(&immediate_debug_work, K_MSEC(100));  // Show after 100ms
+    k_work_init_delayable(&repeat_debug_work1, delayed_sensor_msg);
+    k_work_init_delayable(&repeat_debug_work2, delayed_sensor_msg);
+    
+    k_work_schedule(&immediate_debug_work, K_MSEC(100));   // 100ms
+    k_work_schedule(&repeat_debug_work1, K_MSEC(1000));    // 1 second
+    k_work_schedule(&repeat_debug_work2, K_MSEC(5000));    // 5 seconds
     
     // Get PWM device safely
     pwm_dev = NULL;
