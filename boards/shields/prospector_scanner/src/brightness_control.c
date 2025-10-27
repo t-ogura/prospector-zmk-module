@@ -34,6 +34,14 @@ static int brightness_control_init(void) {
     
     zmk_widget_debug_status_set_text(&debug_widget, "🔆 Fixed Mode (CONFIG=n)");
     
+    // Schedule a delayed message to avoid being overwritten
+    static struct k_work_delayable debug_msg_work;
+    static void delayed_debug_msg(struct k_work *work) {
+        zmk_widget_debug_status_set_text(&debug_widget, "🔆 FIXED MODE ACTIVE");
+    }
+    k_work_init_delayable(&debug_msg_work, delayed_debug_msg);
+    k_work_schedule(&debug_msg_work, K_MSEC(3000));  // Show after 3 seconds
+    
     // Try to get PWM device safely
     const struct device *pwm_dev = NULL;
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
@@ -243,6 +251,15 @@ static int brightness_control_init(void) {
         LOG_ERR("🔍 APDS9960 sensor not ready - 4-pin hardware or I2C issue");
         LOG_WRN("Falling back to fixed brightness mode");
         zmk_widget_debug_status_set_text(&debug_widget, "❌ APDS9960: Not Ready (I2C?)");
+        
+        // Schedule a delayed message to avoid being overwritten
+        static struct k_work_delayable error_debug_work;
+        static void delayed_error_msg(struct k_work *work) {
+            zmk_widget_debug_status_set_text(&debug_widget, "❌ SENSOR INIT FAILED");
+        }
+        k_work_init_delayable(&error_debug_work, delayed_error_msg);
+        k_work_schedule(&error_debug_work, K_MSEC(3000));  // Show after 3 seconds
+        
         // Set fallback brightness
         led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
@@ -250,6 +267,14 @@ static int brightness_control_init(void) {
     
     LOG_INF("✅ APDS9960 sensor ready - 4-pin mode with polling (no INT pin)");
     zmk_widget_debug_status_set_text(&debug_widget, "✅ APDS9960: Ready (4-pin)");
+    
+    // Schedule a delayed message to avoid being overwritten
+    static struct k_work_delayable sensor_debug_work;
+    static void delayed_sensor_msg(struct k_work *work) {
+        zmk_widget_debug_status_set_text(&debug_widget, "✅ SENSOR MODE ACTIVE");
+    }
+    k_work_init_delayable(&sensor_debug_work, delayed_sensor_msg);
+    k_work_schedule(&sensor_debug_work, K_MSEC(3000));  // Show after 3 seconds
     
     LOG_INF("📊 Sensor: Min=%u%%, Max=%u%%, Threshold=%u, Interval=%ums", 
             CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS,
