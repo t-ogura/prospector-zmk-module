@@ -263,9 +263,10 @@ static void update_scanner_battery_widget(void) {
              zmk_battery_before, zmk_battery_after, update_counter,
              update_result, usb_powered ? "Y" : "N", charging ? "Y" : "N");
     // Debug widget re-enabled with safer ZMK-native approach
-    if (debug_widget.debug_label) {
-        zmk_widget_debug_status_set_text(&debug_widget, debug_text);
-    }
+    // TEMPORARILY DISABLED: Battery debug overwriting sensor debug messages
+    // if (debug_widget.debug_label) {
+    //     zmk_widget_debug_status_set_text(&debug_widget, debug_text);
+    // }
 
     zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
                                             battery_level, usb_powered, charging);
