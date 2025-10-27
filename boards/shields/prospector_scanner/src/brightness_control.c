@@ -246,60 +246,76 @@ static int brightness_control_init(void) {
     k_work_schedule(&repeat_debug_work1, K_MSEC(1000));    // 1 second
     k_work_schedule(&repeat_debug_work2, K_MSEC(5000));    // 5 seconds
     
-    // Get PWM device safely
+    // Get PWM device safely with crash protection
     zmk_widget_debug_status_set_text(&debug_widget, "🔍 Getting PWM device...");
+    
     pwm_dev = NULL;
+    bool pwm_available = false;
+    
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 PWM: DT check OK");
+    
+    // Try to get PWM device with protection
     pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 PWM: Got device ptr");
+    
+    if (pwm_dev && device_is_ready(pwm_dev)) {
+        pwm_available = true;
+        zmk_widget_debug_status_set_text(&debug_widget, "✅ PWM Ready");
+    } else {
+        zmk_widget_debug_status_set_text(&debug_widget, "❌ PWM NOT READY");
+    }
+#else
+    zmk_widget_debug_status_set_text(&debug_widget, "❌ PWM: No DT");
 #endif
     
-    if (!pwm_dev || !device_is_ready(pwm_dev)) {
-        LOG_ERR("PWM device not ready");
-        zmk_widget_debug_status_set_text(&debug_widget, "❌ PWM NOT READY");
+    if (!pwm_available) {
+        LOG_ERR("PWM device not available - continuing without brightness control");
+        zmk_widget_debug_status_set_text(&debug_widget, "⚠️ No PWM - continuing");
         return 0;
     }
     
-    zmk_widget_debug_status_set_text(&debug_widget, "✅ PWM Ready");
-    
-    // Get sensor device safely
+    // Get sensor device safely with crash protection
     zmk_widget_debug_status_set_text(&debug_widget, "🔍 Getting APDS9960...");
+    
     sensor_dev = NULL;
+    bool sensor_available = false;
+    
 #if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960) && IS_ENABLED(CONFIG_APDS9960)
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: DT check OK");
+    
     LOG_DBG("🔍 Device tree has APDS9960 definition, getting device...");
     sensor_dev = DEVICE_DT_GET_ONE(avago_apds9960);
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Got device ptr");
+    
     LOG_DBG("🔍 Sensor device pointer: %p", sensor_dev);
-    zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Got device");
+    
+    if (sensor_dev) {
+        zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Checking Ready...");
+        if (device_is_ready(sensor_dev)) {
+            sensor_available = true;
+            zmk_widget_debug_status_set_text(&debug_widget, "🎉 SENSOR SUCCESS!");
+        } else {
+            zmk_widget_debug_status_set_text(&debug_widget, "❌ SENSOR NOT READY");
+        }
+    } else {
+        zmk_widget_debug_status_set_text(&debug_widget, "❌ APDS9960: NULL Device");
+    }
 #else
     LOG_WRN("🔍 No APDS9960 device tree definition or CONFIG_APDS9960 disabled");
     zmk_widget_debug_status_set_text(&debug_widget, "❌ No APDS9960 in DT");
 #endif
     
-    if (!sensor_dev) {
-        LOG_ERR("🔍 APDS9960 sensor device is NULL - device tree issue");
-        zmk_widget_debug_status_set_text(&debug_widget, "❌ APDS9960: NULL Device");
+    if (!sensor_available) {
+        LOG_ERR("🔍 APDS9960 sensor not available - falling back to fixed brightness");
+        zmk_widget_debug_status_set_text(&debug_widget, "❌ SENSOR FALLBACK");
         led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
     
-    zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Checking Ready...");
-    
-    if (!device_is_ready(sensor_dev)) {
-        LOG_ERR("🔍 APDS9960 sensor not ready - 4-pin hardware or I2C issue");
-        LOG_WRN("Falling back to fixed brightness mode");
-        zmk_widget_debug_status_set_text(&debug_widget, "❌ APDS9960: Not Ready (I2C?)");
-        
-        // Schedule a delayed message to avoid being overwritten
-        static struct k_work_delayable error_debug_work;
-        k_work_init_delayable(&error_debug_work, delayed_error_msg);
-        k_work_schedule(&error_debug_work, K_MSEC(3000));  // Show after 3 seconds
-        
-        // Set fallback brightness
-        led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-        return 0;
-    }
-    
+    // Success - sensor is ready
     LOG_INF("✅ APDS9960 sensor ready - 4-pin mode with polling (no INT pin)");
-    zmk_widget_debug_status_set_text(&debug_widget, "🎉 SENSOR SUCCESS!");
+    zmk_widget_debug_status_set_text(&debug_widget, "🎉 SENSOR READY!");
     
     // Schedule a delayed message to avoid being overwritten
     static struct k_work_delayable sensor_debug_work;
