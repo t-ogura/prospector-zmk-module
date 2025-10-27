@@ -330,13 +330,13 @@ config PROSPECTOR_BATTERY_SUPPORT
     default y
     depends on PROSPECTOR_MODE_SCANNER
     select ZMK_BATTERY_REPORTING
-    select USB_DEVICE_STACK
     help
       Enable battery operation for Prospector scanner device.
       Automatically detects battery presence via device tree.
       Safe to enable even without battery hardware - will auto-hide if not detected.
       Displays battery level and charging status in top-right corner.
-      Automatically enables ZMK_BATTERY_REPORTING and USB_DEVICE_STACK.
+      Automatically enables ZMK_BATTERY_REPORTING.
+      Note: USB_DEVICE_STACK must be enabled manually in config file.
 
 config PROSPECTOR_BATTERY_WIDGET_POSITION
     string "Battery widget screen position"
