@@ -194,8 +194,8 @@ reschedule:
 }
 
 static int brightness_control_init(void) {
-    LOG_INF("🌞 Brightness Control: Sensor Mode");
-    LOG_INF("⚠️  Sensor mode requires APDS9960 hardware and CONFIG_APDS9960=y");
+    LOG_INF("🌞 Brightness Control: Sensor Mode (4-pin connector, polling mode)");
+    LOG_INF("📡 Using APDS9960 in polling mode - no INT pin required");
     
     // Get PWM device safely
     pwm_dev = NULL;
@@ -215,13 +215,14 @@ static int brightness_control_init(void) {
 #endif
     
     if (!sensor_dev || !device_is_ready(sensor_dev)) {
-        LOG_WRN("APDS9960 sensor not ready - check hardware connection and CONFIG_APDS9960=y");
+        LOG_WRN("APDS9960 sensor not ready - check 4-pin I2C connection (SDA=D4, SCL=D5)");
+        LOG_WRN("Falling back to fixed brightness mode");
         // Set fallback brightness
         led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
     
-    LOG_INF("✅ APDS9960 sensor ready - starting automatic brightness control with smooth fading");
+    LOG_INF("✅ APDS9960 sensor ready - 4-pin mode with polling (no INT pin)");
     LOG_INF("📊 Sensor: Min=%u%%, Max=%u%%, Threshold=%u, Interval=%ums", 
             CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS,
             CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB,

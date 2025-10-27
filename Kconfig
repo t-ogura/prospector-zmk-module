@@ -207,15 +207,18 @@ config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     select I2C
     select SENSOR  
     select APDS9960
+    select APDS9960_TRIGGER_NONE
     help
       Enable APDS9960 ambient light sensor for automatic brightness adjustment.
       When enabled, automatically enables I2C, SENSOR framework, and APDS9960 driver.
+      Uses polling mode (no interrupt pin required) for 4-pin connector operation.
       When disabled, uses fixed brightness mode.
       
-      Hardware connection (when enabled):
+      Hardware connection (4-pin connector mode):
       - SDA = D4 (P0.04)
       - SCL = D5 (P0.05) 
       - VCC = 3.3V, GND = GND
+      - INT pin not needed (polling mode)
       
       User-friendly: Only this one setting needs to be changed!
 
