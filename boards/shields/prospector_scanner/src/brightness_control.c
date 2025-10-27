@@ -247,6 +247,7 @@ static int brightness_control_init(void) {
     k_work_schedule(&repeat_debug_work2, K_MSEC(5000));    // 5 seconds
     
     // Get PWM device safely
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 Getting PWM device...");
     pwm_dev = NULL;
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
     pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
@@ -254,17 +255,23 @@ static int brightness_control_init(void) {
     
     if (!pwm_dev || !device_is_ready(pwm_dev)) {
         LOG_ERR("PWM device not ready");
+        zmk_widget_debug_status_set_text(&debug_widget, "❌ PWM NOT READY");
         return 0;
     }
     
+    zmk_widget_debug_status_set_text(&debug_widget, "✅ PWM Ready");
+    
     // Get sensor device safely
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 Getting APDS9960...");
     sensor_dev = NULL;
 #if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960) && IS_ENABLED(CONFIG_APDS9960)
     LOG_DBG("🔍 Device tree has APDS9960 definition, getting device...");
     sensor_dev = DEVICE_DT_GET_ONE(avago_apds9960);
     LOG_DBG("🔍 Sensor device pointer: %p", sensor_dev);
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Got device");
 #else
     LOG_WRN("🔍 No APDS9960 device tree definition or CONFIG_APDS9960 disabled");
+    zmk_widget_debug_status_set_text(&debug_widget, "❌ No APDS9960 in DT");
 #endif
     
     if (!sensor_dev) {
@@ -292,7 +299,7 @@ static int brightness_control_init(void) {
     }
     
     LOG_INF("✅ APDS9960 sensor ready - 4-pin mode with polling (no INT pin)");
-    zmk_widget_debug_status_set_text(&debug_widget, "✅ APDS9960: Ready (4-pin)");
+    zmk_widget_debug_status_set_text(&debug_widget, "🎉 SENSOR SUCCESS!");
     
     // Schedule a delayed message to avoid being overwritten
     static struct k_work_delayable sensor_debug_work;
