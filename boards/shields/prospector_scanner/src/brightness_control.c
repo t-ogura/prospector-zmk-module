@@ -211,11 +211,21 @@ static int brightness_control_init(void) {
     // Get sensor device safely
     sensor_dev = NULL;
 #if DT_HAS_COMPAT_STATUS_OKAY(avago_apds9960) && IS_ENABLED(CONFIG_APDS9960)
+    LOG_DBG("🔍 Device tree has APDS9960 definition, getting device...");
     sensor_dev = DEVICE_DT_GET_ONE(avago_apds9960);
+    LOG_DBG("🔍 Sensor device pointer: %p", sensor_dev);
+#else
+    LOG_WRN("🔍 No APDS9960 device tree definition or CONFIG_APDS9960 disabled");
 #endif
     
-    if (!sensor_dev || !device_is_ready(sensor_dev)) {
-        LOG_WRN("APDS9960 sensor not ready - check 4-pin I2C connection (SDA=D4, SCL=D5)");
+    if (!sensor_dev) {
+        LOG_ERR("🔍 APDS9960 sensor device is NULL - device tree issue");
+        led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        return 0;
+    }
+    
+    if (!device_is_ready(sensor_dev)) {
+        LOG_ERR("🔍 APDS9960 sensor not ready - 4-pin hardware or I2C issue");
         LOG_WRN("Falling back to fixed brightness mode");
         // Set fallback brightness
         led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
