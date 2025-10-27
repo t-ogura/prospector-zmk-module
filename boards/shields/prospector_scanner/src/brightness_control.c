@@ -15,6 +15,8 @@
 #include <zephyr/init.h>
 #include <zephyr/logging/log.h>
 
+#include "debug_status_widget.h"
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // Only compile brightness control if sensor mode is DISABLED
@@ -197,6 +199,8 @@ static int brightness_control_init(void) {
     LOG_INF("🌞 Brightness Control: Sensor Mode (4-pin connector, polling mode)");
     LOG_INF("📡 Using APDS9960 in polling mode - no INT pin required");
     
+    zmk_widget_debug_status_set_text(&debug_widget, "🌞 Initializing APDS9960...");
+    
     // Get PWM device safely
     pwm_dev = NULL;
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
@@ -220,19 +224,25 @@ static int brightness_control_init(void) {
     
     if (!sensor_dev) {
         LOG_ERR("🔍 APDS9960 sensor device is NULL - device tree issue");
+        zmk_widget_debug_status_set_text(&debug_widget, "❌ APDS9960: NULL Device");
         led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
     
+    zmk_widget_debug_status_set_text(&debug_widget, "🔍 APDS9960: Checking Ready...");
+    
     if (!device_is_ready(sensor_dev)) {
         LOG_ERR("🔍 APDS9960 sensor not ready - 4-pin hardware or I2C issue");
         LOG_WRN("Falling back to fixed brightness mode");
+        zmk_widget_debug_status_set_text(&debug_widget, "❌ APDS9960: Not Ready (I2C?)");
         // Set fallback brightness
         led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
         return 0;
     }
     
     LOG_INF("✅ APDS9960 sensor ready - 4-pin mode with polling (no INT pin)");
+    zmk_widget_debug_status_set_text(&debug_widget, "✅ APDS9960: Ready (4-pin)");
+    
     LOG_INF("📊 Sensor: Min=%u%%, Max=%u%%, Threshold=%u, Interval=%ums", 
             CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS,
             CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB,
