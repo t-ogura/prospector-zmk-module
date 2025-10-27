@@ -227,6 +227,10 @@ static void delayed_error_msg(struct k_work *work) {
 }
 
 static int brightness_control_init(void) {
+    // FIRST PRIORITY: Show that function is called
+    zmk_widget_debug_status_set_text(&debug_widget, "🚀 BRIGHTNESS INIT CALLED!");
+    k_msleep(100);  // Ensure this message is visible
+    
     LOG_INF("🌞 Brightness Control: Sensor Mode (4-pin connector, polling mode)");
     LOG_INF("📡 Using APDS9960 in polling mode - no INT pin required");
     
@@ -343,6 +347,6 @@ static int brightness_control_init(void) {
     return 0;
 }
 
-SYS_INIT(brightness_control_init, APPLICATION, 70);  // Higher priority for sensor mode
+SYS_INIT(brightness_control_init, APPLICATION, 50);  // Even higher priority for sensor mode
 
 #endif  // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
