@@ -219,7 +219,7 @@ reschedule:
 
 // Delayed debug message functions
 static void delayed_sensor_msg(struct k_work *work) {
-    zmk_widget_debug_status_set_text(&debug_widget, "✅ SENSOR MODE ACTIVE");
+    zmk_widget_debug_status_set_text(&debug_widget, "✅ SENSOR INIT CALLED");
 }
 
 static void delayed_error_msg(struct k_work *work) {
@@ -230,7 +230,13 @@ static int brightness_control_init(void) {
     LOG_INF("🌞 Brightness Control: Sensor Mode (4-pin connector, polling mode)");
     LOG_INF("📡 Using APDS9960 in polling mode - no INT pin required");
     
-    zmk_widget_debug_status_set_text(&debug_widget, "🌞 Initializing APDS9960...");
+    // IMMEDIATE debug message - should show right away
+    zmk_widget_debug_status_set_text(&debug_widget, "🌞 SENSOR INIT STARTED");
+    
+    // Also schedule immediate repeated message
+    static struct k_work_delayable immediate_debug_work;
+    k_work_init_delayable(&immediate_debug_work, delayed_sensor_msg);
+    k_work_schedule(&immediate_debug_work, K_MSEC(100));  // Show after 100ms
     
     // Get PWM device safely
     pwm_dev = NULL;
@@ -309,6 +315,6 @@ static int brightness_control_init(void) {
     return 0;
 }
 
-SYS_INIT(brightness_control_init, APPLICATION, 90);
+SYS_INIT(brightness_control_init, APPLICATION, 70);  // Higher priority for sensor mode
 
 #endif  // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
