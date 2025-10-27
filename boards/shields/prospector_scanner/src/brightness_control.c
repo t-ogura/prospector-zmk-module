@@ -19,12 +19,20 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+    #warning "COMPILING SENSOR MODE - CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y"
+#else
+    #warning "COMPILING FIXED MODE - CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n"
+#endif
+
 // Only compile brightness control if sensor mode is DISABLED
 #if !IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
 
 // Fixed brightness mode implementation - safe and simple
 static int brightness_control_init(void) {
     LOG_INF("🔆 Brightness Control: Fixed Mode (85%)");
+    
+    zmk_widget_debug_status_set_text(&debug_widget, "🔆 Fixed Mode (CONFIG=n)");
     
     // Try to get PWM device safely
     const struct device *pwm_dev = NULL;
