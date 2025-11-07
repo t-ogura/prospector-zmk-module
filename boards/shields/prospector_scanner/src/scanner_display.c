@@ -309,26 +309,58 @@ ZMK_SUBSCRIPTION(scanner_battery, zmk_battery_state_changed);
 
 ZMK_LISTENER(scanner_usb, scanner_usb_listener);
 ZMK_SUBSCRIPTION(scanner_usb, zmk_usb_conn_state_changed);
-#endif
 
 // Forward declaration of work handler
 static void battery_periodic_update_handler(struct k_work *work);
 
-// Work queue definition 
+// Work queue definition
 static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_handler);
 
 // Periodic battery status update work
 static void battery_periodic_update_handler(struct k_work *work) {
+    // CRITICAL SAFETY CHECK: Ensure scanner battery widget is initialized
+    if (!scanner_battery_widget.obj) {
+        LOG_ERR("❌ Scanner battery widget not initialized, cannot update");
+        return;
+    }
+
     static uint32_t periodic_counter = 0;
     periodic_counter++;
-    
+
     LOG_INF("🔄 Periodic battery status update triggered (%ds interval)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
-    
-    // CRITICAL INVESTIGATION: Bypass ZMK battery cache - read from hardware directly
+
+    // CRITICAL FIX: Check if battery hardware actually exists and is ready
+    bool battery_available = false;
+#if DT_HAS_CHOSEN(zmk_battery)
+    const struct device *battery_check = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    if (device_is_ready(battery_check)) {
+        battery_available = true;
+        LOG_INF("✅ Battery hardware detected and ready");
+    } else {
+        LOG_WRN("⚠️  Battery node exists in DT but hardware not ready - USB-only mode");
+    }
+#else
+    LOG_INF("ℹ️  No battery node in device tree - USB-only mode");
+#endif
+
+    // If no battery hardware, just show USB status and skip battery readings
+    if (!battery_available) {
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+        bool usb_powered = zmk_usb_is_powered();
+        LOG_INF("🔌 USB-only mode: USB powered = %s", usb_powered ? "YES" : "NO");
+        // Update widget to show USB-only mode (0% battery, USB indicator)
+        zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 0, usb_powered, false);
+#endif
+        // Schedule next update
+        k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
+        return;
+    }
+
+    // Battery hardware is available - proceed with normal battery monitoring
     uint8_t current_battery = 0;
     bool current_usb = false;
     bool current_charging = false;
-    
+
     // METHOD 1: ZMK API (may be cached)
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     uint8_t zmk_cached_battery = zmk_battery_state_of_charge();
