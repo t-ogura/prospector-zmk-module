@@ -4117,6 +4117,112 @@ bool channel_match = (scanner_channel == 0 ||
 
 ---
 
+### ✅ **バッテリーハードウェア存在チェック実装** (2025-11-07)
+
+#### **問題: バッテリー機能有効化でクラッシュ**
+
+**症状**:
+```
+CONFIG_PROSPECTOR_BATTERY_SUPPORT=y にすると即座にクラッシュ
+画面が一瞬光って消える（起動失敗）
+```
+
+#### **根本原因の発見**
+
+**調査過程**:
+1. ❌ 初期化タイミング問題と推測 → 3秒ディレイ追加 → 改善せず
+2. ❌ イベントリスナー登録問題 → 条件付き登録 → 改善せず
+3. ❌ Widget初期化問題 → 安全チェック追加 → 改善せず
+4. ✅ **デバイスツリー vs 実ハードウェア不一致を発見**
+
+**真の原因**:
+```bash
+# Seeeduino XIAO BLE board file
+zmk,battery = &vbatt;  # Device Treeにバッテリーノード定義あり
+
+vbatt: vbatt {
+    compatible = "zmk,battery-voltage-divider";
+    io-channels = <&adc 7>;
+    power-gpios = <&gpio0 14 (GPIO_OPEN_DRAIN | GPIO_ACTIVE_LOW)>;
+    output-ohms = <510000>;
+    full-ohms = <(1000000 + 510000)>;
+};
+```
+
+**問題**:
+- Device TreeにはバッテリーノードがXIAO BLEボード標準で定義されている
+- しかしProspectorスキャナーには**物理的なバッテリーが接続されていない**
+- `DT_HAS_CHOSEN(zmk_battery)` = TRUE（DTノード存在）
+- コードが存在しないハードウェアにアクセス試行 → クラッシュ
+
+#### **解決策: ハードウェア実在性チェック**
+
+**実装** (commit 1b3a585):
+```c
+static void battery_periodic_update_handler(struct k_work *work) {
+    // Widget初期化チェック
+    if (!scanner_battery_widget.obj) {
+        return;
+    }
+
+    // ✅ CRITICAL: バッテリーハードウェアが実際に準備完了しているか確認
+    bool battery_available = false;
+#if DT_HAS_CHOSEN(zmk_battery)
+    const struct device *battery_check = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    if (device_is_ready(battery_check)) {
+        battery_available = true;
+        LOG_INF("✅ Battery hardware detected and ready");
+    } else {
+        LOG_WRN("⚠️  Battery node exists in DT but hardware not ready - USB-only mode");
+    }
+#endif
+
+    // バッテリーハードウェアなし → USB-onlyモードで動作
+    if (!battery_available) {
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+        bool usb_powered = zmk_usb_is_powered();
+        // 0% battery, USB indicator表示
+        zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 0, usb_powered, false);
+#endif
+        k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
+        return;
+    }
+
+    // バッテリーハードウェアあり → 通常のバッテリー監視
+    // ... 通常処理 ...
+}
+```
+
+#### **動作モード**
+
+| 状況 | 動作 |
+|------|------|
+| **USB電源 + バッテリーなし** | USB icon表示、0% battery（クラッシュなし） |
+| **USB電源 + バッテリーあり** | Battery % + USB充電icon表示 |
+| **バッテリー電源のみ** | Battery % 表示（USB iconなし） |
+
+#### **技術的利点**
+
+1. **グレースフルデグラデーション**: ハードウェアなしでも動作継続
+2. **開発フレンドリー**: バッテリー未接続でもテスト可能
+3. **プロダクション対応**: バッテリー追加で自動的にフル機能有効化
+4. **ユーザー透過**: 設定だけで両シナリオ対応
+
+#### **学習された教訓**
+
+**Critical Lesson**: Device Tree定義 ≠ 実ハードウェア存在
+- `DT_HAS_CHOSEN()` はDTノード存在のみ確認
+- `device_is_ready()` で実ハードウェア準備状態を確認必須
+- ボードレベルDT定義が標準装備を前提としている場合あり
+
+**デバッグ手法**:
+1. 症状治療ではなく根本原因を追求
+2. Device Tree定義の確認
+3. 実ハードウェア構成との照合
+4. `device_is_ready()`での実在性確認
+
+---
+
 **Development Start**: 2025-11-07
 **Status**: 🚧 **IN PROGRESS** - チャンネル機能完成、バッテリー機能テスト中
-**Next Step**: バッテリーウィジェット表示テスト
+**Next Step**: バッテリーウィジェット表示テスト（ハードウェアチェック修正版）
