@@ -233,10 +233,10 @@ config PROSPECTOR_BRIGHTNESS_FADE_STEPS
 # Ambient Light Sensor Settings
 config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     bool "Enable ambient light sensor for automatic brightness"
-    default y
+    default n
     depends on PROSPECTOR_MODE_SCANNER
     select I2C
-    select SENSOR  
+    select SENSOR
     select APDS9960
     help
       Enable APDS9960 ambient light sensor for automatic brightness adjustment.
