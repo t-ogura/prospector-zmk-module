@@ -253,28 +253,8 @@ static void update_scanner_battery_widget(void) {
            battery_level, usb_powered ? "yes" : "no", charging ? "yes" : "no");
 #endif
 
-    // Update debug widget with detailed battery investigation (line 1)
-    static char debug_text[128];
-    
-    // Get ZMK cached value for comparison
-#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    uint8_t zmk_cached = zmk_battery_state_of_charge();
-#else
-    uint8_t zmk_cached = 0;
-#endif
-    
-    // ZMK-native battery debug display
-    snprintf(debug_text, sizeof(debug_text), 
-             "ZMK %d%%->%d%% #%d\n%s USB:%s CHG:%s", 
-             zmk_battery_before, zmk_battery_after, update_counter,
-             update_result, usb_powered ? "Y" : "N", charging ? "Y" : "N");
-    // Debug widget re-enabled with safer ZMK-native approach
-    // TEMPORARILY DISABLED: Battery debug overwriting sensor debug messages
-    // if (debug_widget.debug_label) {
-    //     zmk_widget_debug_status_set_text(&debug_widget, debug_text);
-    // }
-
-    zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
+    // Update scanner battery widget with current status
+    zmk_widget_scanner_battery_status_update(&scanner_battery_widget,
                                             battery_level, usb_powered, charging);
 }
 
@@ -300,6 +280,7 @@ static int scanner_usb_listener(const zmk_event_t *eh) {
     
     return -ENOTSUP;
 }
+#endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
 
 // Register event listeners for scanner battery monitoring
 // CRITICAL FIX: Only register when battery support is enabled
@@ -363,61 +344,8 @@ static void battery_periodic_update_handler(struct k_work *work) {
 
     // METHOD 1: ZMK API (may be cached)
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    uint8_t zmk_cached_battery = zmk_battery_state_of_charge();
-    LOG_INF("🔍 ZMK API CALL: zmk_battery_state_of_charge() returned %d%% (possibly cached)", zmk_cached_battery);
-    current_battery = zmk_cached_battery;
-#endif
-
-    // METHOD 2: Direct hardware sensor access
-#if DT_HAS_CHOSEN(zmk_battery)
-    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
-    if (device_is_ready(battery_dev)) {
-        struct sensor_value voltage;
-        int ret = sensor_sample_fetch(battery_dev);
-        if (ret == 0) {
-            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
-            if (ret == 0) {
-                // Convert voltage to percentage (rough estimation)
-                // Typical Li-Po: 3.0V (0%) to 4.2V (100%)
-                int32_t voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
-                
-                // Simple voltage-to-percentage mapping
-                uint8_t hardware_battery = 0;
-                if (voltage_mv >= 4200) {
-                    hardware_battery = 100;
-                } else if (voltage_mv >= 4000) {
-                    hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
-                } else if (voltage_mv >= 3700) {
-                    hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
-                } else if (voltage_mv >= 3000) {
-                    hardware_battery = ((voltage_mv - 3000) * 25) / 700;
-                } else {
-                    hardware_battery = 0;
-                }
-                
-                LOG_INF("🔍 HARDWARE SENSOR: Battery voltage %dmV -> %d%% (hardware calc)", voltage_mv, hardware_battery);
-                
-                // Compare ZMK cache vs hardware reading
-                if (zmk_cached_battery != hardware_battery) {
-                    LOG_WRN("⚠️  CACHE MISMATCH: ZMK cached=%d%% vs Hardware=%d%% (diff=%d%%)", 
-                            zmk_cached_battery, hardware_battery, abs(zmk_cached_battery - hardware_battery));
-                    // Use hardware reading if significantly different
-                    if (abs(zmk_cached_battery - hardware_battery) > 5) {
-                        current_battery = hardware_battery;
-                        LOG_INF("🎯 USING HARDWARE VALUE due to significant difference");
-                    }
-                } else {
-                    LOG_INF("✅ ZMK cache matches hardware reading");
-                }
-            } else {
-                LOG_WRN("Failed to read battery voltage from sensor: %d", ret);
-            }
-        } else {
-            LOG_WRN("Failed to sample battery sensor: %d", ret);
-        }
-    } else {
-        LOG_WRN("Battery sensor device not ready");
-    }
+    current_battery = zmk_battery_state_of_charge();
+    LOG_INF("🔍 ZMK API: Battery level %d%% (from ZMK cache)", current_battery);
 #endif
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
@@ -426,35 +354,12 @@ static void battery_periodic_update_handler(struct k_work *work) {
     LOG_INF("🔍 USB API CALL: zmk_usb_is_powered() returned %s", current_usb ? "true" : "false");
 #endif
 
-    LOG_INF("🔍 FINAL VALUES: Battery=%d%% USB=%s Charging=%s", 
-            current_battery, current_usb ? "true" : "false", current_charging ? "true" : "false");
-    
-    // Update debug widget with comprehensive battery investigation (line 1)
-    static char periodic_debug[128];
-    
-    // Show both ZMK cached and hardware values for comparison
-#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    uint8_t zmk_only = zmk_battery_state_of_charge();
-#else
-    uint8_t zmk_only = 0;
-#endif
-    
-    snprintf(periodic_debug, sizeof(periodic_debug), "P#%d ZMK:%d%% HW:%d%% U:%s\nMethod:%s Chg:%s", 
-             periodic_counter, zmk_only, current_battery, current_usb ? "Y" : "N",
-             (current_battery != zmk_only) ? "HW" : "CACHE",
-             current_charging ? "Y" : "N");
-    // TEMPORARILY DISABLED: debug widget updates to avoid overwriting brightness_control messages
-    // if (debug_widget.debug_label) {
-    //     zmk_widget_debug_status_set_text(&debug_widget, periodic_debug);
-    // }
-    
-    // FORCE UPDATE regardless of cache - bypass the change detection in update_scanner_battery_widget()
-    LOG_INF("🔍 BYPASSING cache check - forcing widget update directly");
-    zmk_widget_scanner_battery_status_update(&scanner_battery_widget, 
+    LOG_INF("📊 Scanner Battery Status: %d%% | USB: %s | Charging: %s",
+            current_battery, current_usb ? "YES" : "NO", current_charging ? "YES" : "NO");
+
+    // Update battery widget with current status
+    zmk_widget_scanner_battery_status_update(&scanner_battery_widget,
                                             current_battery, current_usb, current_charging);
-    
-    // Also call the original update method for comparison
-    update_scanner_battery_widget();
     
     // Schedule next update
     k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
