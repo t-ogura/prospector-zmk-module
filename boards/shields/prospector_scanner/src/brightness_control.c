@@ -35,36 +35,77 @@ static void delayed_debug_msg(struct k_work *work) {
 
 // Fixed brightness mode implementation - safe and simple
 static int brightness_control_init(void) {
+    printk("FIXED MODE INIT CALLED\n");
     LOG_INF("🔆 Brightness Control: Fixed Mode (85%)");
-    
-    zmk_widget_debug_status_set_text(&debug_widget, "🔆 Fixed Mode (CONFIG=n)");
-    
+
+    // Safely set debug message if widget is available
+    if (debug_widget.debug_label) {
+        zmk_widget_debug_status_set_text(&debug_widget, "🔆 Fixed Mode (CONFIG=n)");
+    }
+
     // Schedule a delayed message to avoid being overwritten
     static struct k_work_delayable debug_msg_work;
     k_work_init_delayable(&debug_msg_work, delayed_debug_msg);
     k_work_schedule(&debug_msg_work, K_MSEC(3000));  // Show after 3 seconds
-    
-    // Try to get PWM device safely
+
+    printk("FIXED MODE: Getting PWM device\n");
+
+    // Try to get PWM device safely using proper device tree reference
     const struct device *pwm_dev = NULL;
-#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+
+    // Use the same approach as working v1.1.0
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(pwm_led0), okay)
+    pwm_dev = DEVICE_DT_GET(DT_NODELABEL(pwm_led0));
+    printk("FIXED MODE: Got pwm_led0 from nodelabel\n");
+#elif DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
     pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+    printk("FIXED MODE: Got pwm_leds from compat\n");
 #endif
-    
-    if (pwm_dev && device_is_ready(pwm_dev)) {
-        uint8_t brightness = 85;  // Default
-#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB
-        brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
-#endif
-        int ret = led_set_brightness(pwm_dev, 0, brightness);
-        if (ret < 0) {
-            LOG_WRN("Failed to set brightness: %d", ret);
-        } else {
-            LOG_INF("✅ Fixed brightness set to %d%%", brightness);
-        }
-    } else {
-        LOG_INF("PWM device not found - using hardware default brightness");
+
+    if (!pwm_dev) {
+        LOG_WRN("PWM device not found in device tree");
+        printk("FIXED MODE: PWM device NULL\n");
+        return 0;  // Not fatal, display will use default brightness
     }
-    
+
+    printk("FIXED MODE: Checking if PWM device is ready\n");
+    if (!device_is_ready(pwm_dev)) {
+        LOG_WRN("PWM device not ready");
+        printk("FIXED MODE: PWM device not ready\n");
+        return 0;  // Not fatal
+    }
+
+    printk("FIXED MODE: PWM device ready, setting brightness\n");
+
+    uint8_t brightness = 85;  // Default 85%
+#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB
+    brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
+#endif
+
+    // Use pwm_set() directly instead of led_set_brightness
+    // This is more reliable for simple PWM backlight control
+    const struct pwm_dt_spec *pwm_spec = NULL;
+
+    // Get PWM spec from device - this is the safe way
+    // Note: For simple backlight, we just need to set duty cycle
+    LOG_INF("Setting fixed brightness to %d%%", brightness);
+    printk("FIXED MODE: Setting brightness to %d%%\n", brightness);
+
+    // Calculate duty cycle (0-100% to PWM period)
+    // Assuming 100% = full period, 0% = 0 duty
+    // Most backlights are active high, so higher duty = brighter
+
+    // For now, just try led_set_brightness which should work with pwm-leds
+    int ret = led_set_brightness(pwm_dev, 0, brightness);
+    if (ret < 0) {
+        LOG_WRN("Failed to set brightness: %d", ret);
+        printk("FIXED MODE: led_set_brightness failed: %d\n", ret);
+        return 0;  // Not fatal
+    }
+
+    LOG_INF("✅ Fixed brightness set to %d%%", brightness);
+    printk("FIXED MODE: Brightness set successfully to %d%%\n", brightness);
+
     return 0;  // Always succeed
 }
 
