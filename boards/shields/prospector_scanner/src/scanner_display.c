@@ -134,6 +134,12 @@ static void start_signal_monitoring(void) {
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 // Scanner battery event listener for updating battery widget
 static void update_scanner_battery_widget(void) {
+    // CRITICAL SAFETY CHECK: Ensure battery widget is initialized before updating
+    if (!scanner_battery_widget.obj) {
+        LOG_WRN("⚠️  Battery widget not initialized yet, skipping update");
+        return;
+    }
+
     uint8_t battery_level = 0;
     bool usb_powered = false;
     bool charging = false;
@@ -296,11 +302,14 @@ static int scanner_usb_listener(const zmk_event_t *eh) {
 }
 
 // Register event listeners for scanner battery monitoring
+// CRITICAL FIX: Only register when battery support is enabled
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 ZMK_LISTENER(scanner_battery, scanner_battery_listener);
 ZMK_SUBSCRIPTION(scanner_battery, zmk_battery_state_changed);
 
 ZMK_LISTENER(scanner_usb, scanner_usb_listener);
 ZMK_SUBSCRIPTION(scanner_usb, zmk_usb_conn_state_changed);
+#endif
 
 // Forward declaration of work handler
 static void battery_periodic_update_handler(struct k_work *work);
@@ -713,13 +722,14 @@ lv_obj_t *zmk_display_status_screen() {
     //     LOG_INF("✅ Debug widget initialized for diagnostics");
     // }
     
-    // Initialize scanner battery widget with current status
+    // Initialize scanner battery widget with delayed first update
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
-    LOG_INF("Initializing scanner battery widget with current status");
-    update_scanner_battery_widget();
-    
-    // NOTE: Battery monitoring will start automatically when keyboards become active
-    // This saves power when no keyboards are connected
+    LOG_INF("Scheduling delayed battery widget initialization (3s delay)");
+    // CRITICAL FIX: Delay first battery update to allow ZMK battery system and USB stack to initialize
+    // Immediate call at boot can crash if battery device or USB stack not ready
+    k_work_schedule(&battery_periodic_work, K_SECONDS(3));
+
+    // NOTE: Battery monitoring will continue with periodic updates after first successful read
 #endif
     
     // Start periodic signal timeout monitoring
