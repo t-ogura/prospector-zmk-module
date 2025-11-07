@@ -36,6 +36,20 @@ config ZMK_STATUS_ADV_KEYBOARD_NAME
       Name to identify this keyboard in status advertisements.
       Limited to 8 characters including null terminator.
 
+config PROSPECTOR_CHANNEL
+    int "Prospector channel number (0-255)"
+    range 0 255
+    default 0
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Channel number for Prospector scanner pairing.
+      0 = Broadcast to all scanners (default, maximum compatibility)
+      1-255 = Specific channel for dedicated scanner pairing
+
+      Use this to prevent interference when multiple keyboards and
+      scanners are in the same area. Set the same channel number on
+      both keyboard and scanner to create a dedicated pair.
+
 config ZMK_STATUS_ADV_ACTIVITY_BASED
     bool "Enable activity-based advertisement intervals"
     default y
@@ -128,6 +142,23 @@ config PROSPECTOR_SCANNER_TIMEOUT_MS
       Time in milliseconds to wait before considering a keyboard as lost.
       Default is 480000ms (8 minutes) - should be longer than keyboard idle interval.
       Range is 10-600 seconds (10min max).
+
+config PROSPECTOR_SCANNER_CHANNEL
+    int "Prospector scanner channel number (0-255)"
+    range 0 255
+    default 0
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Channel number for receiving keyboard advertisements.
+      0 = Receive from all keyboards (default, maximum compatibility)
+      1-255 = Receive only from keyboards on the same channel
+
+      Use this to prevent interference when multiple keyboards and
+      scanners are in the same area. Set the same channel number on
+      both keyboard and scanner to create a dedicated pair.
+
+      Backward compatibility: Old keyboards (channel=0) will always
+      be received by scanners regardless of scanner channel setting.
 
 config PROSPECTOR_SCANNER_IDLE_BRIGHTNESS_MS
     int "Time before dimming display when no keyboard activity"

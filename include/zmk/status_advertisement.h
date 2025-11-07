@@ -35,7 +35,7 @@ struct zmk_status_adv_data {
     uint8_t keyboard_id[4];        // Keyboard identifier
     uint8_t modifier_flags;        // Active modifier keys (Ctrl/Shift/Alt/GUI)
     uint8_t wpm_value;             // Words per minute (0-255, 0 = inactive/unknown)
-    uint8_t reserved[1];           // Reserved for future use (reduced from 2 to 1)
+    uint8_t channel;               // Channel number 0-255 (0 = accept all/broadcast to all)
 } __packed;  // Total: 26 bytes
 
 /**

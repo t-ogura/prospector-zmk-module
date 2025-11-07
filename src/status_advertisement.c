@@ -556,8 +556,12 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.wpm_value = 0;
 #endif
     
-    // Reserved bytes (1 byte) for future expansion  
-    memset(manufacturer_data.reserved, 0, 1);
+    // Channel number (0 = broadcast to all scanners)
+#ifdef CONFIG_PROSPECTOR_CHANNEL
+    manufacturer_data.channel = CONFIG_PROSPECTOR_CHANNEL;
+#else
+    manufacturer_data.channel = 0;  // Default: broadcast to all
+#endif
     
     const char *role_str = 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)

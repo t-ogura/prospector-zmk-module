@@ -368,11 +368,32 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                 const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf_copy.data;
                 
                 // Check if this is Prospector data: FF FF AB CD
-                if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF && 
+                if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF &&
                     data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
-                    prospector_data = data;
-                    printk("*** PROSPECTOR SCANNER: Valid Prospector data found! Version=%d, Battery=%d%% ***\n", 
-                           data->version, data->battery_level);
+
+                    // Channel filtering logic
+                    uint8_t scanner_channel = 0;
+#ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
+                    scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
+#endif
+                    uint8_t keyboard_channel = data->channel;
+
+                    // Accept if:
+                    // - Scanner channel is 0 (accept all)
+                    // - Keyboard channel is 0 (broadcast to all)
+                    // - Channels match
+                    bool channel_match = (scanner_channel == 0 ||
+                                        keyboard_channel == 0 ||
+                                        scanner_channel == keyboard_channel);
+
+                    if (channel_match) {
+                        prospector_data = data;
+                        printk("*** PROSPECTOR SCANNER: Valid data! Ch:%d->%d Ver=%d Bat=%d%% ***\n",
+                               keyboard_channel, scanner_channel, data->version, data->battery_level);
+                    } else {
+                        printk("*** SCANNER: Channel mismatch - KB Ch:%d, Scanner Ch:%d (filtered) ***\n",
+                               keyboard_channel, scanner_channel);
+                    }
                 } else {
                     printk("*** SCANNER: Wrong manufacturer signature: %02X%02X %02X%02X (expected FFFF ABCD) ***\n",
                            data->manufacturer_id[0], data->manufacturer_id[1],
