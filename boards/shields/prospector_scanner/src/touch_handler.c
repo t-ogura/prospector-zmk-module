@@ -5,6 +5,7 @@
  */
 
 #include "touch_handler.h"
+#include "system_settings_widget.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -19,6 +20,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #error "Touch sensor device tree node not found"
 #endif
 
+// Swipe gesture detection settings
+#define SWIPE_THRESHOLD 50  // Minimum pixels for valid swipe
+
 // Touch event state
 static struct touch_event_data last_event = {0};
 static touch_event_callback_t registered_callback = NULL;
@@ -27,6 +31,17 @@ static bool touch_active = false;
 // Current touch coordinates (accumulated from INPUT_ABS_X/Y events)
 static uint16_t current_x = 0;
 static uint16_t current_y = 0;
+
+// Swipe gesture state
+static struct {
+    int16_t start_x;
+    int16_t start_y;
+    int64_t start_time;
+    bool in_progress;
+} swipe_state = {0};
+
+// External reference to settings widget (defined in scanner_display.c)
+extern struct zmk_widget_system_settings system_settings_widget;
 
 /**
  * Input event callback for CST816S touch sensor
@@ -60,9 +75,53 @@ static void touch_input_callback(struct input_event *evt) {
             last_event.touched = touch_active;
             last_event.timestamp = k_uptime_get_32();
 
-            LOG_INF("🖐️ Touch %s at (%d, %d)",
-                    touch_active ? "DOWN" : "UP",
-                    last_event.x, last_event.y);
+            if (touch_active) {
+                // Touch DOWN - record start position
+                swipe_state.start_x = current_x;
+                swipe_state.start_y = current_y;
+                swipe_state.start_time = k_uptime_get();
+                swipe_state.in_progress = true;
+
+                LOG_INF("🖐️ Touch DOWN at (%d, %d)", current_x, current_y);
+            } else {
+                // Touch UP - check for swipe gesture
+                LOG_INF("🖐️ Touch UP at (%d, %d)", current_x, current_y);
+
+                if (swipe_state.in_progress) {
+                    int16_t dx = current_x - swipe_state.start_x;
+                    int16_t dy = current_y - swipe_state.start_y;
+                    int16_t abs_dx = (dx < 0) ? -dx : dx;
+                    int16_t abs_dy = (dy < 0) ? -dy : dy;
+
+                    // Check if movement is primarily vertical and exceeds threshold
+                    if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
+                        if (dy > 0) {
+                            // DOWN swipe detected
+                            LOG_INF("⬇️ DOWN SWIPE detected (dy=%d)", dy);
+
+                            // Toggle settings screen
+                            if (!system_settings_widget.obj) {
+                                LOG_ERR("Settings widget not initialized");
+                            } else {
+                                bool is_visible = !lv_obj_has_flag(system_settings_widget.obj,
+                                                                   LV_OBJ_FLAG_HIDDEN);
+                                if (is_visible) {
+                                    zmk_widget_system_settings_hide(&system_settings_widget);
+                                    LOG_INF("✅ Settings screen HIDDEN");
+                                } else {
+                                    zmk_widget_system_settings_show(&system_settings_widget);
+                                    LOG_INF("✅ Settings screen SHOWN");
+                                }
+                            }
+                        } else {
+                            // UP swipe detected
+                            LOG_INF("⬆️ UP SWIPE detected (dy=%d)", dy);
+                        }
+                    }
+
+                    swipe_state.in_progress = false;
+                }
+            }
 
             // Call registered callback if available (for future gesture implementation)
             if (registered_callback) {
