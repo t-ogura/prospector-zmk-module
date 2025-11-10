@@ -165,12 +165,37 @@ disp_spi: &spi3 {
     apds9960: apds9960@39 {
         compatible = "avago,apds9960";
         reg = <0x39>;
-        
+
         // DUMMY INT PIN - Pin 2 (D2/P0.28) - NOT ACTUALLY CONNECTED OR USED
         // This satisfies Zephyr driver initialization requirements
         // With CONFIG_APDS9960_TRIGGER_NONE=y, this pin is only checked for existence
         int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-        
+
+        status = "okay";
+    };
+
+    // CST816S Touch Controller for Waveshare 1.69" Round LCD
+    // I2C address: 0x15
+    // SDA/SCL shared with APDS9960 (both on D4/D5)
+    touch_sensor: cst816s@15 {
+        compatible = "hynitron,cst816s";
+        reg = <0x15>;
+        status = "okay";
+
+        // Touch panel control pins
+        // TP_IRQ → D0 = P0.02 (interrupt pin)
+        // TP_RST → D1 = P0.28 (reset pin)
+        irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        rst-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
+    };
+};
+
+// Touch Input Listener
+// Converts touch sensor input events to ZMK events
+/ {
+    touch_listener: touch_listener {
+        compatible = "zmk,input-listener";
+        device = <&touch_sensor>;
         status = "okay";
     };
 };
