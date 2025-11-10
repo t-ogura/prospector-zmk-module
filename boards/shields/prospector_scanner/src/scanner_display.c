@@ -24,6 +24,8 @@
 #include "wpm_status_widget.h"
 #include "debug_status_widget.h"
 #include "scanner_battery_status_widget.h"
+#include "system_settings_widget.h"
+#include "touch_handler.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -43,6 +45,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // Global UI objects for dynamic updates
 static lv_obj_t *device_name_label = NULL;
+static lv_obj_t *main_screen = NULL;
 static struct zmk_widget_scanner_battery battery_widget;
 static struct zmk_widget_connection_status connection_widget;
 static struct zmk_widget_layer_status layer_widget;
@@ -50,6 +53,8 @@ static struct zmk_widget_modifier_status modifier_widget;
 // Profile widget removed - redundant with connection status widget
 static struct zmk_widget_signal_status signal_widget;
 static struct zmk_widget_wpm_status wpm_widget;
+// Global widget for access from custom behavior
+struct zmk_widget_system_settings system_settings_widget;
 
 // Global debug widget for sensor diagnostics (positioned in modifier area)
 struct zmk_widget_debug_status debug_widget;
@@ -69,7 +74,7 @@ static bool battery_monitoring_active = false;
 #endif
 #endif
 
-// Forward declaration
+// Forward declarations
 static void trigger_scanner_start(void);
 
 // Forward declaration for signal timeout checking
@@ -613,13 +618,15 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
 
 // Display rotation initialization (merged from display_rotate_init.c)
 static int scanner_display_init(void) {
-    LOG_INF("Initializing scanner display system");
-    
+    // Use ERR level for critical init messages to ensure they're visible
+    LOG_ERR("🚀 ===== SCANNER DISPLAY INIT STARTING =====");
+
     const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
     if (!device_is_ready(display)) {
-        LOG_ERR("Display device not ready");
+        LOG_ERR("❌ Display device not ready");
         return -EIO;
     }
+    LOG_ERR("✅ Display device ready");
     
     // Set display orientation
 #ifdef CONFIG_PROSPECTOR_ROTATE_DISPLAY_180
@@ -639,23 +646,34 @@ static int scanner_display_init(void) {
     }
     
     // Note: Backlight control is now handled by brightness_control.c
-    
+
     // Add a delay to allow display to stabilize
     k_msleep(100);
-    
-    LOG_INF("Scanner display initialized successfully");
+
+    // Initialize direct touch handler for raw coordinate debugging
+    ret = touch_handler_init();
+    if (ret < 0) {
+        LOG_WRN("Touch handler init failed: %d (continuing anyway)", ret);
+    } else {
+        LOG_INF("✅ Touch handler initialized - will log raw coordinates");
+    }
+
+    LOG_INF("✅ Scanner display initialized successfully");
     return 0;
 }
 
 // Initialize display early in the boot process
 SYS_INIT(scanner_display_init, APPLICATION, 60);
 
+// Custom settings toggle behavior handles gesture now - no event listener needed
+
 // Required function for ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
 // Following the working adapter pattern with simple, stable display
 lv_obj_t *zmk_display_status_screen() {
-    LOG_INF("Creating scanner status screen");
-    
+    LOG_ERR("🎨 ===== zmk_display_status_screen() CALLED =====");
+
     lv_obj_t *screen = lv_obj_create(NULL);
+    main_screen = screen;  // Save reference for later use
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     
@@ -724,11 +742,15 @@ lv_obj_t *zmk_display_status_screen() {
     
     // Start periodic signal timeout monitoring
     start_signal_monitoring();
-    
+
+    // Initialize system settings widget (initially hidden)
+    zmk_widget_system_settings_init(&system_settings_widget, screen);
+    LOG_INF("System settings widget initialized");
+
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
-    
-    LOG_INF("Scanner screen created successfully");
+
+    LOG_INF("Scanner screen created successfully with gesture support");
     return screen;
 }
 

@@ -33,21 +33,21 @@ static uint16_t current_y = 0;
  *
  * This receives INPUT_BTN_TOUCH, INPUT_ABS_X, INPUT_ABS_Y events from Zephyr
  */
-static void touch_input_callback(struct input_event *evt) {
-    LOG_DBG("Touch input event: type=%d code=%d value=%d",
-            evt->type, evt->code, evt->value);
+// External callback registration function that can be called from scanner_display.c
+extern void touch_handler_late_register_callback(touch_event_callback_t callback);
 
+static void touch_input_callback(struct input_event *evt) {
     switch (evt->code) {
         case INPUT_ABS_X:
             // Store X coordinate
             current_x = (uint16_t)evt->value;
-            LOG_DBG("Touch X: %d", current_x);
+            LOG_INF("📍 X: %d", current_x);
             break;
 
         case INPUT_ABS_Y:
             // Store Y coordinate
             current_y = (uint16_t)evt->value;
-            LOG_DBG("Touch Y: %d", current_y);
+            LOG_INF("📍 Y: %d", current_y);
             break;
 
         case INPUT_BTN_TOUCH:
@@ -60,24 +60,18 @@ static void touch_input_callback(struct input_event *evt) {
             last_event.touched = touch_active;
             last_event.timestamp = k_uptime_get_32();
 
-            LOG_INF("Touch %s at (%d, %d)",
-                    touch_active ? "PRESS" : "RELEASE",
+            LOG_INF("🖐️ Touch %s at (%d, %d)",
+                    touch_active ? "DOWN" : "UP",
                     last_event.x, last_event.y);
 
-            // Call registered callback if available
+            // Call registered callback if available (for future gesture implementation)
             if (registered_callback) {
                 registered_callback(&last_event);
             }
             break;
 
         default:
-            LOG_DBG("Unknown input code: %d", evt->code);
             break;
-    }
-
-    // Sync event marks end of event batch (optional handling)
-    if (evt->sync) {
-        LOG_DBG("Touch event sync");
     }
 }
 
@@ -100,11 +94,12 @@ int touch_handler_init(void) {
 
 int touch_handler_register_callback(touch_event_callback_t callback) {
     if (!callback) {
+        LOG_ERR("❌ Callback is NULL!");
         return -EINVAL;
     }
 
     registered_callback = callback;
-    LOG_INF("Touch callback registered");
+    LOG_INF("✅ Touch callback registered successfully: callback=%p", (void*)callback);
 
     return 0;
 }

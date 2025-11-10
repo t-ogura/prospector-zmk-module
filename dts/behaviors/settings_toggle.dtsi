@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2024 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    behaviors {
+        /omit-if-no-ref/ settings_toggle: behavior_settings_toggle {
+            compatible = "zmk,behavior-settings-toggle";
+            #binding-cells = <0>;
+        };
+    };
+};

@@ -190,13 +190,20 @@ disp_spi: &spi3 {
     };
 };
 
-// Touch Input Listener
-// Converts touch sensor input events to ZMK events
+// Touch Input Listener - Direct touch event handling
 / {
     touch_listener: touch_listener {
         compatible = "zmk,input-listener";
         device = <&touch_sensor>;
-        status = "okay";
+        status = "okay";  // Enabled for raw touch events
+    };
+
+    // Custom settings toggle behavior for gesture
+    behaviors {
+        settings_toggle: behavior_settings_toggle {
+            compatible = "zmk,behavior-settings-toggle";
+            #binding-cells = <0>;
+        };
     };
 };
 
