@@ -190,15 +190,12 @@ disp_spi: &spi3 {
     };
 };
 
-// Touch Input Listener - Direct touch event handling
-/ {
-    touch_listener: touch_listener {
-        compatible = "zmk,input-listener";
-        device = <&touch_sensor>;
-        status = "okay";  // Enabled for raw touch events
-    };
+// Touch Input - Direct CST816S driver events via INPUT_CALLBACK_DEFINE
+// No zmk,input-listener needed - touch_handler.c uses INPUT_CALLBACK_DEFINE instead
+// This avoids the input processing pipeline and mouse gesture system
 
-    // Custom settings toggle behavior for gesture
+/ {
+    // Custom settings toggle behavior for gesture (future use)
     behaviors {
         settings_toggle: behavior_settings_toggle {
             compatible = "zmk,behavior-settings-toggle";
