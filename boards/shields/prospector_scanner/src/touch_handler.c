@@ -55,6 +55,8 @@ extern struct zmk_widget_system_settings system_settings_widget;
 extern void touch_handler_late_register_callback(touch_event_callback_t callback);
 
 static void touch_input_callback(struct input_event *evt) {
+    LOG_DBG("📥 Input event received: type=%d, code=%d, value=%d", evt->type, evt->code, evt->value);
+
     switch (evt->code) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
@@ -216,6 +218,7 @@ static void touch_input_callback(struct input_event *evt) {
             break;
 
         default:
+            LOG_DBG("Unknown input event: type=%d, code=%d, value=%d", evt->type, evt->code, evt->value);
             break;
     }
 }
