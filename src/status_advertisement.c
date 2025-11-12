@@ -587,13 +587,21 @@ static void build_manufacturer_payload(void) {
 #endif
 }
 
-// CRITICAL FIX: DO NOT stop default ZMK advertising
-// Stopping it breaks PC connection while keeping Prospector working
+// RESTORE v1.1.1 APPROACH: Complete advertising replacement
+// This was the ONLY approach that worked with LED + Split communication
 static int stop_default_advertising(const struct device *dev) {
-    // DISABLED: Stopping ZMK advertising breaks BLE connection to PC
-    // The keyboard becomes visible but not connectable
-    LOG_INF("Prospector: Keeping default ZMK advertising ACTIVE for PC connection");
-    default_adv_stopped = false;  // Never stop it
+    if (default_adv_stopped) {
+        return 0;
+    }
+
+    LOG_INF("Prospector: Stopping default ZMK advertising (v1.1.1 working approach)");
+    int err = bt_le_adv_stop();
+    if (err && err != -EALREADY) {
+        LOG_ERR("bt_le_adv_stop failed: %d", err);
+    } else {
+        LOG_INF("Default advertising stopped - this approach worked in v1.1.1");
+        default_adv_stopped = true;
+    }
     return 0;
 }
 
@@ -604,9 +612,11 @@ static void start_custom_advertising(void) {
     return;
 #endif
 
-    // CRITICAL FIX: Skip advertising stop - let ZMK handle normal BLE connection
-    // We'll try bt_le_adv_update_data() to coexist with ZMK advertising
-    LOG_DBG("Starting Prospector advertising without stopping ZMK");
+    if (!default_adv_stopped) {
+        LOG_DBG("Default advertising not stopped yet, trying again");
+        stop_default_advertising(NULL);
+        k_sleep(K_MSEC(50)); // Wait for stop to complete
+    }
 
     build_manufacturer_payload();
     
@@ -627,32 +637,18 @@ static void start_custom_advertising(void) {
     LOG_DBG("Prospector: Starting separated adv/scan_rsp advertising");
     LOG_DBG("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
     LOG_DBG("SCAN_RSP: Name + Appearance = %d bytes", 2 + actual_name_len + 3);
-    
-    // This approach keeps manufacturer_data at full 26 bytes while device name in scan response
-    LOG_INF("✅ Advertisement stays within 31-byte limit: %d bytes", 3 + 2 + sizeof(manufacturer_data));
-    
-    // CRITICAL FIX: Use bt_le_adv_update_data() to coexist with ZMK advertising
-    // Try to update existing ZMK advertising data with our manufacturer data
-    int err = bt_le_adv_update_data(adv_data_array, ARRAY_SIZE(adv_data_array),
-                                    scan_rsp, ARRAY_SIZE(scan_rsp));
+
+    // Start advertising with separated adv_data and scan_rsp
+    int err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array),
+                              scan_rsp, ARRAY_SIZE(scan_rsp));
 
     if (err == 0) {
-        LOG_INF("✅ Advertising data updated successfully (coexisting with ZMK)");
+        LOG_INF("✅ Advertising started successfully");
     } else if (err == -E2BIG) {
-        LOG_ERR("❌ Advertising update failed: -E2BIG (payload too large - %d bytes exceeds 31-byte limit)",
+        LOG_ERR("❌ Advertising failed: -E2BIG (payload too large - %d bytes exceeds 31-byte limit)",
                 3 + 2 + sizeof(manufacturer_data)); // Flags + ManufData header + payload
-    } else if (err == -EAGAIN) {
-        // ZMK advertising not started yet, try bt_le_adv_start
-        LOG_INF("ZMK advertising not active yet, starting Prospector advertising...");
-        err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array),
-                              scan_rsp, ARRAY_SIZE(scan_rsp));
-        if (err == 0) {
-            LOG_INF("✅ Prospector advertising started");
-        } else {
-            LOG_ERR("❌ Advertising start failed with error: %d", err);
-        }
     } else {
-        LOG_WRN("⚠️  Advertising update failed with error: %d (may coexist with ZMK)", err);
+        LOG_ERR("❌ Advertising failed with error: %d", err);
     }
     
     LOG_INF("Manufacturer data (%d bytes): %02X%02X %02X%02X %02X %02X %02X %02X %02X %02X %02X", 
