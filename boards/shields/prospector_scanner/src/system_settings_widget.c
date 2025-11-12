@@ -74,14 +74,18 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 30);
 
     // --- Bootloader Button ---
-    widget->bootloader_btn = lv_btn_create(widget->obj);
+    widget->bootloader_btn = lv_obj_create(widget->obj);
     lv_obj_set_size(widget->bootloader_btn, 180, 50);
     lv_obj_align(widget->bootloader_btn, LV_ALIGN_CENTER, 0, -40);
 
     // Button style - blue with rounded corners
     lv_obj_set_style_bg_color(widget->bootloader_btn, lv_color_hex(0x2196F3), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(widget->bootloader_btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(widget->bootloader_btn, 15, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(widget->bootloader_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(widget->bootloader_btn, 0, LV_PART_MAIN);
+    lv_obj_add_flag(widget->bootloader_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(widget->bootloader_btn, LV_OBJ_FLAG_SCROLLABLE);
 
     // Button label
     lv_obj_t *bootloader_label = lv_label_create(widget->bootloader_btn);
@@ -93,14 +97,18 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     lv_obj_add_event_cb(widget->bootloader_btn, bootloader_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
     // --- Reset Button ---
-    widget->reset_btn = lv_btn_create(widget->obj);
+    widget->reset_btn = lv_obj_create(widget->obj);
     lv_obj_set_size(widget->reset_btn, 180, 50);
     lv_obj_align(widget->reset_btn, LV_ALIGN_CENTER, 0, 30);
 
     // Button style - red with rounded corners
     lv_obj_set_style_bg_color(widget->reset_btn, lv_color_hex(0xF44336), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(widget->reset_btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(widget->reset_btn, 15, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(widget->reset_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(widget->reset_btn, 0, LV_PART_MAIN);
+    lv_obj_add_flag(widget->reset_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(widget->reset_btn, LV_OBJ_FLAG_SCROLLABLE);
 
     // Button label
     lv_obj_t *reset_label = lv_label_create(widget->reset_btn);
