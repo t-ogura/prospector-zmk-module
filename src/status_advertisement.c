@@ -485,18 +485,16 @@ static void build_manufacturer_payload(void) {
 #endif
 
     if (strcmp(central_side, "LEFT") == 0) {
-        // Central is on LEFT: 
-        // peripheral_battery[0] = RIGHT keyboard (first peripheral)
-        // peripheral_battery[1] = AUX (if exists)
-        // peripheral_battery[2] = unused
-        manufacturer_data.peripheral_battery[0] = peripheral_batteries[0]; // Right keyboard
+        // Central is on LEFT: Scanner expects battery_level=Right, peripheral_battery[0]=Left
+        // So we swap: battery_level gets peripheral, peripheral_battery[0] gets central
+        uint8_t central_battery = battery_level;
+        manufacturer_data.battery_level = peripheral_batteries[0]; // Right (peripheral) -> battery_level
+        manufacturer_data.peripheral_battery[0] = central_battery; // Left (central) -> peripheral_battery[0]
         manufacturer_data.peripheral_battery[1] = peripheral_batteries[1]; // Aux if exists
         manufacturer_data.peripheral_battery[2] = peripheral_batteries[2]; // Third peripheral
     } else {
-        // Central is on RIGHT (default):
-        // peripheral_battery[0] = LEFT keyboard (first peripheral)
-        // peripheral_battery[1] = AUX (if exists)  
-        // peripheral_battery[2] = unused
+        // Central is on RIGHT (default): Scanner expects battery_level=Right, peripheral_battery[0]=Left
+        // This matches naturally: battery_level=central(right), peripheral_battery[0]=peripheral(left)
         memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 3);
     }
            
