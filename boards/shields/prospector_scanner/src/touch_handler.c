@@ -21,7 +21,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #endif
 
 // Swipe gesture detection settings
-#define SWIPE_THRESHOLD 50  // Minimum pixels for valid swipe
+#define SWIPE_THRESHOLD 30  // Minimum pixels for valid swipe (adjusted for 180° rotated display)
 
 // Touch event state
 static struct touch_event_data last_event = {0};
