@@ -462,14 +462,10 @@ static void build_manufacturer_payload(void) {
     
     // BLE status flags - use ZMK BLE APIs (only on central or non-split)
 #if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
-    bool ble_connected = zmk_ble_active_profile_is_connected();
-    bool ble_open = zmk_ble_active_profile_is_open();
-    LOG_DBG("BLE status check: connected=%d, open=%d", ble_connected, ble_open);
-
-    if (ble_connected) {
+    if (zmk_ble_active_profile_is_connected()) {
         flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
     }
-    if (!ble_open) {
+    if (!zmk_ble_active_profile_is_open()) {
         flags |= ZMK_STATUS_FLAG_BLE_BONDED;
     }
 #endif
@@ -486,12 +482,8 @@ static void build_manufacturer_payload(void) {
     const char *central_side = "RIGHT";
 #ifdef CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE
     central_side = CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE;
-    LOG_INF("🔍 CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE is defined: '%s'", central_side);
-#else
-    LOG_WRN("⚠️  CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE is NOT defined, using default: '%s'", central_side);
 #endif
 
-    LOG_INF("Central side configuration: '%s'", central_side);
     if (strcmp(central_side, "LEFT") == 0) {
         // Central is on LEFT: 
         // peripheral_battery[0] = RIGHT keyboard (first peripheral)
