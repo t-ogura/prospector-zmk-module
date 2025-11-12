@@ -77,7 +77,7 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
         widget->layer_labels[i] = lv_label_create(widget->obj);
         
         // Set larger font for better visibility  
-        lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_28, 0);  // Large numbers (enabled via config)
+        lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_20, 0);  // Large numbers (enabled via config)
         
         // Set layer number text (support 0-9)
         char layer_text[3];  // Support double digits
