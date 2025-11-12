@@ -174,26 +174,39 @@ static void touch_input_callback(struct input_event *evt) {
                     // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
                         if (dy > 0) {
-                            // DOWN swipe detected
+                            // DOWN swipe detected - SHOW settings screen
                             LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
 
-                            // Toggle settings screen
+                            if (!system_settings_widget.obj) {
+                                LOG_ERR("Settings widget not initialized");
+                            } else {
+                                bool is_visible = !lv_obj_has_flag(system_settings_widget.obj,
+                                                                   LV_OBJ_FLAG_HIDDEN);
+                                if (!is_visible) {
+                                    // Only show if currently hidden
+                                    zmk_widget_system_settings_show(&system_settings_widget);
+                                    LOG_INF("✅ Settings screen SHOWN (down swipe)");
+                                } else {
+                                    LOG_INF("⚠️  Settings already visible, ignoring down swipe");
+                                }
+                            }
+                        } else {
+                            // UP swipe detected - HIDE settings screen
+                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
+
                             if (!system_settings_widget.obj) {
                                 LOG_ERR("Settings widget not initialized");
                             } else {
                                 bool is_visible = !lv_obj_has_flag(system_settings_widget.obj,
                                                                    LV_OBJ_FLAG_HIDDEN);
                                 if (is_visible) {
+                                    // Only hide if currently visible
                                     zmk_widget_system_settings_hide(&system_settings_widget);
-                                    LOG_INF("✅ Settings screen HIDDEN");
+                                    LOG_INF("✅ Settings screen HIDDEN (up swipe)");
                                 } else {
-                                    zmk_widget_system_settings_show(&system_settings_widget);
-                                    LOG_INF("✅ Settings screen SHOWN");
+                                    LOG_INF("⚠️  Settings already hidden, ignoring up swipe");
                                 }
                             }
-                        } else {
-                            // UP swipe detected
-                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
                         }
                     } else {
                         LOG_INF("❌ Horizontal swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
