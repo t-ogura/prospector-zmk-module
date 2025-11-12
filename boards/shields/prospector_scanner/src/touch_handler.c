@@ -27,6 +27,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static struct touch_event_data last_event = {0};
 static touch_event_callback_t registered_callback = NULL;
 static bool touch_active = false;
+static bool prev_touch_active = false;  // Track previous state to detect touch start
 
 // Current touch coordinates (accumulated from INPUT_ABS_X/Y events)
 static uint16_t current_x = 0;
@@ -84,8 +85,11 @@ static void touch_input_callback(struct input_event *evt) {
             last_event.touched = touch_active;
             last_event.timestamp = k_uptime_get_32();
 
-            if (touch_active) {
-                // Touch DOWN - record start position
+            // Detect touch start (false → true transition)
+            bool touch_started = touch_active && !prev_touch_active;
+
+            if (touch_started) {
+                // Touch DOWN - record start position ONLY at touch start
                 swipe_state.start_x = current_x;
                 swipe_state.start_y = current_y;
                 swipe_state.start_time = k_uptime_get();
@@ -96,6 +100,9 @@ static void touch_input_callback(struct input_event *evt) {
                 // Reset coordinate update flags for next touch
                 x_updated = false;
                 y_updated = false;
+            } else if (touch_active) {
+                // Touch is being held (dragging) - just log current position
+                LOG_DBG("👆 Dragging at (%d, %d)", current_x, current_y);
             } else {
                 // Touch UP - check for swipe gesture
                 // NOTE: Display orientation vs touch panel coordinate system mismatch
@@ -159,6 +166,9 @@ static void touch_input_callback(struct input_event *evt) {
             if (registered_callback) {
                 registered_callback(&last_event);
             }
+
+            // Update previous state for next event
+            prev_touch_active = touch_active;
             break;
 
         default:
