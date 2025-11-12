@@ -98,19 +98,23 @@ static void touch_input_callback(struct input_event *evt) {
                 y_updated = false;
             } else {
                 // Touch UP - check for swipe gesture
+                // NOTE: Display is rotated 180 degrees - coordinates are inverted
+                // Physical DOWN swipe → dy is NEGATIVE (y decreases)
+                // Physical UP swipe → dy is POSITIVE (y increases)
                 int16_t dx = current_x - swipe_state.start_x;
                 int16_t dy = current_y - swipe_state.start_y;
                 int16_t abs_dx = (dx < 0) ? -dx : dx;
                 int16_t abs_dy = (dy < 0) ? -dy : dy;
 
-                LOG_INF("🖐️ Touch UP at (%d, %d) - Movement: dx=%d, dy=%d (start: %d,%d)",
-                        current_x, current_y, dx, dy, swipe_state.start_x, swipe_state.start_y);
+                LOG_INF("👆 Swipe: (%d,%d) → (%d,%d), dx=%d dy=%d",
+                        swipe_state.start_x, swipe_state.start_y, current_x, current_y, dx, dy);
 
                 if (swipe_state.in_progress) {
                     // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
-                        if (dy > 0) {
-                            // DOWN swipe detected
+                        // INVERTED: Physical DOWN swipe has negative dy
+                        if (dy < 0) {
+                            // DOWN swipe detected (dy is negative due to 180° rotation)
                             LOG_INF("⬇️ DOWN SWIPE detected (dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
 
                             // Toggle settings screen
@@ -128,12 +132,11 @@ static void touch_input_callback(struct input_event *evt) {
                                 }
                             }
                         } else {
-                            // UP swipe detected
+                            // UP swipe detected (dy is positive due to 180° rotation)
                             LOG_INF("⬆️ UP SWIPE detected (dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
                         }
                     } else {
-                        LOG_DBG("❌ No valid swipe: abs_dx=%d, abs_dy=%d, threshold=%d",
-                                abs_dx, abs_dy, SWIPE_THRESHOLD);
+                        LOG_INF("❌ Horizontal swipe (not vertical)");
                     }
 
                     swipe_state.in_progress = false;
