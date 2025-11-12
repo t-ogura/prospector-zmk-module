@@ -59,10 +59,11 @@ static void update_connection_status(struct zmk_widget_connection_status *widget
     snprintf(profile_text, sizeof(profile_text), "%d", kbd->data.profile_slot);
     lv_label_set_text(widget->ble_profile_label, profile_text);
     
-    LOG_INF("Connection status: USB:%s BLE:%s Profile:%d", 
+    LOG_INF("Connection status: USB:%s BLE:%s Profile:%d (status_flags=0x%02X)",
             usb_hid_ready ? "Ready" : "NotReady",
             ble_connected ? "Connected" : (ble_bonded ? "Bonded" : "Open"),
-            kbd->data.profile_slot);
+            kbd->data.profile_slot,
+            kbd->data.status_flags);
 }
 
 int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widget, lv_obj_t *parent) {
