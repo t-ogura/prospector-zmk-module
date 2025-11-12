@@ -56,6 +56,48 @@ extern void touch_handler_late_register_callback(touch_event_callback_t callback
 
 static void touch_input_callback(struct input_event *evt) {
     switch (evt->code) {
+        case INPUT_KEY_DOWN:
+            // CST816S hardware gesture: Swipe DOWN detected
+            if (evt->value == 1) {  // Key press
+                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected");
+                // Toggle settings screen
+                if (!system_settings_widget.obj) {
+                    LOG_ERR("Settings widget not initialized");
+                } else {
+                    bool is_visible = !lv_obj_has_flag(system_settings_widget.obj,
+                                                       LV_OBJ_FLAG_HIDDEN);
+                    if (is_visible) {
+                        zmk_widget_system_settings_hide(&system_settings_widget);
+                        LOG_INF("✅ Settings screen HIDDEN (by CST816S gesture)");
+                    } else {
+                        zmk_widget_system_settings_show(&system_settings_widget);
+                        LOG_INF("✅ Settings screen SHOWN (by CST816S gesture)");
+                    }
+                }
+            }
+            break;
+
+        case INPUT_KEY_UP:
+            if (evt->value == 1) {
+                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected");
+                // Future: implement swipe up action
+            }
+            break;
+
+        case INPUT_KEY_LEFT:
+            if (evt->value == 1) {
+                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected");
+                // Future: implement swipe left action
+            }
+            break;
+
+        case INPUT_KEY_RIGHT:
+            if (evt->value == 1) {
+                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected");
+                // Future: implement swipe right action
+            }
+            break;
+
         case INPUT_ABS_X:
             // Store X coordinate
             current_x = (uint16_t)evt->value;
