@@ -462,10 +462,14 @@ static void build_manufacturer_payload(void) {
     
     // BLE status flags - use ZMK BLE APIs (only on central or non-split)
 #if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
-    if (zmk_ble_active_profile_is_connected()) {
+    bool ble_connected = zmk_ble_active_profile_is_connected();
+    bool ble_open = zmk_ble_active_profile_is_open();
+    LOG_DBG("BLE status check: connected=%d, open=%d", ble_connected, ble_open);
+
+    if (ble_connected) {
         flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
     }
-    if (!zmk_ble_active_profile_is_open()) {
+    if (!ble_open) {
         flags |= ZMK_STATUS_FLAG_BLE_BONDED;
     }
 #endif
