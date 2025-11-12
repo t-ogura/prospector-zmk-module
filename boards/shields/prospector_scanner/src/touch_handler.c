@@ -98,24 +98,31 @@ static void touch_input_callback(struct input_event *evt) {
                 y_updated = false;
             } else {
                 // Touch UP - check for swipe gesture
-                // NOTE: Display is rotated 180 degrees - coordinates are inverted
-                // Physical DOWN swipe → dy is NEGATIVE (y decreases)
-                // Physical UP swipe → dy is POSITIVE (y increases)
-                int16_t dx = current_x - swipe_state.start_x;
-                int16_t dy = current_y - swipe_state.start_y;
+                // NOTE: Display orientation vs touch panel coordinate system mismatch
+                // Physical vertical swipe → coordinate X axis changes (90° rotation)
+                // Physical horizontal swipe → coordinate Y axis changes
+                int16_t raw_dx = current_x - swipe_state.start_x;
+                int16_t raw_dy = current_y - swipe_state.start_y;
+
+                // COORDINATE TRANSFORM: Swap X/Y axes for 90° rotation
+                // Physical vertical movement → coordinate X movement (inverted)
+                // Physical horizontal movement → coordinate Y movement
+                int16_t dx = -raw_dy;  // Physical horizontal = coordinate Y (inverted)
+                int16_t dy = -raw_dx;  // Physical vertical = coordinate X (inverted)
+
                 int16_t abs_dx = (dx < 0) ? -dx : dx;
                 int16_t abs_dy = (dy < 0) ? -dy : dy;
 
-                LOG_INF("👆 Swipe: (%d,%d) → (%d,%d), dx=%d dy=%d",
-                        swipe_state.start_x, swipe_state.start_y, current_x, current_y, dx, dy);
+                LOG_INF("👆 Swipe: (%d,%d) → (%d,%d), raw dx=%d dy=%d → physical dx=%d dy=%d",
+                        swipe_state.start_x, swipe_state.start_y, current_x, current_y,
+                        raw_dx, raw_dy, dx, dy);
 
                 if (swipe_state.in_progress) {
                     // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
-                        // INVERTED: Physical DOWN swipe has negative dy
-                        if (dy < 0) {
-                            // DOWN swipe detected (dy is negative due to 180° rotation)
-                            LOG_INF("⬇️ DOWN SWIPE detected (dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
+                        if (dy > 0) {
+                            // DOWN swipe detected
+                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
 
                             // Toggle settings screen
                             if (!system_settings_widget.obj) {
@@ -132,11 +139,12 @@ static void touch_input_callback(struct input_event *evt) {
                                 }
                             }
                         } else {
-                            // UP swipe detected (dy is positive due to 180° rotation)
-                            LOG_INF("⬆️ UP SWIPE detected (dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
+                            // UP swipe detected
+                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
                         }
                     } else {
-                        LOG_INF("❌ Horizontal swipe (not vertical)");
+                        LOG_INF("❌ Horizontal swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
+                                abs_dx, abs_dy, SWIPE_THRESHOLD);
                     }
 
                     swipe_state.in_progress = false;
