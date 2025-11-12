@@ -31,6 +31,8 @@ static bool touch_active = false;
 // Current touch coordinates (accumulated from INPUT_ABS_X/Y events)
 static uint16_t current_x = 0;
 static uint16_t current_y = 0;
+static bool x_updated = false;
+static bool y_updated = false;
 
 // Swipe gesture state
 static struct {
@@ -56,18 +58,25 @@ static void touch_input_callback(struct input_event *evt) {
         case INPUT_ABS_X:
             // Store X coordinate
             current_x = (uint16_t)evt->value;
-            LOG_INF("📍 X: %d", current_x);
+            x_updated = true;
+            LOG_DBG("📍 X: %d", current_x);
             break;
 
         case INPUT_ABS_Y:
             // Store Y coordinate
             current_y = (uint16_t)evt->value;
-            LOG_INF("📍 Y: %d", current_y);
+            y_updated = true;
+            LOG_DBG("📍 Y: %d", current_y);
             break;
 
         case INPUT_BTN_TOUCH:
             // Touch state changed
             touch_active = (evt->value != 0);
+
+            // Wait for coordinates to be updated
+            if (!x_updated || !y_updated) {
+                LOG_WRN("⚠️  Touch event before coordinates updated, using previous values");
+            }
 
             // Update last event with complete coordinates
             last_event.x = current_x;
@@ -83,21 +92,26 @@ static void touch_input_callback(struct input_event *evt) {
                 swipe_state.in_progress = true;
 
                 LOG_INF("🖐️ Touch DOWN at (%d, %d)", current_x, current_y);
+
+                // Reset coordinate update flags for next touch
+                x_updated = false;
+                y_updated = false;
             } else {
                 // Touch UP - check for swipe gesture
-                LOG_INF("🖐️ Touch UP at (%d, %d)", current_x, current_y);
+                int16_t dx = current_x - swipe_state.start_x;
+                int16_t dy = current_y - swipe_state.start_y;
+                int16_t abs_dx = (dx < 0) ? -dx : dx;
+                int16_t abs_dy = (dy < 0) ? -dy : dy;
+
+                LOG_INF("🖐️ Touch UP at (%d, %d) - Movement: dx=%d, dy=%d (start: %d,%d)",
+                        current_x, current_y, dx, dy, swipe_state.start_x, swipe_state.start_y);
 
                 if (swipe_state.in_progress) {
-                    int16_t dx = current_x - swipe_state.start_x;
-                    int16_t dy = current_y - swipe_state.start_y;
-                    int16_t abs_dx = (dx < 0) ? -dx : dx;
-                    int16_t abs_dy = (dy < 0) ? -dy : dy;
-
                     // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
                         if (dy > 0) {
                             // DOWN swipe detected
-                            LOG_INF("⬇️ DOWN SWIPE detected (dy=%d)", dy);
+                            LOG_INF("⬇️ DOWN SWIPE detected (dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
 
                             // Toggle settings screen
                             if (!system_settings_widget.obj) {
@@ -115,12 +129,19 @@ static void touch_input_callback(struct input_event *evt) {
                             }
                         } else {
                             // UP swipe detected
-                            LOG_INF("⬆️ UP SWIPE detected (dy=%d)", dy);
+                            LOG_INF("⬆️ UP SWIPE detected (dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
                         }
+                    } else {
+                        LOG_DBG("❌ No valid swipe: abs_dx=%d, abs_dy=%d, threshold=%d",
+                                abs_dx, abs_dy, SWIPE_THRESHOLD);
                     }
 
                     swipe_state.in_progress = false;
                 }
+
+                // Reset coordinate update flags
+                x_updated = false;
+                y_updated = false;
             }
 
             // Call registered callback if available (for future gesture implementation)
