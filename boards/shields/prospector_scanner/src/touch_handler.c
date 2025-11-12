@@ -73,6 +73,8 @@ static void touch_input_callback(struct input_event *evt) {
         case INPUT_BTN_TOUCH:
             // Touch state changed
             touch_active = (evt->value != 0);
+            LOG_DBG("🔔 BTN_TOUCH event: value=%d, prev_active=%d, new_active=%d",
+                    evt->value, prev_touch_active, touch_active);
 
             // Wait for coordinates to be updated
             if (!x_updated || !y_updated) {
