@@ -57,26 +57,42 @@ static void create_system_settings_ui(struct zmk_widget_system_settings *widget)
     lv_obj_set_style_text_align(widget->title_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 30);
 
-    // --- Bootloader Button (clickable) ---
-    widget->bootloader_button = lv_label_create(widget->obj);
-    lv_label_set_text(widget->bootloader_button, "[ Enter Bootloader ]");
-    lv_obj_set_style_text_color(widget->bootloader_button, lv_color_hex(0x2196F3), LV_PART_MAIN);
-    lv_obj_set_style_text_align(widget->bootloader_button, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    // --- Bootloader Button (real button widget) ---
+    widget->bootloader_button = lv_btn_create(widget->obj);
+    lv_obj_set_size(widget->bootloader_button, 180, 50);  // Larger, more touchable
     lv_obj_align(widget->bootloader_button, LV_ALIGN_CENTER, 0, -40);
 
-    // Make button clickable
-    lv_obj_add_flag(widget->bootloader_button, LV_OBJ_FLAG_CLICKABLE);
+    // Style the button
+    lv_obj_set_style_bg_color(widget->bootloader_button, lv_color_hex(0x2196F3), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(widget->bootloader_button, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(widget->bootloader_button, 8, LV_PART_MAIN);
+
+    // Add label to button
+    lv_obj_t *bootloader_label = lv_label_create(widget->bootloader_button);
+    lv_label_set_text(bootloader_label, "Enter Bootloader");
+    lv_obj_set_style_text_color(bootloader_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(bootloader_label);
+
+    // Add click event
     lv_obj_add_event_cb(widget->bootloader_button, bootloader_button_event_handler, LV_EVENT_CLICKED, widget);
 
-    // --- Reset Button (clickable) ---
-    widget->reset_button = lv_label_create(widget->obj);
-    lv_label_set_text(widget->reset_button, "[ System Reset ]");
-    lv_obj_set_style_text_color(widget->reset_button, lv_color_hex(0xF44336), LV_PART_MAIN);
-    lv_obj_set_style_text_align(widget->reset_button, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    // --- Reset Button (real button widget) ---
+    widget->reset_button = lv_btn_create(widget->obj);
+    lv_obj_set_size(widget->reset_button, 180, 50);  // Larger, more touchable
     lv_obj_align(widget->reset_button, LV_ALIGN_CENTER, 0, 30);
 
-    // Make button clickable
-    lv_obj_add_flag(widget->reset_button, LV_OBJ_FLAG_CLICKABLE);
+    // Style the button
+    lv_obj_set_style_bg_color(widget->reset_button, lv_color_hex(0xF44336), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(widget->reset_button, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(widget->reset_button, 8, LV_PART_MAIN);
+
+    // Add label to button
+    lv_obj_t *reset_label = lv_label_create(widget->reset_button);
+    lv_label_set_text(reset_label, "System Reset");
+    lv_obj_set_style_text_color(reset_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(reset_label);
+
+    // Add click event
     lv_obj_add_event_cb(widget->reset_button, reset_button_event_handler, LV_EVENT_CLICKED, widget);
 
     // Instruction text at bottom
@@ -125,13 +141,18 @@ static void bootloader_button_event_handler(lv_event_t *e) {
 
     LOG_WRN("⚠️  BOOTLOADER MODE REQUESTED - Entering bootloader...");
 
-    // Update button text to show it was clicked
+    // Update button appearance to show it was clicked
     if (widget && widget->bootloader_button) {
-        lv_label_set_text(widget->bootloader_button, "[ Entering Bootloader... ]");
-        lv_obj_set_style_text_color(widget->bootloader_button, lv_color_hex(0x00FF00), LV_PART_MAIN);
+        // Get the label child of the button
+        lv_obj_t *label = lv_obj_get_child(widget->bootloader_button, 0);
+        if (label) {
+            lv_label_set_text(label, "Entering...");
+        }
+        // Change button color to green
+        lv_obj_set_style_bg_color(widget->bootloader_button, lv_color_hex(0x00FF00), LV_PART_MAIN);
     }
 
-    // Force LVGL update to show the text change
+    // Force LVGL update to show the change
     lv_refr_now(NULL);
 
     // Small delay to let user see the feedback
@@ -147,13 +168,18 @@ static void reset_button_event_handler(lv_event_t *e) {
 
     LOG_WRN("⚠️  SYSTEM RESET REQUESTED - Rebooting...");
 
-    // Update button text to show it was clicked
+    // Update button appearance to show it was clicked
     if (widget && widget->reset_button) {
-        lv_label_set_text(widget->reset_button, "[ Rebooting... ]");
-        lv_obj_set_style_text_color(widget->reset_button, lv_color_hex(0x00FF00), LV_PART_MAIN);
+        // Get the label child of the button
+        lv_obj_t *label = lv_obj_get_child(widget->reset_button, 0);
+        if (label) {
+            lv_label_set_text(label, "Rebooting...");
+        }
+        // Change button color to green
+        lv_obj_set_style_bg_color(widget->reset_button, lv_color_hex(0x00FF00), LV_PART_MAIN);
     }
 
-    // Force LVGL update to show the text change
+    // Force LVGL update to show the change
     lv_refr_now(NULL);
 
     // Small delay to let user see the feedback
