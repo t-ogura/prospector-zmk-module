@@ -13,6 +13,7 @@
         zmk,kscan = &kscan0;
         zmk,physical-layout = &default_layout;  // ZMK Studio compatibility: no matrix_transform!
         zephyr,display = &st7789v;
+        zephyr,console = &cdc_acm_uart;  // USB logging console
     };
 
     default_layout: default_layout {
@@ -54,8 +55,15 @@
             label = "Display Backlight";
         };
     };
-    
+
     // Ambient light sensor alias removed - pure Kconfig control
+};
+
+// USB CDC ACM device for logging
+&zephyr_udc0 {
+    cdc_acm_uart: cdc_acm_uart {
+        compatible = "zephyr,cdc-acm-uart";
+    };
 };
 
 // Disable default SPI2 to avoid conflicts
