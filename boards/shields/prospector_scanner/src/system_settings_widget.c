@@ -44,23 +44,46 @@ static void create_settings_ui(struct zmk_widget_system_settings *widget) {
         return;  // Already created
     }
 
-    LOG_INF("Creating system settings UI (first show)");
+    LOG_INF("🔧 Creating system settings UI (first show)");
+    LOG_INF("🔧 Widget pointer: %p", (void*)widget);
+    LOG_INF("🔧 Widget parent: %p", (void*)widget->parent);
 
+    if (!widget->parent) {
+        LOG_ERR("❌ CRITICAL: widget->parent is NULL! Cannot create UI");
+        return;
+    }
+
+    LOG_INF("🔧 About to call lv_obj_create(parent)...");
     // Create container for system settings screen - FULL SCREEN OVERLAY
     widget->obj = lv_obj_create(widget->parent);
-    lv_obj_set_size(widget->obj, LV_PCT(100), LV_PCT(100));
+    LOG_INF("🔧 lv_obj_create() returned: %p", (void*)widget->obj);
 
+    if (!widget->obj) {
+        LOG_ERR("❌ CRITICAL: lv_obj_create() returned NULL!");
+        return;
+    }
+
+    LOG_INF("🔧 Setting object size...");
+    lv_obj_set_size(widget->obj, LV_PCT(100), LV_PCT(100));
+    LOG_INF("🔧 Size set successfully");
+
+    LOG_INF("🔧 Setting background style...");
     // Make background completely opaque (no transparency)
     lv_obj_set_style_bg_color(widget->obj, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(widget->obj, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(widget->obj, 0, LV_PART_MAIN);
     lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_SCROLLABLE);
+    LOG_INF("🔧 Background style set");
 
+    LOG_INF("🔧 Setting position...");
     // Position at (0,0) to cover entire parent
     lv_obj_set_pos(widget->obj, 0, 0);
+    LOG_INF("🔧 Position set");
 
+    LOG_INF("🔧 Creating title label...");
     // Title label - at top
     widget->title_label = lv_label_create(widget->obj);
+    LOG_INF("🔧 Title label created: %p", (void*)widget->title_label);
     lv_label_set_text(widget->title_label, "System Settings");
     lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_align(widget->title_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
