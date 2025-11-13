@@ -752,9 +752,9 @@ lv_obj_t *zmk_display_status_screen() {
     // Start periodic signal timeout monitoring
     start_signal_monitoring();
 
-    // Initialize system settings widget (initially hidden)
-    zmk_widget_system_settings_init(&system_settings_widget, screen);
-    LOG_INF("System settings widget initialized");
+    // Lazy initialize system settings widget (UI created on first show to save memory)
+    zmk_widget_system_settings_init_lazy(&system_settings_widget, screen);
+    LOG_INF("System settings widget lazy initialized");
 
     // Trigger scanner initialization after screen is ready
     trigger_scanner_start();
