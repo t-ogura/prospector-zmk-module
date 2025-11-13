@@ -27,10 +27,8 @@ static void bootloader_btn_event_cb(lv_event_t *e) {
         // Set GPREGRET register to indicate bootloader request
         NRF_POWER->GPREGRET = 0x57; // Magic value for bootloader entry
 
-        // Small delay to ensure log is printed
-        k_msleep(100);
-
-        // Perform system reset to enter bootloader
+        // DO NOT use k_msleep() in LVGL event handler - causes system freeze!
+        // Perform system reset immediately
         sys_reboot(SYS_REBOOT_WARM);
     }
 }
@@ -41,10 +39,8 @@ static void reset_btn_event_cb(lv_event_t *e) {
     if (code == LV_EVENT_CLICKED) {
         LOG_INF("🔄 Reset button clicked - performing system reset");
 
-        // Small delay to ensure log is printed
-        k_msleep(100);
-
-        // Perform normal system reset
+        // DO NOT use k_msleep() in LVGL event handler - causes system freeze!
+        // Perform normal system reset immediately
         sys_reboot(SYS_REBOOT_WARM);
     }
 }
