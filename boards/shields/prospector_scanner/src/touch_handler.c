@@ -11,6 +11,7 @@
 #include <zephyr/device.h>
 #include <zephyr/input/input.h>
 #include <zephyr/logging/log.h>
+#include <lvgl.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -28,6 +29,9 @@ static struct touch_event_data last_event = {0};
 static touch_event_callback_t registered_callback = NULL;
 static bool touch_active = false;
 static bool prev_touch_active = false;  // Track previous state to detect touch start
+
+// LVGL input device
+static lv_indev_t *lvgl_indev = NULL;
 
 // Current touch coordinates (accumulated from INPUT_ABS_X/Y events)
 static uint16_t current_x = 0;
@@ -239,6 +243,13 @@ static void touch_input_callback(struct input_event *evt) {
 // Input callback registration macro
 INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), touch_input_callback);
 
+// LVGL input device read callback
+static void lvgl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
+    data->point.x = current_x;
+    data->point.y = current_y;
+    data->state = touch_active ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
 int touch_handler_init(void) {
     const struct device *touch_dev = DEVICE_DT_GET(TOUCH_NODE);
 
@@ -249,6 +260,20 @@ int touch_handler_init(void) {
 
     LOG_INF("Touch handler initialized: CST816S on I2C");
     LOG_INF("Touch panel size: 240x280 (Waveshare 1.69\" Round LCD)");
+
+    // Register LVGL input device for touch events
+    static lv_indev_drv_t indev_drv;
+    lv_indev_drv_init(&indev_drv);
+    indev_drv.type = LV_INDEV_TYPE_POINTER;
+    indev_drv.read_cb = lvgl_input_read;
+    lvgl_indev = lv_indev_drv_register(&indev_drv);
+
+    if (!lvgl_indev) {
+        LOG_ERR("Failed to register LVGL input device");
+        return -ENOMEM;
+    }
+
+    LOG_INF("✅ LVGL input device registered for touch events");
 
     return 0;
 }
