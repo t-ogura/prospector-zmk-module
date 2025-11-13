@@ -66,19 +66,15 @@ static void touch_input_callback(struct input_event *evt) {
             // CST816S hardware gesture: Swipe DOWN detected
             if (evt->value == 1) {  // Key press
                 LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected");
-                // Toggle settings screen
-                if (!system_settings_widget.obj) {
-                    LOG_ERR("Settings widget not initialized");
+                // Toggle settings screen (obj may be NULL due to lazy init)
+                bool is_visible = (system_settings_widget.obj != NULL) &&
+                                !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
+                if (is_visible) {
+                    zmk_widget_system_settings_hide(&system_settings_widget);
+                    LOG_INF("✅ Settings screen HIDDEN (by CST816S gesture)");
                 } else {
-                    bool is_visible = !lv_obj_has_flag(system_settings_widget.obj,
-                                                       LV_OBJ_FLAG_HIDDEN);
-                    if (is_visible) {
-                        zmk_widget_system_settings_hide(&system_settings_widget);
-                        LOG_INF("✅ Settings screen HIDDEN (by CST816S gesture)");
-                    } else {
-                        zmk_widget_system_settings_show(&system_settings_widget);
-                        LOG_INF("✅ Settings screen SHOWN (by CST816S gesture)");
-                    }
+                    zmk_widget_system_settings_show(&system_settings_widget);
+                    LOG_INF("✅ Settings screen SHOWN (by CST816S gesture)");
                 }
             }
             break;
@@ -181,35 +177,31 @@ static void touch_input_callback(struct input_event *evt) {
                             // DOWN swipe detected - SHOW settings screen
                             LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
 
-                            if (!system_settings_widget.obj) {
-                                LOG_ERR("Settings widget not initialized");
+                            // Check visibility (obj may be NULL before first show due to lazy init)
+                            bool is_visible = (system_settings_widget.obj != NULL) &&
+                                            !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
+
+                            if (!is_visible) {
+                                // Show screen (will create UI if needed via lazy init)
+                                zmk_widget_system_settings_show(&system_settings_widget);
+                                LOG_INF("✅ Settings screen SHOWN (down swipe)");
                             } else {
-                                bool is_visible = !lv_obj_has_flag(system_settings_widget.obj,
-                                                                   LV_OBJ_FLAG_HIDDEN);
-                                if (!is_visible) {
-                                    // Only show if currently hidden
-                                    zmk_widget_system_settings_show(&system_settings_widget);
-                                    LOG_INF("✅ Settings screen SHOWN (down swipe)");
-                                } else {
-                                    LOG_INF("⚠️  Settings already visible, ignoring down swipe");
-                                }
+                                LOG_INF("⚠️  Settings already visible, ignoring down swipe");
                             }
                         } else {
                             // UP swipe detected - HIDE settings screen
                             LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
 
-                            if (!system_settings_widget.obj) {
-                                LOG_ERR("Settings widget not initialized");
+                            // Check visibility (obj may be NULL if never shown)
+                            bool is_visible = (system_settings_widget.obj != NULL) &&
+                                            !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
+
+                            if (is_visible) {
+                                // Hide screen
+                                zmk_widget_system_settings_hide(&system_settings_widget);
+                                LOG_INF("✅ Settings screen HIDDEN (up swipe)");
                             } else {
-                                bool is_visible = !lv_obj_has_flag(system_settings_widget.obj,
-                                                                   LV_OBJ_FLAG_HIDDEN);
-                                if (is_visible) {
-                                    // Only hide if currently visible
-                                    zmk_widget_system_settings_hide(&system_settings_widget);
-                                    LOG_INF("✅ Settings screen HIDDEN (up swipe)");
-                                } else {
-                                    LOG_INF("⚠️  Settings already hidden, ignoring up swipe");
-                                }
+                                LOG_INF("⚠️  Settings already hidden, ignoring up swipe");
                             }
                         }
                     } else {
