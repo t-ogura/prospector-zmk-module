@@ -22,7 +22,9 @@
 // Profile widget removed - connection status already handled by connection_status_widget
 #include "signal_status_widget.h"
 #include "wpm_status_widget.h"
+#if IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)
 #include "debug_status_widget.h"
+#endif
 #include "scanner_battery_status_widget.h"
 #include "system_settings_widget.h"
 #include "touch_handler.h"
@@ -57,7 +59,9 @@ static struct zmk_widget_wpm_status wpm_widget;
 struct zmk_widget_system_settings system_settings_widget;
 
 // Global debug widget for sensor diagnostics (positioned in modifier area)
+#if IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)
 struct zmk_widget_debug_status debug_widget;
+#endif
 
 // Scanner's own battery status widget (top-right corner)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -432,7 +436,9 @@ static void start_battery_monitoring(void) {
     
     // Update debug widget to show monitoring started
     if (debug_widget.debug_label) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)
         zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STARTED");
+#endif
     }
 }
 
@@ -443,7 +449,9 @@ static void stop_battery_monitoring(void) {
     
     // Update debug widget to show monitoring stopped
     if (debug_widget.debug_label) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)
         zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STOPPED");
+#endif
     }
 }
 #endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
@@ -719,12 +727,13 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -5, -5); // More space from edge
     
     // Debug status widget (overlaps modifier area when no modifiers active)
+#if IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET)
     zmk_widget_debug_status_init(&debug_widget, screen);
-    
-    // Debug widget visibility controlled by CONFIG_PROSPECTOR_DEBUG_WIDGET
-    bool debug_enabled = IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET);
-    LOG_INF("Debug widget %s by CONFIG_PROSPECTOR_DEBUG_WIDGET", debug_enabled ? "ENABLED" : "DISABLED");
-    zmk_widget_debug_status_set_visible(&debug_widget, debug_enabled);
+    LOG_INF("Debug widget ENABLED by CONFIG_PROSPECTOR_DEBUG_WIDGET");
+    zmk_widget_debug_status_set_visible(&debug_widget, true);
+#else
+    LOG_INF("Debug widget DISABLED by CONFIG_PROSPECTOR_DEBUG_WIDGET");
+#endif
     // TEMPORARILY DISABLED: initial debug message to avoid overwriting brightness_control
     // if (debug_widget.debug_label && debug_enabled) {
     //     zmk_widget_debug_status_set_text(&debug_widget, "DEBUG: Scanner Ready");

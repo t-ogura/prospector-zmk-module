@@ -24,7 +24,9 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # zephyr_library_sources(src/profile_status_widget.c)  # Removed - redundant with connection_status_widget
   zephyr_library_sources(src/signal_status_widget.c)  # RSSI + reception rate widget
   zephyr_library_sources(src/wpm_status_widget.c)  # YADS-style WPM display widget
-  zephyr_library_sources(src/debug_status_widget.c)  # Debug status overlay widget for diagnostics
+  if(CONFIG_PROSPECTOR_DEBUG_WIDGET)
+    zephyr_library_sources(src/debug_status_widget.c)  # Debug status overlay widget for diagnostics
+  endif()
   zephyr_library_sources(src/brightness_control.c)  # Auto-brightness with ambient light sensor
   zephyr_library_sources(src/system_settings_widget.c)  # System settings screen (simple version - no buttons yet)
   zephyr_library_sources(src/behavior_settings_toggle.c)  # Custom behavior for settings toggle gesture
