@@ -680,7 +680,7 @@ lv_obj_t *zmk_display_status_screen() {
     // Device name label at top center (larger font for better readability) - moved down 10px
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0); // Retro pixel font style
+    lv_obj_set_style_text_font(device_name_label, &lv_font_montserrat_20, 0);
     lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25); // Back to center
     lv_label_set_text(device_name_label, "Initializing...");
     
