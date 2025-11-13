@@ -116,26 +116,39 @@ static void create_settings_ui(struct zmk_widget_system_settings *widget) {
 }
 
 void zmk_widget_system_settings_show(struct zmk_widget_system_settings *widget) {
+    LOG_INF("🔵 zmk_widget_system_settings_show() CALLED");
+
     if (!widget) {
+        LOG_WRN("⚠️  Widget is NULL, cannot show");
         return;
     }
 
+    LOG_INF("📋 Widget obj before create_settings_ui: %p", (void*)widget->obj);
+
     // Create UI if not created yet (lazy initialization)
     create_settings_ui(widget);
+
+    LOG_INF("📋 Widget obj after create_settings_ui: %p", (void*)widget->obj);
 
     if (widget->obj) {
         // Move to foreground to ensure it covers everything
         lv_obj_move_foreground(widget->obj);
         // Make visible
         lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
-        LOG_DBG("System settings screen shown - moved to foreground");
+        LOG_INF("✅ System settings screen shown - moved to foreground");
+    } else {
+        LOG_ERR("❌ Widget obj is NULL after create_settings_ui!");
     }
 }
 
 void zmk_widget_system_settings_hide(struct zmk_widget_system_settings *widget) {
+    LOG_INF("🔴 zmk_widget_system_settings_hide() CALLED");
+
     if (widget && widget->obj) {
         // Hide the overlay
         lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
-        LOG_DBG("System settings screen hidden");
+        LOG_INF("✅ System settings screen hidden");
+    } else {
+        LOG_WRN("⚠️  Cannot hide - widget or obj is NULL");
     }
 }

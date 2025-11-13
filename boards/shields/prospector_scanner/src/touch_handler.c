@@ -104,20 +104,20 @@ static void touch_input_callback(struct input_event *evt) {
             // Store X coordinate
             current_x = (uint16_t)evt->value;
             x_updated = true;
-            LOG_DBG("📍 X: %d", current_x);
+            LOG_INF("📍 X: %d", current_x);
             break;
 
         case INPUT_ABS_Y:
             // Store Y coordinate
             current_y = (uint16_t)evt->value;
             y_updated = true;
-            LOG_DBG("📍 Y: %d", current_y);
+            LOG_INF("📍 Y: %d", current_y);
             break;
 
         case INPUT_BTN_TOUCH:
             // Touch state changed
             touch_active = (evt->value != 0);
-            LOG_DBG("🔔 BTN_TOUCH event: value=%d, prev_active=%d, new_active=%d",
+            LOG_INF("🔔 BTN_TOUCH event: value=%d, prev_active=%d, new_active=%d",
                     evt->value, prev_touch_active, touch_active);
 
             // Wait for coordinates to be updated
@@ -148,7 +148,7 @@ static void touch_input_callback(struct input_event *evt) {
                 y_updated = false;
             } else if (touch_active) {
                 // Touch is being held (dragging) - just log current position
-                LOG_DBG("👆 Dragging at (%d, %d)", current_x, current_y);
+                LOG_INF("👆 Dragging at (%d, %d)", current_x, current_y);
             } else {
                 // Touch UP - check for swipe gesture
                 // NOTE: Display orientation vs touch panel coordinate system mismatch
