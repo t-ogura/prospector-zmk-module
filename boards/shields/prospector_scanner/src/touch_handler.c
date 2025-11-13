@@ -65,33 +65,9 @@ static void touch_input_callback(struct input_event *evt) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
             if (evt->value == 1) {  // Key press
-                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected");
-
-                // CRITICAL SAFETY: Check if widget struct itself is valid
-                // The widget is defined as global but may not be initialized yet
-                if (&system_settings_widget == NULL) {
-                    LOG_ERR("❌ CRASH PREVENTION: system_settings_widget pointer is NULL!");
-                    break;
-                }
-
-                LOG_INF("🔍 Widget address check passed: %p", (void*)&system_settings_widget);
-                LOG_INF("🔍 Widget obj pointer: %p", (void*)system_settings_widget.obj);
-
-                // Toggle settings screen (obj may be NULL due to lazy init)
-                bool is_visible = (system_settings_widget.obj != NULL) &&
-                                !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
-
-                LOG_INF("🔍 is_visible calculated: %d", is_visible);
-
-                if (is_visible) {
-                    LOG_INF("🔄 Calling zmk_widget_system_settings_hide()...");
-                    zmk_widget_system_settings_hide(&system_settings_widget);
-                    LOG_INF("✅ Settings screen HIDDEN (by CST816S gesture)");
-                } else {
-                    LOG_INF("🔄 Calling zmk_widget_system_settings_show()...");
-                    zmk_widget_system_settings_show(&system_settings_widget);
-                    LOG_INF("✅ Settings screen SHOWN (by CST816S gesture)");
-                }
+                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - HANDLER DISABLED FOR TESTING");
+                // TEMPORARILY DISABLED to test if CST816S can detect DOWN gesture
+                // The crash appears to happen in settings widget code, not in gesture detection
             }
             break;
 
