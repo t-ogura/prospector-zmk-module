@@ -25,21 +25,39 @@ static void reset_btn_event_cb(lv_event_t *e) {
 }
 
 int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, lv_obj_t *parent) {
+    // Lazy initialization - only store parent, don't create UI yet
+    widget->obj = NULL;
+    widget->title_label = NULL;
+    widget->bootloader_btn = NULL;
+    widget->bootloader_label = NULL;
+    widget->reset_btn = NULL;
+    widget->reset_label = NULL;
+    widget->parent = parent;  // Store parent for later
+
+    LOG_INF("System settings widget initialized (lazy mode - UI will be created on first show)");
+    return 0;
+}
+
+// Helper function to create the actual UI (called on first show)
+static void create_settings_ui(struct zmk_widget_system_settings *widget) {
+    if (widget->obj != NULL) {
+        return;  // Already created
+    }
+
+    LOG_INF("Creating system settings UI (first show)");
+
     // Create container for system settings screen - FULL SCREEN OVERLAY
-    widget->obj = lv_obj_create(parent);
+    widget->obj = lv_obj_create(widget->parent);
     lv_obj_set_size(widget->obj, LV_PCT(100), LV_PCT(100));
 
     // Make background completely opaque (no transparency)
     lv_obj_set_style_bg_color(widget->obj, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_COVER, LV_PART_MAIN);  // Fully opaque
+    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(widget->obj, 0, LV_PART_MAIN);
     lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_SCROLLABLE);
 
     // Position at (0,0) to cover entire parent
     lv_obj_set_pos(widget->obj, 0, 0);
-
-    // Move to top of z-order so it covers everything
-    lv_obj_move_foreground(widget->obj);
 
     // Title label - at top
     widget->title_label = lv_label_create(widget->obj);
@@ -48,7 +66,7 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     lv_obj_set_style_text_align(widget->title_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);
 
-    // Bootloader button - styled object (not lv_btn to avoid complexity)
+    // Bootloader button
     widget->bootloader_btn = lv_obj_create(widget->obj);
     lv_obj_set_size(widget->bootloader_btn, 180, 50);
     lv_obj_set_style_bg_color(widget->bootloader_btn, lv_color_hex(0x0066CC), LV_PART_MAIN);
@@ -94,12 +112,18 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     // Initially hidden
     lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    LOG_INF("System settings widget initialized with bootloader and reset buttons");
-    return 0;
+    LOG_INF("System settings UI created successfully");
 }
 
 void zmk_widget_system_settings_show(struct zmk_widget_system_settings *widget) {
-    if (widget && widget->obj) {
+    if (!widget) {
+        return;
+    }
+
+    // Create UI if not created yet (lazy initialization)
+    create_settings_ui(widget);
+
+    if (widget->obj) {
         // Move to foreground to ensure it covers everything
         lv_obj_move_foreground(widget->obj);
         // Make visible
