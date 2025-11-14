@@ -48,6 +48,38 @@ static struct {
     bool in_progress;
 } swipe_state = {0};
 
+// Work queue for LVGL operations (must run in thread context, not ISR)
+static struct k_work settings_show_work;
+static struct k_work settings_hide_work;
+
+static void settings_show_work_handler(struct k_work *work) {
+    // Check visibility (obj may be NULL before first show due to lazy init)
+    bool is_visible = (system_settings_widget.obj != NULL) &&
+                    !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
+
+    if (!is_visible) {
+        // Show screen (will create UI if needed via lazy init)
+        zmk_widget_system_settings_show(&system_settings_widget);
+        LOG_INF("✅ Settings screen SHOWN (down swipe)");
+    } else {
+        LOG_INF("⚠️  Settings already visible, ignoring down swipe");
+    }
+}
+
+static void settings_hide_work_handler(struct k_work *work) {
+    // Check visibility (obj may be NULL if never shown)
+    bool is_visible = (system_settings_widget.obj != NULL) &&
+                    !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
+
+    if (is_visible) {
+        // Hide screen
+        zmk_widget_system_settings_hide(&system_settings_widget);
+        LOG_INF("✅ Settings screen HIDDEN (up swipe)");
+    } else {
+        LOG_INF("⚠️  Settings already hidden, ignoring up swipe");
+    }
+}
+
 // External reference to settings widget (defined in scanner_display.c)
 extern struct zmk_widget_system_settings system_settings_widget;
 
@@ -140,8 +172,8 @@ static void touch_input_callback(struct input_event *evt) {
                 x_updated = false;
                 y_updated = false;
             } else if (touch_active) {
-                // Touch is being held (dragging) - just log current position
-                LOG_INF("👆 Dragging at (%d, %d)", current_x, current_y);
+                // Touch is being held (dragging) - just log current position (reduced logging)
+                LOG_DBG("👆 Dragging at (%d, %d)", current_x, current_y);
             } else {
                 // Touch UP - check for swipe gesture
                 // NOTE: Display orientation vs touch panel coordinate system mismatch
@@ -169,36 +201,16 @@ static void touch_input_callback(struct input_event *evt) {
                         if (dy > 0) {
                             // DOWN swipe detected - SHOW settings screen
                             LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
-
-                            // Check visibility (obj may be NULL before first show due to lazy init)
-                            bool is_visible = (system_settings_widget.obj != NULL) &&
-                                            !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
-
-                            if (!is_visible) {
-                                // Show screen (will create UI if needed via lazy init)
-                                zmk_widget_system_settings_show(&system_settings_widget);
-                                LOG_INF("✅ Settings screen SHOWN (down swipe)");
-                            } else {
-                                LOG_INF("⚠️  Settings already visible, ignoring down swipe");
-                            }
+                            // Submit work to show settings (LVGL must run in thread context)
+                            k_work_submit(&settings_show_work);
                         } else {
                             // UP swipe detected - HIDE settings screen
                             LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
-
-                            // Check visibility (obj may be NULL if never shown)
-                            bool is_visible = (system_settings_widget.obj != NULL) &&
-                                            !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
-
-                            if (is_visible) {
-                                // Hide screen
-                                zmk_widget_system_settings_hide(&system_settings_widget);
-                                LOG_INF("✅ Settings screen HIDDEN (up swipe)");
-                            } else {
-                                LOG_INF("⚠️  Settings already hidden, ignoring up swipe");
-                            }
+                            // Submit work to hide settings (LVGL must run in thread context)
+                            k_work_submit(&settings_hide_work);
                         }
                     } else {
-                        LOG_INF("❌ Horizontal swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
+                        LOG_DBG("Horizontal swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
                                 abs_dx, abs_dy, SWIPE_THRESHOLD);
                     }
 
@@ -245,6 +257,11 @@ int touch_handler_init(void) {
 
     LOG_INF("Touch handler initialized: CST816S on I2C");
     LOG_INF("Touch panel size: 240x280 (Waveshare 1.69\" Round LCD)");
+
+    // Initialize work queues for LVGL operations (must run in thread context)
+    k_work_init(&settings_show_work, settings_show_work_handler);
+    k_work_init(&settings_hide_work, settings_hide_work_handler);
+    LOG_INF("✅ Work queues initialized for deferred LVGL operations");
 
     // Register LVGL input device for touch events
     static lv_indev_drv_t indev_drv;
