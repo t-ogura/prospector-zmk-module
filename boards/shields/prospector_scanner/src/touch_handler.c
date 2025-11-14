@@ -48,6 +48,9 @@ static struct {
     bool in_progress;
 } swipe_state = {0};
 
+// External reference to settings widget (defined in scanner_display.c)
+extern struct zmk_widget_system_settings system_settings_widget;
+
 // Work queue for LVGL operations (must run in thread context, not ISR)
 static struct k_work settings_show_work;
 static struct k_work settings_hide_work;
@@ -79,9 +82,6 @@ static void settings_hide_work_handler(struct k_work *work) {
         LOG_INF("⚠️  Settings already hidden, ignoring up swipe");
     }
 }
-
-// External reference to settings widget (defined in scanner_display.c)
-extern struct zmk_widget_system_settings system_settings_widget;
 
 /**
  * Input event callback for CST816S touch sensor
