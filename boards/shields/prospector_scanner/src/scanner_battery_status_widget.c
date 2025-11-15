@@ -141,18 +141,36 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
 }
 
 bool zmk_scanner_battery_hardware_available(void) {
-    // CRITICAL FIX: Always return false to prevent boot crash
-    // The issue: device_is_ready() may trigger I2C/sensor subsystem access
-    // which isn't initialized when brightness_control_init doesn't run.
+    // SAFE IMPLEMENTATION: Battery uses ADC (not I2C), so device_is_ready() is safe
+    // after boot completes and ADC subsystem is initialized.
     //
-    // Root cause timeline:
-    // v1.1.0: Light sensor missing -> brightness_control_init skipped -> I2C not init -> crash
-    // v1.1.1: brightness_control_init ALWAYS runs -> I2C always init -> no crash
-    // v1.1.2: Battery support enabled -> device_is_ready() tries I2C -> I2C not init -> crash
+    // XIAO BLE battery monitoring:
+    // - Uses ADC channel 7 (P0.31/AIN7)
+    // - Voltage divider circuit (510kΩ + 1MΩ)
+    // - Power control via GPIO P0.14
+    // - No I2C dependency - pure ADC operation
     //
-    // Solution: Disable battery widget completely for now
-    // TODO: Re-enable after ensuring I2C subsystem init is independent
+    // This function is called AFTER boot, so ADC subsystem is ready.
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_DEMO_MODE)
+    // Demo mode: Always show battery widget with fake data
+    return true;
+
+#elif DT_HAS_CHOSEN(zmk_battery)
+    // Check if battery device is actually ready (ADC-based check)
+    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    bool ready = device_is_ready(battery_dev);
+
+    if (!ready) {
+        LOG_DBG("Battery device exists in DT but not ready (ADC may need time to init)");
+    }
+
+    return ready;
+
+#else
+    // No battery configured in device tree
     return false;
+#endif
 }
 
 int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_status *widget,
