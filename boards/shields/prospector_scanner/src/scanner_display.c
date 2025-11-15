@@ -166,56 +166,63 @@ static void update_scanner_battery_widget(void) {
 #if DT_HAS_CHOSEN(zmk_battery)
     const char *update_result = "N/A";
 
-    // Use zmk_scanner_battery_hardware_available() which tests actual sensor access
-    if (zmk_scanner_battery_hardware_available()) {
-        const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
-        LOG_INF("🔋 Manual battery reading with ZMK-style processing");
-        
-        // Replicate ZMK's battery update logic manually
-        struct sensor_value state_of_charge;
-        int ret = -1;
-        
+    // CRITICAL: Use zmk_scanner_battery_hardware_available() which tests actual sensor access
+    if (!zmk_scanner_battery_hardware_available()) {
+        // Hardware not available - skip all battery processing to prevent crash
+        LOG_WRN("🚫 Scanner battery hardware not available - operating in USB-only mode");
+
+        // Hide battery widget when no hardware
+        zmk_widget_scanner_battery_status_set_visible(&scanner_battery_widget, false);
+
+        // Early return - don't process battery at all
+        return;
+    }
+
+    // Hardware is available - proceed with battery reading
+    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    LOG_INF("🔋 Manual battery reading with ZMK-style processing");
+
+    // Replicate ZMK's battery update logic manually
+    struct sensor_value state_of_charge;
+    int ret = -1;
+
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_STATE_OF_CHARGE)
-        // Try STATE_OF_CHARGE first (same as ZMK)
-        ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE);
+    // Try STATE_OF_CHARGE first (same as ZMK)
+    ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE);
+    if (ret == 0) {
+        ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, &state_of_charge);
         if (ret == 0) {
-            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, &state_of_charge);
-            if (ret == 0) {
-                update_result = "SOC_MODE";
-            }
+            update_result = "SOC_MODE";
         }
+    }
 #elif IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_LITHIUM_VOLTAGE)
-        // Try LITHIUM_VOLTAGE mode (same as ZMK)
-        ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_VOLTAGE);
+    // Try LITHIUM_VOLTAGE mode (same as ZMK)
+    ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_VOLTAGE);
+    if (ret == 0) {
+        struct sensor_value voltage;
+        ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
         if (ret == 0) {
-            struct sensor_value voltage;
-            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
-            if (ret == 0) {
-                // ZMK's lithium_ion_mv_to_pct conversion
-                uint16_t mv = voltage.val1 * 1000 + (voltage.val2 / 1000);
-                if (mv >= 4200) {
-                    state_of_charge.val1 = 100;
-                } else if (mv <= 3450) {
-                    state_of_charge.val1 = 0;
-                } else {
-                    state_of_charge.val1 = mv * 2 / 15 - 459;
-                }
-                update_result = "VOLTAGE_MODE";
+            // ZMK's lithium_ion_mv_to_pct conversion
+            uint16_t mv = voltage.val1 * 1000 + (voltage.val2 / 1000);
+            if (mv >= 4200) {
+                state_of_charge.val1 = 100;
+            } else if (mv <= 3450) {
+                state_of_charge.val1 = 0;
+            } else {
+                state_of_charge.val1 = mv * 2 / 15 - 459;
             }
+            update_result = "VOLTAGE_MODE";
         }
+    }
 #endif
-        
-        if (ret != 0) {
-            update_result = "SENSOR_FAIL";
-            LOG_ERR("❌ Battery sensor reading failed: %d", ret);
-        } else {
-            // Successfully read battery - use direct value instead of cache
-            battery_level = state_of_charge.val1;
-            LOG_INF("✅ Battery reading succeeded: %d%% (direct from sensor)", battery_level);
-        }
+
+    if (ret != 0) {
+        update_result = "SENSOR_FAIL";
+        LOG_ERR("❌ Battery sensor reading failed: %d", ret);
     } else {
-        update_result = "NOT_READY";
-        LOG_ERR("Battery device not ready");
+        // Successfully read battery - use direct value instead of cache
+        battery_level = state_of_charge.val1;
+        LOG_INF("✅ Battery reading succeeded: %d%% (direct from sensor)", battery_level);
     }
 #else
     const char *update_result = "NO_DEVICE";
@@ -319,14 +326,31 @@ static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_ha
 static void battery_periodic_update_handler(struct k_work *work) {
     static uint32_t periodic_counter = 0;
     periodic_counter++;
-    
+
     LOG_INF("🔄 Periodic battery status update triggered (%ds interval)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
-    
-    // CRITICAL INVESTIGATION: Bypass ZMK battery cache - read from hardware directly
+
+    // CRITICAL: Check hardware availability first to prevent crash
+#if DT_HAS_CHOSEN(zmk_battery)
+    if (!zmk_scanner_battery_hardware_available()) {
+        // Hardware not available - skip battery update entirely
+        LOG_WRN("🚫 Periodic update: Scanner battery hardware not available - skipping update");
+
+        // Reschedule next periodic update
+        k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
+        return;
+    }
+#else
+    // No battery device tree configuration - skip battery update
+    LOG_WRN("🚫 Periodic update: No battery device tree configuration");
+    k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
+    return;
+#endif
+
+    // Hardware is available - proceed with battery reading
     uint8_t current_battery = 0;
     bool current_usb = false;
     bool current_charging = false;
-    
+
     // METHOD 1: ZMK API (may be cached)
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     uint8_t zmk_cached_battery = zmk_battery_state_of_charge();
@@ -335,55 +359,51 @@ static void battery_periodic_update_handler(struct k_work *work) {
 #endif
 
     // METHOD 2: Direct hardware sensor access
-    // CRITICAL FIX: Use proper hardware detection to avoid crash
+    // Hardware availability already checked at top of function
 #if DT_HAS_CHOSEN(zmk_battery)
-    if (zmk_scanner_battery_hardware_available()) {
-        const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
-        struct sensor_value voltage;
-        int ret = sensor_sample_fetch(battery_dev);
+    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
+    struct sensor_value voltage;
+    int ret = sensor_sample_fetch(battery_dev);
+    if (ret == 0) {
+        ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
         if (ret == 0) {
-            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &voltage);
-            if (ret == 0) {
-                // Convert voltage to percentage (rough estimation)
-                // Typical Li-Po: 3.0V (0%) to 4.2V (100%)
-                int32_t voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
-                
-                // Simple voltage-to-percentage mapping
-                uint8_t hardware_battery = 0;
-                if (voltage_mv >= 4200) {
-                    hardware_battery = 100;
-                } else if (voltage_mv >= 4000) {
-                    hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
-                } else if (voltage_mv >= 3700) {
-                    hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
-                } else if (voltage_mv >= 3000) {
-                    hardware_battery = ((voltage_mv - 3000) * 25) / 700;
-                } else {
-                    hardware_battery = 0;
-                }
-                
-                LOG_INF("🔍 HARDWARE SENSOR: Battery voltage %dmV -> %d%% (hardware calc)", voltage_mv, hardware_battery);
-                
-                // Compare ZMK cache vs hardware reading
-                if (zmk_cached_battery != hardware_battery) {
-                    LOG_WRN("⚠️  CACHE MISMATCH: ZMK cached=%d%% vs Hardware=%d%% (diff=%d%%)", 
-                            zmk_cached_battery, hardware_battery, abs(zmk_cached_battery - hardware_battery));
-                    // Use hardware reading if significantly different
-                    if (abs(zmk_cached_battery - hardware_battery) > 5) {
-                        current_battery = hardware_battery;
-                        LOG_INF("🎯 USING HARDWARE VALUE due to significant difference");
-                    }
-                } else {
-                    LOG_INF("✅ ZMK cache matches hardware reading");
+            // Convert voltage to percentage (rough estimation)
+            // Typical Li-Po: 3.0V (0%) to 4.2V (100%)
+            int32_t voltage_mv = voltage.val1 * 1000 + voltage.val2 / 1000;
+
+            // Simple voltage-to-percentage mapping
+            uint8_t hardware_battery = 0;
+            if (voltage_mv >= 4200) {
+                hardware_battery = 100;
+            } else if (voltage_mv >= 4000) {
+                hardware_battery = 75 + ((voltage_mv - 4000) * 25) / 200;
+            } else if (voltage_mv >= 3700) {
+                hardware_battery = 25 + ((voltage_mv - 3700) * 50) / 300;
+            } else if (voltage_mv >= 3000) {
+                hardware_battery = ((voltage_mv - 3000) * 25) / 700;
+            } else {
+                hardware_battery = 0;
+            }
+
+            LOG_INF("🔍 HARDWARE SENSOR: Battery voltage %dmV -> %d%% (hardware calc)", voltage_mv, hardware_battery);
+
+            // Compare ZMK cache vs hardware reading
+            if (zmk_cached_battery != hardware_battery) {
+                LOG_WRN("⚠️  CACHE MISMATCH: ZMK cached=%d%% vs Hardware=%d%% (diff=%d%%)",
+                        zmk_cached_battery, hardware_battery, abs(zmk_cached_battery - hardware_battery));
+                // Use hardware reading if significantly different
+                if (abs(zmk_cached_battery - hardware_battery) > 5) {
+                    current_battery = hardware_battery;
+                    LOG_INF("🎯 USING HARDWARE VALUE due to significant difference");
                 }
             } else {
-                LOG_WRN("Failed to read battery voltage from sensor: %d", ret);
+                LOG_INF("✅ ZMK cache matches hardware reading");
             }
         } else {
-            LOG_WRN("Failed to sample battery sensor: %d", ret);
+            LOG_WRN("Failed to read battery voltage from sensor: %d", ret);
         }
     } else {
-        LOG_WRN("Battery sensor device not ready");
+        LOG_WRN("Failed to sample battery sensor: %d", ret);
     }
 #endif
 
