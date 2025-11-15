@@ -8,6 +8,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/drivers/sensor.h>
 
 #include <lvgl.h>
 
@@ -145,7 +146,40 @@ bool zmk_scanner_battery_hardware_available(void) {
     return true;
 #elif DT_HAS_CHOSEN(zmk_battery)
     const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
-    return device_is_ready(battery_dev);
+
+    // First check if device tree node is ready
+    if (!device_is_ready(battery_dev)) {
+        LOG_DBG("Battery device tree node not ready");
+        return false;
+    }
+
+    // CRITICAL FIX: Test actual sensor access to verify physical hardware exists
+    // device_is_ready() only checks DT node, not physical hardware presence
+    struct sensor_value test_value;
+    int ret = -1;
+
+    // Try a minimal sensor read to verify hardware exists
+    #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_STATE_OF_CHARGE)
+        ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE);
+        if (ret == 0) {
+            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, &test_value);
+        }
+    #elif IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_LITHIUM_VOLTAGE)
+        ret = sensor_sample_fetch_chan(battery_dev, SENSOR_CHAN_VOLTAGE);
+        if (ret == 0) {
+            ret = sensor_channel_get(battery_dev, SENSOR_CHAN_VOLTAGE, &test_value);
+        }
+    #endif
+
+    if (ret != 0) {
+        LOG_WRN("Battery hardware detection: sensor read failed (%d) - physical hardware not connected", ret);
+        LOG_WRN("Device tree node exists but physical battery hardware is missing");
+        LOG_WRN("Scanner will operate in USB-only mode");
+        return false;
+    }
+
+    LOG_INF("Battery hardware detected and functional (test read succeeded)");
+    return true;
 #else
     return false;
 #endif

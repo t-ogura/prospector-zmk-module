@@ -162,11 +162,13 @@ static void update_scanner_battery_widget(void) {
 #endif
 
     // Alternative approach: Manual sensor reading with ZMK-style processing
+    // CRITICAL FIX: Use proper hardware detection instead of just device_is_ready()
 #if DT_HAS_CHOSEN(zmk_battery)
-    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
     const char *update_result = "N/A";
-    
-    if (device_is_ready(battery_dev)) {
+
+    // Use zmk_scanner_battery_hardware_available() which tests actual sensor access
+    if (zmk_scanner_battery_hardware_available()) {
+        const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
         LOG_INF("🔋 Manual battery reading with ZMK-style processing");
         
         // Replicate ZMK's battery update logic manually
@@ -333,9 +335,10 @@ static void battery_periodic_update_handler(struct k_work *work) {
 #endif
 
     // METHOD 2: Direct hardware sensor access
+    // CRITICAL FIX: Use proper hardware detection to avoid crash
 #if DT_HAS_CHOSEN(zmk_battery)
-    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
-    if (device_is_ready(battery_dev)) {
+    if (zmk_scanner_battery_hardware_available()) {
+        const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
         struct sensor_value voltage;
         int ret = sensor_sample_fetch(battery_dev);
         if (ret == 0) {
