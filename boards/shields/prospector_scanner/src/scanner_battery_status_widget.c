@@ -185,20 +185,23 @@ bool zmk_scanner_battery_hardware_available(void) {
 #endif
 }
 
-int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_status *widget, 
+int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_status *widget,
                                           lv_obj_t *parent) {
     if (!widget || !parent) {
         return -EINVAL;
     }
 
-    // Check if battery hardware is available
-    if (!zmk_scanner_battery_hardware_available()) {
-        LOG_INF("Scanner battery hardware not detected - widget will be hidden");
-        widget->visible = false;
-        return 0;
-    }
+    // CRITICAL FIX: Don't call zmk_scanner_battery_hardware_available() during init
+    // as it may crash before logging system is fully ready.
+    // Instead, check basic DT availability only and do full hardware check later.
+#if !DT_HAS_CHOSEN(zmk_battery)
+    // No battery device tree config at all - hide widget
+    LOG_INF("No battery device tree configuration - widget will be hidden");
+    widget->visible = false;
+    return 0;
+#endif
 
-    LOG_INF("Initializing scanner battery status widget");
+    LOG_INF("Initializing scanner battery status widget (hardware check deferred)");
 
     // Create container object
     widget->obj = lv_obj_create(parent);
@@ -238,22 +241,21 @@ int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_sta
     widget->visible = true;
     widget->last_update = 0;
 
-    // Get initial battery status and update display
-    uint8_t initial_level = 0;
+    // CRITICAL FIX: Don't call zmk_battery_state_of_charge() during init
+    // as it may access sensor hardware before it's ready and cause crash.
+    // Initial update will be done later by periodic update or event handler.
+    uint8_t initial_level = 0;  // Safe default
     bool initial_usb = false;
-    
-#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    initial_level = zmk_battery_state_of_charge();
-#endif
 
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)  
+    // Only check USB status (safe operation, no sensor access)
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
     initial_usb = zmk_usb_is_powered();
 #endif
 
-    zmk_widget_scanner_battery_status_update(widget, initial_level, initial_usb, initial_usb);
+    // Don't call update here - it will be done later when hardware is confirmed ready
+    // zmk_widget_scanner_battery_status_update(widget, initial_level, initial_usb, initial_usb);
 
-    LOG_INF("Scanner battery status widget initialized successfully (level: %d%%, USB: %s)",
-            initial_level, initial_usb ? "yes" : "no");
+    LOG_INF("Scanner battery status widget initialized (hardware check and update deferred)");
 
     return 0;
 }
