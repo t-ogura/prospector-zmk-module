@@ -90,7 +90,7 @@ int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *p
     widget->wpm_value_label = lv_label_create(widget->obj);
     lv_obj_align(widget->wpm_value_label, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_label_set_text(widget->wpm_value_label, "0");  // Initial inactive state
-    lv_obj_set_style_text_font(widget->wpm_value_label, &lv_font_montserrat_16, 0);  // Normal size font
+    lv_obj_set_style_text_font(widget->wpm_value_label, &lv_font_montserrat_12, 0);  // Normal size font
     lv_obj_set_style_text_color(widget->wpm_value_label, lv_color_make(0xFF, 0xFF, 0xFF), 0);  // White text
     lv_obj_set_style_text_align(widget->wpm_value_label, LV_TEXT_ALIGN_CENTER, 0);
     
