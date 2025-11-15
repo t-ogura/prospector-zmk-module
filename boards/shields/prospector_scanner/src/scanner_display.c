@@ -266,9 +266,9 @@ static void update_scanner_battery_widget(void) {
     
     // Get ZMK cached value for comparison
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    uint8_t zmk_cached = zmk_battery_state_of_charge();
+    uint8_t zmk_cached __attribute__((unused)) = zmk_battery_state_of_charge();
 #else
-    uint8_t zmk_cached = 0;
+    uint8_t zmk_cached __attribute__((unused)) = 0;
 #endif
     
     // ZMK-native battery debug display
@@ -333,9 +333,9 @@ static void battery_periodic_update_handler(struct k_work *work) {
     // CRITICAL FIX: Initialize widget on first run (after all subsystems ready)
     // This prevents crash during early boot when I2C/sensor not yet initialized
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
-    if (!widget_initialized && screen != NULL) {
+    if (!widget_initialized && main_screen != NULL) {
         LOG_INF("🔋 First-time initialization of scanner battery widget (deferred from init)");
-        zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
+        zmk_widget_scanner_battery_status_init(&scanner_battery_widget, main_screen);
         lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, 10, 0);
         widget_initialized = true;
         LOG_INF("✅ Scanner battery widget initialized successfully in periodic handler");
