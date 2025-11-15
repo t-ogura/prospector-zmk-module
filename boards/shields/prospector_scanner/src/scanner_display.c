@@ -325,9 +325,22 @@ static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_ha
 // Periodic battery status update work
 static void battery_periodic_update_handler(struct k_work *work) {
     static uint32_t periodic_counter = 0;
+    static bool widget_initialized = false;
     periodic_counter++;
 
     LOG_INF("🔄 Periodic battery status update triggered (%ds interval)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
+
+    // CRITICAL FIX: Initialize widget on first run (after all subsystems ready)
+    // This prevents crash during early boot when I2C/sensor not yet initialized
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    if (!widget_initialized && screen != NULL) {
+        LOG_INF("🔋 First-time initialization of scanner battery widget (deferred from init)");
+        zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
+        lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, 10, 0);
+        widget_initialized = true;
+        LOG_INF("✅ Scanner battery widget initialized successfully in periodic handler");
+    }
+#endif
 
     // CRITICAL: Check hardware availability first to prevent crash
 #if DT_HAS_CHOSEN(zmk_battery)
@@ -708,9 +721,12 @@ lv_obj_t *zmk_display_status_screen() {
     lv_label_set_text(device_name_label, "Initializing...");
     
     // Scanner battery status widget in top right corner (above connection status)
+    // CRITICAL FIX: Don't initialize battery widget here - it will be initialized
+    // by battery_periodic_update_handler() after all subsystems are ready (including I2C/sensor).
+    // This prevents crash when sensor subsystem not yet initialized.
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
-    zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, 10, 0);
+    // Widget will be initialized on first periodic update (after 3s delay)
+    LOG_INF("Scanner battery widget initialization deferred to periodic handler");
 #endif
     
     // Connection status widget in top right - moved down to make room for battery
