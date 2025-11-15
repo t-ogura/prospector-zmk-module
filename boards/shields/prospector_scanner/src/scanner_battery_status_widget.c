@@ -141,15 +141,18 @@ static void update_widget_appearance(struct zmk_widget_scanner_battery_status *w
 }
 
 bool zmk_scanner_battery_hardware_available(void) {
-#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_DEMO_MODE)
-    // Demo mode: always return true for UI testing
-    return true;
-#elif DT_HAS_CHOSEN(zmk_battery)
-    const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
-    return device_is_ready(battery_dev);
-#else
+    // CRITICAL FIX: Always return false to prevent boot crash
+    // The issue: device_is_ready() may trigger I2C/sensor subsystem access
+    // which isn't initialized when brightness_control_init doesn't run.
+    //
+    // Root cause timeline:
+    // v1.1.0: Light sensor missing -> brightness_control_init skipped -> I2C not init -> crash
+    // v1.1.1: brightness_control_init ALWAYS runs -> I2C always init -> no crash
+    // v1.1.2: Battery support enabled -> device_is_ready() tries I2C -> I2C not init -> crash
+    //
+    // Solution: Disable battery widget completely for now
+    // TODO: Re-enable after ensuring I2C subsystem init is independent
     return false;
-#endif
 }
 
 int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_status *widget,
