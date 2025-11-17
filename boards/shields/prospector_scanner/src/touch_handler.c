@@ -98,30 +98,28 @@ static void touch_input_callback(struct input_event *evt) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
             if (evt->value == 1) {  // Key press
-                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - showing settings");
-                // Submit work to show settings (LVGL must run in thread context)
-                k_work_submit(&settings_show_work);
+                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - ACTION DISABLED FOR DEBUG");
+                // k_work_submit(&settings_show_work);  // DISABLED
             }
             break;
 
         case INPUT_KEY_UP:
             if (evt->value == 1) {
-                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected - hiding settings");
-                // Submit work to hide settings (LVGL must run in thread context)
-                k_work_submit(&settings_hide_work);
+                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected - ACTION DISABLED FOR DEBUG");
+                // k_work_submit(&settings_hide_work);  // DISABLED
             }
             break;
 
         case INPUT_KEY_LEFT:
             if (evt->value == 1) {
-                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected");
+                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected - ACTION DISABLED FOR DEBUG");
                 // Future: implement swipe left action
             }
             break;
 
         case INPUT_KEY_RIGHT:
             if (evt->value == 1) {
-                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected");
+                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected - ACTION DISABLED FOR DEBUG");
                 // Future: implement swipe right action
             }
             break;
@@ -203,18 +201,16 @@ static void touch_input_callback(struct input_event *evt) {
                     // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
                         if (dy > 0) {
-                            // DOWN swipe detected - SHOW settings screen
-                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
-                            // Submit work to show settings (LVGL must run in thread context)
-                            k_work_submit(&settings_show_work);
+                            // DOWN swipe detected - LOG ONLY (no action)
+                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d) - ACTION DISABLED FOR DEBUG", dy, SWIPE_THRESHOLD);
+                            // k_work_submit(&settings_show_work);  // DISABLED
                         } else {
-                            // UP swipe detected - HIDE settings screen
-                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
-                            // Submit work to hide settings (LVGL must run in thread context)
-                            k_work_submit(&settings_hide_work);
+                            // UP swipe detected - LOG ONLY (no action)
+                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d) - ACTION DISABLED FOR DEBUG", dy, SWIPE_THRESHOLD);
+                            // k_work_submit(&settings_hide_work);  // DISABLED
                         }
                     } else {
-                        LOG_DBG("Horizontal swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
+                        LOG_INF("↔️ HORIZONTAL swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
                                 abs_dx, abs_dy, SWIPE_THRESHOLD);
                     }
 
