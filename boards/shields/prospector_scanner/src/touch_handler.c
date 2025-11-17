@@ -98,16 +98,17 @@ static void touch_input_callback(struct input_event *evt) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
             if (evt->value == 1) {  // Key press
-                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - HANDLER DISABLED FOR TESTING");
-                // TEMPORARILY DISABLED to test if CST816S can detect DOWN gesture
-                // The crash appears to happen in settings widget code, not in gesture detection
+                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - showing settings");
+                // Submit work to show settings (LVGL must run in thread context)
+                k_work_submit(&settings_show_work);
             }
             break;
 
         case INPUT_KEY_UP:
             if (evt->value == 1) {
-                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected");
-                // Future: implement swipe up action
+                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected - hiding settings");
+                // Submit work to hide settings (LVGL must run in thread context)
+                k_work_submit(&settings_hide_work);
             }
             break;
 
