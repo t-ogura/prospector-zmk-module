@@ -19,7 +19,6 @@ enum swipe_direction {
 
 // Swipe gesture event - raised by touch handler, processed by display thread
 struct zmk_swipe_gesture_event {
-    struct zmk_event_header header;
     enum swipe_direction direction;
 };
 
