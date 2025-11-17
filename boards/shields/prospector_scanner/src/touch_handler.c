@@ -160,6 +160,9 @@ static void touch_input_callback(struct input_event *evt) {
             // Detect touch start (false → true transition)
             bool touch_started = touch_active && !prev_touch_active;
 
+            LOG_INF("🔍 Touch state: touch_active=%d, prev_touch_active=%d, touch_started=%d",
+                    touch_active, prev_touch_active, touch_started);
+
             if (touch_started) {
                 // Touch DOWN - record start position ONLY at touch start
                 swipe_state.start_x = current_x;
@@ -192,9 +195,9 @@ static void touch_input_callback(struct input_event *evt) {
                 int16_t abs_dx = (dx < 0) ? -dx : dx;
                 int16_t abs_dy = (dy < 0) ? -dy : dy;
 
-                LOG_INF("👆 Swipe: (%d,%d) → (%d,%d), raw dx=%d dy=%d → physical dx=%d dy=%d",
+                LOG_INF("👆 Swipe: (%d,%d) → (%d,%d), raw dx=%d dy=%d → physical dx=%d dy=%d, in_progress=%d",
                         swipe_state.start_x, swipe_state.start_y, current_x, current_y,
-                        raw_dx, raw_dy, dx, dy);
+                        raw_dx, raw_dy, dx, dy, swipe_state.in_progress);
 
                 if (swipe_state.in_progress) {
                     // Check if movement is primarily vertical and exceeds threshold
