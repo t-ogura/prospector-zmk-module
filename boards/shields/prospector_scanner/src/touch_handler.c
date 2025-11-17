@@ -48,38 +48,31 @@ static struct {
     bool in_progress;
 } swipe_state = {0};
 
-// External reference to settings widget (defined in scanner_display.c)
-extern struct zmk_widget_system_settings system_settings_widget;
+// External reference to main screen (defined in scanner_display.c)
+extern lv_obj_t *main_screen;
 
 // Work queue for LVGL operations (must run in thread context, not ISR)
-static struct k_work settings_show_work;
-static struct k_work settings_hide_work;
+static struct k_work bg_red_work;
+static struct k_work bg_black_work;
 
-static void settings_show_work_handler(struct k_work *work) {
-    // Check visibility (obj may be NULL before first show due to lazy init)
-    bool is_visible = (system_settings_widget.obj != NULL) &&
-                    !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
-
-    if (!is_visible) {
-        // Show screen (will create UI if needed via lazy init)
-        zmk_widget_system_settings_show(&system_settings_widget);
-        LOG_INF("✅ Settings screen SHOWN (down swipe)");
+// Simple test: Change background color only (no overlay, no complex UI)
+static void bg_red_work_handler(struct k_work *work) {
+    LOG_INF("🔴 Setting background to RED (down swipe test)");
+    if (main_screen) {
+        lv_obj_set_style_bg_color(main_screen, lv_color_hex(0xFF0000), 0);
+        LOG_INF("✅ Background changed to RED");
     } else {
-        LOG_INF("⚠️  Settings already visible, ignoring down swipe");
+        LOG_ERR("❌ main_screen is NULL!");
     }
 }
 
-static void settings_hide_work_handler(struct k_work *work) {
-    // Check visibility (obj may be NULL if never shown)
-    bool is_visible = (system_settings_widget.obj != NULL) &&
-                    !lv_obj_has_flag(system_settings_widget.obj, LV_OBJ_FLAG_HIDDEN);
-
-    if (is_visible) {
-        // Hide screen
-        zmk_widget_system_settings_hide(&system_settings_widget);
-        LOG_INF("✅ Settings screen HIDDEN (up swipe)");
+static void bg_black_work_handler(struct k_work *work) {
+    LOG_INF("⚫ Setting background to BLACK (up swipe test)");
+    if (main_screen) {
+        lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x000000), 0);
+        LOG_INF("✅ Background changed to BLACK");
     } else {
-        LOG_INF("⚠️  Settings already hidden, ignoring up swipe");
+        LOG_ERR("❌ main_screen is NULL!");
     }
 }
 
@@ -98,15 +91,15 @@ static void touch_input_callback(struct input_event *evt) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
             if (evt->value == 1) {  // Key press
-                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - ACTION DISABLED FOR DEBUG");
-                // k_work_submit(&settings_show_work);  // DISABLED
+                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - submitting bg_red_work");
+                k_work_submit(&bg_red_work);
             }
             break;
 
         case INPUT_KEY_UP:
             if (evt->value == 1) {
-                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected - ACTION DISABLED FOR DEBUG");
-                // k_work_submit(&settings_hide_work);  // DISABLED
+                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected - submitting bg_black_work");
+                k_work_submit(&bg_black_work);
             }
             break;
 
@@ -201,13 +194,13 @@ static void touch_input_callback(struct input_event *evt) {
                     // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
                         if (dy > 0) {
-                            // DOWN swipe detected - LOG ONLY (no action)
-                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d) - ACTION DISABLED FOR DEBUG", dy, SWIPE_THRESHOLD);
-                            // k_work_submit(&settings_show_work);  // DISABLED
+                            // DOWN swipe detected - TEST: change bg to RED
+                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d) - submitting bg_red_work", dy, SWIPE_THRESHOLD);
+                            k_work_submit(&bg_red_work);
                         } else {
-                            // UP swipe detected - LOG ONLY (no action)
-                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d) - ACTION DISABLED FOR DEBUG", dy, SWIPE_THRESHOLD);
-                            // k_work_submit(&settings_hide_work);  // DISABLED
+                            // UP swipe detected - TEST: change bg to BLACK
+                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d) - submitting bg_black_work", dy, SWIPE_THRESHOLD);
+                            k_work_submit(&bg_black_work);
                         }
                     } else {
                         LOG_INF("↔️ HORIZONTAL swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
@@ -259,9 +252,9 @@ int touch_handler_init(void) {
     LOG_INF("Touch panel size: 240x280 (Waveshare 1.69\" Round LCD)");
 
     // Initialize work queues for LVGL operations (must run in thread context)
-    k_work_init(&settings_show_work, settings_show_work_handler);
-    k_work_init(&settings_hide_work, settings_hide_work_handler);
-    LOG_INF("✅ Work queues initialized for deferred LVGL operations");
+    k_work_init(&bg_red_work, bg_red_work_handler);
+    k_work_init(&bg_black_work, bg_black_work_handler);
+    LOG_INF("✅ Work queues initialized (simple bg color test)");
 
     // Register LVGL input device for touch events
     static lv_indev_drv_t indev_drv;

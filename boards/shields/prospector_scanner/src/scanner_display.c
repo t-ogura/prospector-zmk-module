@@ -45,7 +45,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // Global UI objects for dynamic updates
 static lv_obj_t *device_name_label = NULL;
-static lv_obj_t *main_screen = NULL;
+lv_obj_t *main_screen = NULL;  // Non-static for external access (touch_handler.c)
 static struct zmk_widget_scanner_battery battery_widget;
 static struct zmk_widget_connection_status connection_widget;
 static struct zmk_widget_layer_status layer_widget;
