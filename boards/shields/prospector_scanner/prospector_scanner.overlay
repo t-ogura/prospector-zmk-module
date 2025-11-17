@@ -96,7 +96,21 @@
         };
     };
 
-    // I2C pinctrl removed - controlled by board-level I2C configuration when needed
+    // I2C pinctrl for touch sensor (shares pins with APDS9960 if present)
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,   // D4 = P0.04 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;   // D5 = P0.05 = SCL
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,   // D4 = P0.04 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;   // D5 = P0.05 = SCL
+            low-power-enable;
+        };
+    };
 };
 
 // Use SPI3 with custom pinctrl (matches original adapter)
@@ -149,4 +163,37 @@ disp_spi: &spi3 {
     pinctrl-0 = <&pwm1_default>;
     pinctrl-1 = <&pwm1_sleep>;
     pinctrl-names = "default", "sleep";
+};
+
+// I2C and Touch Sensor Configuration for v2.0 Scanner Touch
+// This section is only used when touch panel hardware is present
+&i2c0 {
+    status = "okay";
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    // CST816S Touch Controller for Waveshare 1.69" Round LCD
+    // I2C address: 0x15
+    touch_sensor: cst816s@15 {
+        compatible = "hynitron,cst816s";
+        reg = <0x15>;
+        status = "okay";
+
+        // Touch panel control pins
+        // TP_IRQ → D0 = P0.02 (interrupt pin)
+        // TP_RST → D1 = P0.28 (reset pin)
+        irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        rst-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
+    };
+};
+
+// Touch Input Listener
+// Converts touch sensor input events to ZMK events
+/ {
+    touch_listener: touch_listener {
+        compatible = "zmk,input-listener";
+        device = <&touch_sensor>;
+        status = "okay";
+    };
 };
