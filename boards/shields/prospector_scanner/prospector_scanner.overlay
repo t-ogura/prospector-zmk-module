@@ -191,9 +191,9 @@ disp_spi: &spi3 {
         status = "okay";
 
         // Touch panel control pins
-        // TP_IRQ → D0 = P0.02 (interrupt pin) - DISABLED to use polling mode
+        // TP_IRQ → D0 = P0.02 (interrupt pin)
         // TP_RST → D1 = P0.28 (reset pin)
-        // irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  // Commented out for polling mode
+        irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
         rst-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
     };
 };
