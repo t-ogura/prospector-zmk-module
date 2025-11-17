@@ -25,7 +25,7 @@ static void reset_btn_event_cb(lv_event_t *e) {
 }
 
 int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, lv_obj_t *parent) {
-    LOG_INF("🔧 System settings widget init START");
+    LOG_INF("🔧 System settings widget init START (minimal text-only mode)");
 
     widget->parent = parent;
 
@@ -34,52 +34,34 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
         return -EINVAL;
     }
 
-    // Create UI immediately (not lazy) to avoid work queue blocking issues
-    LOG_INF("🔧 Creating settings UI during init (not lazy)");
-
-    // Create container for system settings screen - FULL SCREEN OVERLAY
+    // Create container - MINIMAL style to avoid potential LVGL issues
     widget->obj = lv_obj_create(parent);
     if (!widget->obj) {
         LOG_ERR("❌ CRITICAL: lv_obj_create() returned NULL!");
         return -ENOMEM;
     }
 
-    // Set full screen size
-    lv_obj_set_size(widget->obj, LV_PCT(100), LV_PCT(100));
+    // MINIMAL STYLE: absolute size, simple colors only
+    lv_obj_set_size(widget->obj, 240, 280);
+    lv_obj_set_style_bg_color(widget->obj, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_COVER, 0);
 
-    // Make background completely opaque (no transparency)
-    lv_obj_set_style_bg_color(widget->obj, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(widget->obj, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Position at (0,0) to cover entire parent
-    lv_obj_set_pos(widget->obj, 0, 0);
-
-    // Title label - at top
+    // Single centered label - NO alignment helpers, just center
     widget->title_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->title_label, "System Settings");
-    lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_set_style_text_align(widget->title_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(widget->title_label);
 
-    // Buttons are disabled for now (see comment block below)
+    // No buttons
     widget->bootloader_btn = NULL;
     widget->bootloader_label = NULL;
     widget->reset_btn = NULL;
     widget->reset_label = NULL;
 
-    // Instruction at bottom
-    lv_obj_t *instruction = lv_label_create(widget->obj);
-    lv_label_set_text(instruction, "Swipe up to return");
-    lv_obj_set_style_text_color(instruction, lv_color_hex(0x888888), LV_PART_MAIN);
-    lv_obj_set_style_text_align(instruction, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_align(instruction, LV_ALIGN_BOTTOM_MID, 0, -20);
-
     // Initially hidden
     lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    LOG_INF("✅ System settings UI created successfully during init");
+    LOG_INF("✅ System settings UI created (text-only, minimal)");
     return 0;
 }
 
