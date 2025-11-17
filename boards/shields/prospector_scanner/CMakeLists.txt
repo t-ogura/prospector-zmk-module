@@ -27,7 +27,8 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   zephyr_library_sources(src/debug_status_widget.c)  # Debug status overlay widget for diagnostics
   zephyr_library_sources(src/brightness_control.c)  # Auto-brightness with ambient light sensor
   # zephyr_library_sources(src/display_rotate_init.c)  # Merged into scanner_display.c
-  
+  zephyr_library_sources(src/touch_handler.c)  # Touch panel input handler (CST816S)
+
   # NerdFont for modifier symbols (from YADS project - MIT License)
   zephyr_library_sources(src/fonts/NerdFonts_Regular_20.c)
   zephyr_library_sources(src/fonts/NerdFonts_Regular_40.c)
