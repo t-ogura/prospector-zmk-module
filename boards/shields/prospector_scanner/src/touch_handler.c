@@ -5,7 +5,7 @@
  */
 
 #include "touch_handler.h"
-#include "system_settings_widget.h"
+#include "events/swipe_gesture_event.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -13,6 +13,7 @@
 #include <zephyr/dt-bindings/input/input-event-codes.h>  // INPUT_KEY_DOWN, etc.
 #include <zephyr/logging/log.h>
 #include <lvgl.h>
+#include <zmk/event_manager.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -48,32 +49,15 @@ static struct {
     bool in_progress;
 } swipe_state = {0};
 
-// External reference to main screen (defined in scanner_display.c)
-extern lv_obj_t *main_screen;
+// Helper function to raise swipe gesture event (thread-safe)
+static void raise_swipe_event(enum swipe_direction direction) {
+    struct zmk_swipe_gesture_event ev = {
+        .direction = direction
+    };
+    ZMK_EVENT_RAISE(new_zmk_swipe_gesture_event(ev));
 
-// Work queue for LVGL operations (must run in thread context, not ISR)
-static struct k_work bg_red_work;
-static struct k_work bg_black_work;
-
-// Simple test: Change background color only (no overlay, no complex UI)
-static void bg_red_work_handler(struct k_work *work) {
-    LOG_INF("🔴 Setting background to RED (down swipe test)");
-    if (main_screen) {
-        lv_obj_set_style_bg_color(main_screen, lv_color_hex(0xFF0000), 0);
-        LOG_INF("✅ Background changed to RED");
-    } else {
-        LOG_ERR("❌ main_screen is NULL!");
-    }
-}
-
-static void bg_black_work_handler(struct k_work *work) {
-    LOG_INF("⚫ Setting background to BLACK (up swipe test)");
-    if (main_screen) {
-        lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x000000), 0);
-        LOG_INF("✅ Background changed to BLACK");
-    } else {
-        LOG_ERR("❌ main_screen is NULL!");
-    }
+    const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
+    LOG_INF("📤 Swipe event raised: %s", dir_name[direction]);
 }
 
 /**
@@ -91,29 +75,29 @@ static void touch_input_callback(struct input_event *evt) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
             if (evt->value == 1) {  // Key press
-                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected - submitting bg_red_work");
-                k_work_submit(&bg_red_work);
+                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected");
+                raise_swipe_event(SWIPE_DIRECTION_DOWN);
             }
             break;
 
         case INPUT_KEY_UP:
             if (evt->value == 1) {
-                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected - submitting bg_black_work");
-                k_work_submit(&bg_black_work);
+                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected");
+                raise_swipe_event(SWIPE_DIRECTION_UP);
             }
             break;
 
         case INPUT_KEY_LEFT:
             if (evt->value == 1) {
-                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected - ACTION DISABLED FOR DEBUG");
-                // Future: implement swipe left action
+                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected");
+                raise_swipe_event(SWIPE_DIRECTION_LEFT);
             }
             break;
 
         case INPUT_KEY_RIGHT:
             if (evt->value == 1) {
-                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected - ACTION DISABLED FOR DEBUG");
-                // Future: implement swipe right action
+                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected");
+                raise_swipe_event(SWIPE_DIRECTION_RIGHT);
             }
             break;
 
@@ -194,16 +178,24 @@ static void touch_input_callback(struct input_event *evt) {
                     // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
                         if (dy > 0) {
-                            // DOWN swipe detected - TEST: change bg to RED
-                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d) - submitting bg_red_work", dy, SWIPE_THRESHOLD);
-                            k_work_submit(&bg_red_work);
+                            // DOWN swipe detected - raise event
+                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
+                            raise_swipe_event(SWIPE_DIRECTION_DOWN);
                         } else {
-                            // UP swipe detected - TEST: change bg to BLACK
-                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d) - submitting bg_black_work", dy, SWIPE_THRESHOLD);
-                            k_work_submit(&bg_black_work);
+                            // UP swipe detected - raise event
+                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
+                            raise_swipe_event(SWIPE_DIRECTION_UP);
+                        }
+                    } else if (abs_dx > abs_dy && abs_dx > SWIPE_THRESHOLD) {
+                        if (dx > 0) {
+                            LOG_INF("➡️ RIGHT SWIPE detected (physical dx=%d, threshold=%d)", dx, SWIPE_THRESHOLD);
+                            raise_swipe_event(SWIPE_DIRECTION_RIGHT);
+                        } else {
+                            LOG_INF("⬅️ LEFT SWIPE detected (physical dx=%d, threshold=%d)", dx, SWIPE_THRESHOLD);
+                            raise_swipe_event(SWIPE_DIRECTION_LEFT);
                         }
                     } else {
-                        LOG_INF("↔️ HORIZONTAL swipe: abs_dx=%d, abs_dy=%d (threshold=%d)",
+                        LOG_DBG("Swipe too small: abs_dx=%d, abs_dy=%d (threshold=%d)",
                                 abs_dx, abs_dy, SWIPE_THRESHOLD);
                     }
 
@@ -250,11 +242,7 @@ int touch_handler_init(void) {
 
     LOG_INF("Touch handler initialized: CST816S on I2C");
     LOG_INF("Touch panel size: 240x280 (Waveshare 1.69\" Round LCD)");
-
-    // Initialize work queues for LVGL operations (must run in thread context)
-    k_work_init(&bg_red_work, bg_red_work_handler);
-    k_work_init(&bg_black_work, bg_black_work_handler);
-    LOG_INF("✅ Work queues initialized (simple bg color test)");
+    LOG_INF("✅ Using ZMK event system for thread-safe LVGL operations");
 
     // Register LVGL input device for touch events
     static lv_indev_drv_t indev_drv;

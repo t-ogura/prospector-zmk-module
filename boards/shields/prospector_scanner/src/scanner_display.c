@@ -15,6 +15,7 @@
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/battery.h>
 #include <zmk/usb.h>
+#include <zmk/event_manager.h>
 #include "scanner_battery_widget.h"
 #include "connection_status_widget.h"
 #include "layer_status_widget.h"
@@ -26,6 +27,7 @@
 #include "scanner_battery_status_widget.h"
 #include "system_settings_widget.h"
 #include "touch_handler.h"
+#include "events/swipe_gesture_event.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -792,5 +794,46 @@ static void trigger_scanner_start(void) {
     LOG_INF("Scheduling delayed scanner start from display creation");
     k_work_schedule(&scanner_start_work, K_SECONDS(3)); // Wait 3 seconds for display
 }
+
+// Swipe gesture event listener (runs in main thread - safe for LVGL)
+static int swipe_gesture_listener(const zmk_event_t *eh) {
+    const struct zmk_swipe_gesture_event *ev = as_zmk_swipe_gesture_event(eh);
+    if (!ev) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
+    LOG_INF("📥 Swipe event received in display thread: %s", dir_name[ev->direction]);
+
+    if (!main_screen) {
+        LOG_ERR("❌ main_screen is NULL!");
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    // Thread-safe LVGL operations (running in main thread via event system)
+    switch (ev->direction) {
+        case SWIPE_DIRECTION_DOWN:
+            LOG_INF("🔴 Setting background to RED");
+            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0xFF0000), 0);
+            break;
+        case SWIPE_DIRECTION_UP:
+            LOG_INF("⚫ Setting background to BLACK");
+            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x000000), 0);
+            break;
+        case SWIPE_DIRECTION_LEFT:
+            LOG_INF("🔵 Setting background to BLUE");
+            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x0000FF), 0);
+            break;
+        case SWIPE_DIRECTION_RIGHT:
+            LOG_INF("🟢 Setting background to GREEN");
+            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x00FF00), 0);
+            break;
+    }
+
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(swipe_gesture, swipe_gesture_listener);
+ZMK_SUBSCRIPTION(swipe_gesture, zmk_swipe_gesture_event);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY
