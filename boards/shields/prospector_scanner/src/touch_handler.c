@@ -51,13 +51,15 @@ static struct {
 
 // Helper function to raise swipe gesture event (thread-safe)
 static void raise_swipe_event(enum swipe_direction direction) {
-    struct zmk_swipe_gesture_event ev = {
-        .direction = direction
-    };
-    ZMK_EVENT_RAISE(new_zmk_swipe_gesture_event(ev));
-
     const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
-    LOG_INF("📤 Swipe event raised: %s", dir_name[direction]);
+    LOG_INF("📤 Raising swipe event: %s", dir_name[direction]);
+
+    int rc = raise_zmk_swipe_gesture_event(
+        (struct zmk_swipe_gesture_event){.direction = direction});
+
+    if (rc < 0) {
+        LOG_ERR("❌ Failed to raise swipe event: %d", rc);
+    }
 }
 
 /**
