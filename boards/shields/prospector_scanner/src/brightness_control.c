@@ -31,9 +31,11 @@ static int brightness_control_init(void) {
 #endif
     
     if (pwm_dev && device_is_ready(pwm_dev)) {
-        uint8_t brightness = 85;  // Default
+        uint8_t brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;  // Use configured default
 #ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB
-        brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
+        if (CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB > 0) {
+            brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
+        }
 #endif
         int ret = led_set_brightness(pwm_dev, 0, brightness);
         if (ret < 0) {
