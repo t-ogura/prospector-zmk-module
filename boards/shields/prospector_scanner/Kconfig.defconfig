@@ -67,15 +67,15 @@ config PWM
 config LED
     default y
 
-# I2C, Sensor, and APDS9960 drivers - COMPLETELY DISABLED by default
-# Safe: All sensor-related drivers disabled to prevent Device Tree linking errors
-# Users must manually enable sensors AND provide Device Tree overlay when needed
+# I2C and Sensor - Always enabled for battery support
+# Note: I2C and SENSOR are required by ZMK_BATTERY_REPORTING
+# APDS9960 is only enabled when automatic brightness is requested
 
 config I2C
-    default n
+    default y
 
-config SENSOR  
-    default n
+config SENSOR
+    default y
 
 config APDS9960
     default n
