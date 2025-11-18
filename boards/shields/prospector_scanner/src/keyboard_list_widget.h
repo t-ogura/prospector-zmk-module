@@ -11,9 +11,22 @@
 struct zmk_widget_keyboard_list {
     lv_obj_t *obj;              // Container object
     lv_obj_t *title_label;      // Title label
-    lv_obj_t *kb1_label;        // First keyboard
-    lv_obj_t *kb2_label;        // Second keyboard
-    lv_obj_t *kb3_label;        // Third keyboard
+
+    // Keyboard 1 elements
+    lv_obj_t *kb1_label;        // Keyboard name
+    lv_obj_t *kb1_rssi_bar;     // RSSI strength bar (0-5 bars)
+    lv_obj_t *kb1_rssi_label;   // RSSI dBm value
+
+    // Keyboard 2 elements
+    lv_obj_t *kb2_label;        // Keyboard name
+    lv_obj_t *kb2_rssi_bar;     // RSSI strength bar (0-5 bars)
+    lv_obj_t *kb2_rssi_label;   // RSSI dBm value
+
+    // Keyboard 3 elements
+    lv_obj_t *kb3_label;        // Keyboard name
+    lv_obj_t *kb3_rssi_bar;     // RSSI strength bar (0-5 bars)
+    lv_obj_t *kb3_rssi_label;   // RSSI dBm value
+
     lv_obj_t *parent;           // Parent screen
 };
 
