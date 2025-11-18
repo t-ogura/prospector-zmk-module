@@ -27,6 +27,11 @@ struct zmk_widget_layer_status {
     lv_obj_t *layer_labels[MAX_LAYER_DISPLAY]; // Individual layer number labels (0-9 max)
 };
 
+// ========== Dynamic Allocation Functions ==========
+struct zmk_widget_layer_status *zmk_widget_layer_status_create(lv_obj_t *parent);
+void zmk_widget_layer_status_destroy(struct zmk_widget_layer_status *widget);
+
+// ========== Widget Control Functions ==========
 int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_t *parent);
 void zmk_widget_layer_status_update(struct zmk_widget_layer_status *widget, struct zmk_keyboard_status *kbd);
 void zmk_widget_layer_status_reset(struct zmk_widget_layer_status *widget);

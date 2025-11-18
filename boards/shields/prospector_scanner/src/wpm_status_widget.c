@@ -102,6 +102,65 @@ int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *p
     return 0;
 }
 
+// ========== Dynamic Allocation Functions ==========
+
+struct zmk_widget_wpm_status *zmk_widget_wpm_status_create(lv_obj_t *parent) {
+    LOG_DBG("Creating WPM status widget (dynamic allocation)");
+
+    if (!parent) {
+        LOG_ERR("Cannot create widget: parent is NULL");
+        return NULL;
+    }
+
+    // Allocate memory for widget structure using LVGL's memory allocator
+    struct zmk_widget_wpm_status *widget =
+        (struct zmk_widget_wpm_status *)lv_mem_alloc(sizeof(struct zmk_widget_wpm_status));
+    if (!widget) {
+        LOG_ERR("Failed to allocate memory for wpm_status_widget (%d bytes)",
+                sizeof(struct zmk_widget_wpm_status));
+        return NULL;
+    }
+
+    // Zero-initialize the allocated memory
+    memset(widget, 0, sizeof(struct zmk_widget_wpm_status));
+
+    // Initialize widget (this creates LVGL objects)
+    int ret = zmk_widget_wpm_status_init(widget, parent);
+    if (ret != 0) {
+        LOG_ERR("Widget initialization failed, freeing memory");
+        lv_mem_free(widget);
+        return NULL;
+    }
+
+    LOG_DBG("WPM status widget created successfully");
+    return widget;
+}
+
+void zmk_widget_wpm_status_destroy(struct zmk_widget_wpm_status *widget) {
+    LOG_DBG("Destroying WPM status widget (dynamic deallocation)");
+
+    if (!widget) {
+        return;
+    }
+
+    // Delete LVGL objects first (reverse order of creation)
+    if (widget->wpm_value_label) {
+        lv_obj_del(widget->wpm_value_label);
+        widget->wpm_value_label = NULL;
+    }
+    if (widget->wpm_title_label) {
+        lv_obj_del(widget->wpm_title_label);
+        widget->wpm_title_label = NULL;
+    }
+    if (widget->obj) {
+        lv_obj_del(widget->obj);
+        widget->obj = NULL;
+    }
+
+    // Free the widget structure memory from LVGL heap
+    lv_mem_free(widget);
+}
+
 lv_obj_t *zmk_widget_wpm_status_obj(struct zmk_widget_wpm_status *widget) {
     return widget ? widget->obj : NULL;
 }

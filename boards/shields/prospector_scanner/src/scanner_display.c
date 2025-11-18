@@ -49,14 +49,18 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 // Global UI objects for dynamic updates
 static lv_obj_t *device_name_label = NULL;
 lv_obj_t *main_screen = NULL;  // Non-static for external access (touch_handler.c)
-static struct zmk_widget_scanner_battery battery_widget;
-static struct zmk_widget_connection_status connection_widget;
-static struct zmk_widget_layer_status layer_widget;
+// Battery widget (DYNAMIC ALLOCATION - created when main screen shown, destroyed when switching to overlays)
+static struct zmk_widget_scanner_battery *battery_widget = NULL;
+// Connection widget (DYNAMIC ALLOCATION - created when main screen shown, destroyed when switching to overlays)
+static struct zmk_widget_connection_status *connection_widget = NULL;
+// Layer widget (DYNAMIC ALLOCATION - created when main screen shown, destroyed when switching to overlays)
+static struct zmk_widget_layer_status *layer_widget = NULL;
 // Modifier widget (DYNAMIC ALLOCATION - created only when modifiers are pressed)
 static struct zmk_widget_modifier_status *modifier_widget = NULL;
 // Profile widget removed - redundant with connection status widget
 // static struct zmk_widget_signal_status signal_widget;  // DISABLED - info in keyboard list
-static struct zmk_widget_wpm_status wpm_widget;  // RE-ENABLED
+// WPM widget (DYNAMIC ALLOCATION - created when main screen shown, destroyed when switching to overlays)
+static struct zmk_widget_wpm_status *wpm_widget = NULL;
 // System settings widget for settings screen (DYNAMIC ALLOCATION)
 static struct zmk_widget_system_settings *system_settings_widget = NULL;
 // Keyboard list widget for showing active keyboards (DYNAMIC ALLOCATION)
@@ -64,6 +68,15 @@ static struct zmk_widget_keyboard_list *keyboard_list_widget = NULL;
 
 // Global debug widget for sensor diagnostics - DISABLED (debug only)
 // struct zmk_widget_debug_status debug_widget;
+
+// ========== Value Cache for Dynamic Widgets ==========
+// Cache last displayed values so they can be restored when widgets are recreated
+static char cached_device_name[32] = "Scanning...";
+static uint8_t cached_battery_level = 0;
+static bool cached_battery_valid = false;
+static uint8_t cached_wpm_value = 0;
+static struct zmk_keyboard_status cached_keyboard_status;
+static bool cached_status_valid = false;
 
 // Screen state management
 enum screen_state {
@@ -544,11 +557,15 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
     int active_count = zmk_status_scanner_get_active_count();
     
     if (active_count == 0) {
-        // No keyboards found - reset all widgets to default state
-        lv_label_set_text(device_name_label, "Scanning...");
+        // No keyboards found - reset all widgets to default state (NULL-safe for dynamic allocation)
+        if (device_name_label) {
+            lv_label_set_text(device_name_label, "Scanning...");
+        }
         
-        // Reset all widgets to clear stale data
-        zmk_widget_scanner_battery_reset(&battery_widget);
+        // Reset all widgets to clear stale data (NULL-safe for dynamic allocation)
+        if (battery_widget) {
+            zmk_widget_scanner_battery_reset(battery_widget);
+        }
         zmk_widget_connection_status_reset(&connection_widget);
         zmk_widget_layer_status_reset(&layer_widget);
 
@@ -559,7 +576,10 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         }
 
         // zmk_widget_signal_status_reset(&signal_widget);  // DISABLED
-        zmk_widget_wpm_status_reset(&wpm_widget);  // RE-ENABLED
+        // WPM widget reset (NULL-safe for dynamic allocation)
+        if (wpm_widget) {
+            zmk_widget_wpm_status_reset(wpm_widget);
+        }
         
         // Reset scanner's own battery widget (don't reset - should show scanner status)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT) 
@@ -594,13 +614,29 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
             struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
             if (kbd && kbd->active) {
-                // Update device name (large, prominent display)
-                lv_label_set_text(device_name_label, kbd->ble_name);
-                
-                // Update all widgets
-                zmk_widget_scanner_battery_update(&battery_widget, kbd);
-                zmk_widget_connection_status_update(&connection_widget, kbd);
-                zmk_widget_layer_status_update(&layer_widget, kbd);
+                // Cache keyboard status for widget restoration
+                memcpy(&cached_keyboard_status, kbd, sizeof(struct zmk_keyboard_status));
+                cached_status_valid = true;
+
+                // Cache device name
+                strncpy(cached_device_name, kbd->ble_name, sizeof(cached_device_name) - 1);
+                cached_device_name[sizeof(cached_device_name) - 1] = '\0';
+
+                // Update device name (large, prominent display - NULL-safe for dynamic allocation)
+                if (device_name_label) {
+                    lv_label_set_text(device_name_label, kbd->ble_name);
+                }
+
+                // Update all widgets (NULL-safe for dynamic allocation)
+                if (battery_widget) {
+                    zmk_widget_scanner_battery_update(battery_widget, kbd);
+                }
+                if (connection_widget) {
+                    zmk_widget_connection_status_update(connection_widget, kbd);
+                }
+                if (layer_widget) {
+                    zmk_widget_layer_status_update(layer_widget, kbd);
+                }
 
                 // Modifier widget - dynamic allocation based on active modifiers
                 bool has_modifiers = (kbd->data.modifier_flags != 0);
@@ -649,7 +685,10 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     last_modifier = kbd->data.modifier_flags;
                 }
 
-                zmk_widget_wpm_status_update(&wpm_widget, kbd);  // RE-ENABLED
+                // WPM widget update (NULL-safe for dynamic allocation)
+                if (wpm_widget) {
+                    zmk_widget_wpm_status_update(wpm_widget, kbd);
+                }
 
                 // Resume normal brightness control when keyboard is connected
                 // prospector_resume_brightness(); // Function removed in v1.1.1
@@ -743,12 +782,13 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
     LOG_INF("✅ Main screen created");
 
+    // Device name label - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
     LOG_INF("Step 2: Creating device name label...");
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0);
     lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25);
-    lv_label_set_text(device_name_label, "Initializing...");
+    lv_label_set_text(device_name_label, cached_device_name);  // Use cached value
     LOG_INF("✅ Device name label created");
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -758,15 +798,29 @@ lv_obj_t *zmk_display_status_screen() {
     LOG_INF("✅ Scanner battery status widget initialized");
 #endif
 
+    // Connection widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
     LOG_INF("Step 4: Init connection status widget...");
-    zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45);
-    LOG_INF("✅ Connection status widget initialized");
+    connection_widget = zmk_widget_connection_status_create(screen);
+    if (connection_widget) {
+        lv_obj_align(zmk_widget_connection_status_obj(connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45);
+        // Restore cached values if available
+        if (cached_status_valid) {
+            zmk_widget_connection_status_update(connection_widget, &cached_keyboard_status);
+        }
+    }
+    LOG_INF("✅ Connection status widget created");
 
+    // Layer widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
     LOG_INF("Step 5: Init layer status widget...");
-    zmk_widget_layer_status_init(&layer_widget, screen);
-    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -10);
-    LOG_INF("✅ Layer status widget initialized");
+    layer_widget = zmk_widget_layer_status_create(screen);
+    if (layer_widget) {
+        lv_obj_align(zmk_widget_layer_status_obj(layer_widget), LV_ALIGN_CENTER, 0, -10);
+        // Restore cached values if available
+        if (cached_status_valid) {
+            zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);
+        }
+    }
+    LOG_INF("✅ Layer status widget created");
 
     LOG_INF("Step 6: Modifier status widget (dynamic allocation - created on modifier press)");
     // Widget will be created dynamically when modifiers are pressed
@@ -774,16 +828,30 @@ lv_obj_t *zmk_display_status_screen() {
     // lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30);
     LOG_INF("✅ Modifier status widget setup complete");
 
+    // Battery widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
     LOG_INF("Step 7: Init battery widget...");
-    zmk_widget_scanner_battery_init(&battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
-    lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
-    LOG_INF("✅ Battery widget initialized");
+    battery_widget = zmk_widget_scanner_battery_create(screen);
+    if (battery_widget) {
+        lv_obj_align(zmk_widget_scanner_battery_obj(battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
+        lv_obj_set_height(zmk_widget_scanner_battery_obj(battery_widget), 50);
+        // Restore cached values if available
+        if (cached_status_valid) {
+            zmk_widget_scanner_battery_update(battery_widget, &cached_keyboard_status);
+        }
+    }
+    LOG_INF("✅ Battery widget created");
 
+    // WPM widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
     LOG_INF("Step 8: Init WPM status widget...");
-    zmk_widget_wpm_status_init(&wpm_widget, screen);
-    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50);
-    LOG_INF("✅ WPM status widget initialized");  // RE-ENABLED
+    wpm_widget = zmk_widget_wpm_status_create(screen);
+    if (wpm_widget) {
+        lv_obj_align(zmk_widget_wpm_status_obj(wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50);
+        // Restore cached values if available
+        if (cached_status_valid) {
+            zmk_widget_wpm_status_update(wpm_widget, &cached_keyboard_status);
+        }
+    }
+    LOG_INF("✅ WPM status widget created");
 
     // LOG_INF("Step 9: Init signal status widget...");
     // zmk_widget_signal_status_init(&signal_widget, screen);
@@ -937,6 +1005,11 @@ static void restore_keyboard_list_widgets(void) {
     LOG_INF("🔄 Keyboard list widgets restored");
 }
 
+// Swipe gesture cooldown to prevent rapid repeated swipes causing issues
+// Increased to 500ms to account for dynamic memory allocation overhead
+#define SWIPE_COOLDOWN_MS 500  // 500ms cooldown between swipes
+static uint32_t last_swipe_time = 0;
+
 // Swipe gesture event listener (runs in main thread - safe for LVGL)
 static int swipe_gesture_listener(const zmk_event_t *eh) {
     const struct zmk_swipe_gesture_event *ev = as_zmk_swipe_gesture_event(eh);
@@ -952,6 +1025,15 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
+    // Cooldown check: prevent rapid repeated swipes
+    uint32_t now = k_uptime_get_32();
+    if (now - last_swipe_time < SWIPE_COOLDOWN_MS) {
+        LOG_DBG("⏱️  Swipe ignored (cooldown: %d ms remaining)",
+                (int)(SWIPE_COOLDOWN_MS - (now - last_swipe_time)));
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+    last_swipe_time = now;
+
     // Thread-safe LVGL operations (running in main thread via event system)
     // Handle gestures based on current screen state
     switch (ev->direction) {
@@ -959,6 +1041,33 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
             if (current_screen == SCREEN_MAIN) {
                 // From main screen: create and show settings (dynamic allocation)
                 LOG_INF("⬇️  DOWN swipe from MAIN: Creating system settings widget");
+
+                // Destroy main screen widgets to free memory for overlay
+                if (wpm_widget) {
+                    zmk_widget_wpm_status_destroy(wpm_widget);
+                    wpm_widget = NULL;
+                    LOG_DBG("✅ WPM widget destroyed to free memory for overlay");
+                }
+                if (battery_widget) {
+                    zmk_widget_scanner_battery_destroy(battery_widget);
+                    battery_widget = NULL;
+                    LOG_DBG("✅ Battery widget destroyed to free memory for overlay");
+                }
+                if (connection_widget) {
+                    zmk_widget_connection_status_destroy(connection_widget);
+                    connection_widget = NULL;
+                    LOG_DBG("✅ Connection widget destroyed to free memory for overlay");
+                }
+                if (layer_widget) {
+                    zmk_widget_layer_status_destroy(layer_widget);
+                    layer_widget = NULL;
+                    LOG_DBG("✅ Layer widget destroyed to free memory for overlay");
+                }
+                if (device_name_label) {
+                    lv_obj_del(device_name_label);
+                    device_name_label = NULL;
+                    LOG_DBG("✅ Device name label destroyed to free memory for overlay");
+                }
 
                 // Create widget if not already created
                 if (!system_settings_widget) {
@@ -982,6 +1091,61 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                     LOG_INF("✅ Keyboard list widget destroyed, memory freed");
                 }
                 current_screen = SCREEN_MAIN;
+
+                // Recreate main screen widgets with cached values
+                if (!device_name_label) {
+                    device_name_label = lv_label_create(main_screen);
+                    lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
+                    lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0);
+                    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25);
+                    lv_label_set_text(device_name_label, cached_device_name);  // Restore cached name
+                    LOG_DBG("✅ Device name label recreated for main screen");
+                }
+                if (!wpm_widget) {
+                    wpm_widget = zmk_widget_wpm_status_create(main_screen);
+                    if (wpm_widget) {
+                        lv_obj_align(zmk_widget_wpm_status_obj(wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_wpm_status_update(wpm_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ WPM widget recreated for main screen");
+                    }
+                }
+                if (!battery_widget) {
+                    battery_widget = zmk_widget_scanner_battery_create(main_screen);
+                    if (battery_widget) {
+                        lv_obj_align(zmk_widget_scanner_battery_obj(battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
+                        lv_obj_set_height(zmk_widget_scanner_battery_obj(battery_widget), 50);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_scanner_battery_update(battery_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ Battery widget recreated for main screen");
+                    }
+                }
+                if (!connection_widget) {
+                    connection_widget = zmk_widget_connection_status_create(main_screen);
+                    if (connection_widget) {
+                        lv_obj_align(zmk_widget_connection_status_obj(connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_connection_status_update(connection_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ Connection widget recreated for main screen");
+                    }
+                }
+                if (!layer_widget) {
+                    layer_widget = zmk_widget_layer_status_create(main_screen);
+                    if (layer_widget) {
+                        lv_obj_align(zmk_widget_layer_status_obj(layer_widget), LV_ALIGN_CENTER, 0, -10);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ Layer widget recreated for main screen");
+                    }
+                }
             } else if (current_screen == SCREEN_SETTINGS) {
                 // Already on settings screen, do nothing
                 LOG_INF("⬇️  DOWN swipe: Already on settings screen");
@@ -992,6 +1156,33 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
             if (current_screen == SCREEN_MAIN) {
                 // From main screen: create and show keyboard list (dynamic allocation)
                 LOG_INF("⬆️  UP swipe from MAIN: Creating keyboard list widget");
+
+                // Destroy main screen widgets to free memory for overlay
+                if (wpm_widget) {
+                    zmk_widget_wpm_status_destroy(wpm_widget);
+                    wpm_widget = NULL;
+                    LOG_DBG("✅ WPM widget destroyed to free memory for overlay");
+                }
+                if (battery_widget) {
+                    zmk_widget_scanner_battery_destroy(battery_widget);
+                    battery_widget = NULL;
+                    LOG_DBG("✅ Battery widget destroyed to free memory for overlay");
+                }
+                if (connection_widget) {
+                    zmk_widget_connection_status_destroy(connection_widget);
+                    connection_widget = NULL;
+                    LOG_DBG("✅ Connection widget destroyed to free memory for overlay");
+                }
+                if (layer_widget) {
+                    zmk_widget_layer_status_destroy(layer_widget);
+                    layer_widget = NULL;
+                    LOG_DBG("✅ Layer widget destroyed to free memory for overlay");
+                }
+                if (device_name_label) {
+                    lv_obj_del(device_name_label);
+                    device_name_label = NULL;
+                    LOG_DBG("✅ Device name label destroyed to free memory for overlay");
+                }
 
                 // Create widget if not already created
                 if (!keyboard_list_widget) {
@@ -1015,6 +1206,61 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                     LOG_INF("✅ System settings widget destroyed, memory freed");
                 }
                 current_screen = SCREEN_MAIN;
+
+                // Recreate main screen widgets with cached values
+                if (!device_name_label) {
+                    device_name_label = lv_label_create(main_screen);
+                    lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
+                    lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0);
+                    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25);
+                    lv_label_set_text(device_name_label, cached_device_name);  // Restore cached name
+                    LOG_DBG("✅ Device name label recreated for main screen");
+                }
+                if (!wpm_widget) {
+                    wpm_widget = zmk_widget_wpm_status_create(main_screen);
+                    if (wpm_widget) {
+                        lv_obj_align(zmk_widget_wpm_status_obj(wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_wpm_status_update(wpm_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ WPM widget recreated for main screen");
+                    }
+                }
+                if (!battery_widget) {
+                    battery_widget = zmk_widget_scanner_battery_create(main_screen);
+                    if (battery_widget) {
+                        lv_obj_align(zmk_widget_scanner_battery_obj(battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
+                        lv_obj_set_height(zmk_widget_scanner_battery_obj(battery_widget), 50);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_scanner_battery_update(battery_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ Battery widget recreated for main screen");
+                    }
+                }
+                if (!connection_widget) {
+                    connection_widget = zmk_widget_connection_status_create(main_screen);
+                    if (connection_widget) {
+                        lv_obj_align(zmk_widget_connection_status_obj(connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_connection_status_update(connection_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ Connection widget recreated for main screen");
+                    }
+                }
+                if (!layer_widget) {
+                    layer_widget = zmk_widget_layer_status_create(main_screen);
+                    if (layer_widget) {
+                        lv_obj_align(zmk_widget_layer_status_obj(layer_widget), LV_ALIGN_CENTER, 0, -10);
+                        // Restore cached values
+                        if (cached_status_valid) {
+                            zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);
+                        }
+                        LOG_DBG("✅ Layer widget recreated for main screen");
+                    }
+                }
             } else if (current_screen == SCREEN_KEYBOARD_LIST) {
                 // Already on keyboard list screen, do nothing
                 LOG_INF("⬆️  UP swipe: Already on keyboard list screen");
@@ -1043,6 +1289,61 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                 }
             }
             current_screen = SCREEN_MAIN;
+
+            // Recreate main screen widgets with cached values
+            if (!device_name_label) {
+                device_name_label = lv_label_create(main_screen);
+                lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
+                lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0);
+                lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25);
+                lv_label_set_text(device_name_label, cached_device_name);  // Restore cached name
+                LOG_DBG("✅ Device name label recreated for main screen");
+            }
+            if (!wpm_widget) {
+                wpm_widget = zmk_widget_wpm_status_create(main_screen);
+                if (wpm_widget) {
+                    lv_obj_align(zmk_widget_wpm_status_obj(wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50);
+                    // Restore cached values
+                    if (cached_status_valid) {
+                        zmk_widget_wpm_status_update(wpm_widget, &cached_keyboard_status);
+                    }
+                    LOG_DBG("✅ WPM widget recreated for main screen");
+                }
+            }
+            if (!battery_widget) {
+                battery_widget = zmk_widget_scanner_battery_create(main_screen);
+                if (battery_widget) {
+                    lv_obj_align(zmk_widget_scanner_battery_obj(battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
+                    lv_obj_set_height(zmk_widget_scanner_battery_obj(battery_widget), 50);
+                    // Restore cached values
+                    if (cached_status_valid) {
+                        zmk_widget_scanner_battery_update(battery_widget, &cached_keyboard_status);
+                    }
+                    LOG_DBG("✅ Battery widget recreated for main screen");
+                }
+            }
+            if (!connection_widget) {
+                connection_widget = zmk_widget_connection_status_create(main_screen);
+                if (connection_widget) {
+                    lv_obj_align(zmk_widget_connection_status_obj(connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45);
+                    // Restore cached values
+                    if (cached_status_valid) {
+                        zmk_widget_connection_status_update(connection_widget, &cached_keyboard_status);
+                    }
+                    LOG_DBG("✅ Connection widget recreated for main screen");
+                }
+            }
+            if (!layer_widget) {
+                layer_widget = zmk_widget_layer_status_create(main_screen);
+                if (layer_widget) {
+                    lv_obj_align(zmk_widget_layer_status_obj(layer_widget), LV_ALIGN_CENTER, 0, -10);
+                    // Restore cached values
+                    if (cached_status_valid) {
+                        zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);
+                    }
+                    LOG_DBG("✅ Layer widget recreated for main screen");
+                }
+            }
             break;
     }
 

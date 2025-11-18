@@ -137,3 +137,54 @@ void zmk_widget_layer_status_reset(struct zmk_widget_layer_status *widget) {
 lv_obj_t *zmk_widget_layer_status_obj(struct zmk_widget_layer_status *widget) {
     return widget ? widget->obj : NULL;
 }
+
+// ========== Dynamic Allocation Functions ==========
+
+struct zmk_widget_layer_status *zmk_widget_layer_status_create(lv_obj_t *parent) {
+    LOG_DBG("Creating layer status widget (dynamic allocation)");
+
+    if (!parent) {
+        LOG_ERR("Cannot create widget: parent is NULL");
+        return NULL;
+    }
+
+    // Allocate memory for widget structure using LVGL's memory allocator
+    struct zmk_widget_layer_status *widget =
+        (struct zmk_widget_layer_status *)lv_mem_alloc(sizeof(struct zmk_widget_layer_status));
+    if (!widget) {
+        LOG_ERR("Failed to allocate memory for layer_status_widget (%d bytes)",
+                sizeof(struct zmk_widget_layer_status));
+        return NULL;
+    }
+
+    // Zero-initialize the allocated memory
+    memset(widget, 0, sizeof(struct zmk_widget_layer_status));
+
+    // Initialize widget (this creates LVGL objects)
+    int ret = zmk_widget_layer_status_init(widget, parent);
+    if (ret != 0) {
+        LOG_ERR("Widget initialization failed, freeing memory");
+        lv_mem_free(widget);
+        return NULL;
+    }
+
+    LOG_DBG("Layer status widget created successfully");
+    return widget;
+}
+
+void zmk_widget_layer_status_destroy(struct zmk_widget_layer_status *widget) {
+    LOG_DBG("Destroying layer status widget (dynamic deallocation)");
+
+    if (!widget) {
+        return;
+    }
+
+    // Delete LVGL objects (parent obj will delete all children including layer_labels and layer_title)
+    if (widget->obj) {
+        lv_obj_del(widget->obj);
+        widget->obj = NULL;
+    }
+
+    // Free the widget structure memory from LVGL heap
+    lv_mem_free(widget);
+}
