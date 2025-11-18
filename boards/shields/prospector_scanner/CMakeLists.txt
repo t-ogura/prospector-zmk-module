@@ -22,11 +22,12 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   zephyr_library_sources(src/layer_status_widget.c)  # YADS-style large layer display widget
   zephyr_library_sources(src/modifier_status_widget.c)  # Modifier key status widget (C S A G)
   # zephyr_library_sources(src/profile_status_widget.c)  # Removed - redundant with connection_status_widget
-  zephyr_library_sources(src/signal_status_widget.c)  # RSSI + reception rate widget
-  zephyr_library_sources(src/wpm_status_widget.c)  # YADS-style WPM display widget
-  zephyr_library_sources(src/debug_status_widget.c)  # Debug status overlay widget for diagnostics
+  # zephyr_library_sources(src/signal_status_widget.c)  # RSSI + reception rate widget - DISABLED (info in keyboard list)
+  zephyr_library_sources(src/wpm_status_widget.c)  # YADS-style WPM display widget - RE-ENABLED
+  # zephyr_library_sources(src/debug_status_widget.c)  # Debug status overlay widget - DISABLED (debug only)
   zephyr_library_sources(src/brightness_control.c)  # Auto-brightness with ambient light sensor
   zephyr_library_sources(src/system_settings_widget.c)  # System settings screen (simple version - no buttons yet)
+  zephyr_library_sources(src/keyboard_list_widget.c)  # Keyboard list screen (shows active keyboards)
   zephyr_library_sources(src/behavior_settings_toggle.c)  # Custom behavior for settings toggle gesture
   # zephyr_library_sources(src/display_rotate_init.c)  # Merged into scanner_display.c
   zephyr_library_sources(src/touch_handler.c)  # Direct CST816S touch event handler for raw coordinates

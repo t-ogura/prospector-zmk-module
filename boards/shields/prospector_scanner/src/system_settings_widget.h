@@ -18,6 +18,10 @@ struct zmk_widget_system_settings {
     lv_obj_t *parent;           // Parent screen for lazy init
 };
 
-int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, lv_obj_t *parent);
+// Dynamic allocation functions
+struct zmk_widget_system_settings *zmk_widget_system_settings_create(lv_obj_t *parent);
+void zmk_widget_system_settings_destroy(struct zmk_widget_system_settings *widget);
+
+// Widget control functions
 void zmk_widget_system_settings_show(struct zmk_widget_system_settings *widget);
 void zmk_widget_system_settings_hide(struct zmk_widget_system_settings *widget);

@@ -21,11 +21,12 @@
 #include "layer_status_widget.h"
 #include "modifier_status_widget.h"
 // Profile widget removed - connection status already handled by connection_status_widget
-#include "signal_status_widget.h"
-#include "wpm_status_widget.h"
-#include "debug_status_widget.h"
+// #include "signal_status_widget.h"  // DISABLED - info available in keyboard list
+#include "wpm_status_widget.h"  // RE-ENABLED
+// #include "debug_status_widget.h"  // DISABLED - debug only
 #include "scanner_battery_status_widget.h"
 #include "system_settings_widget.h"
+#include "keyboard_list_widget.h"  // Keyboard list screen (shows active keyboards)
 #include "touch_handler.h"
 #include "events/swipe_gesture_event.h"
 
@@ -51,15 +52,27 @@ lv_obj_t *main_screen = NULL;  // Non-static for external access (touch_handler.
 static struct zmk_widget_scanner_battery battery_widget;
 static struct zmk_widget_connection_status connection_widget;
 static struct zmk_widget_layer_status layer_widget;
-static struct zmk_widget_modifier_status modifier_widget;
+// Modifier widget (DYNAMIC ALLOCATION - created only when modifiers are pressed)
+static struct zmk_widget_modifier_status *modifier_widget = NULL;
 // Profile widget removed - redundant with connection status widget
-static struct zmk_widget_signal_status signal_widget;
-static struct zmk_widget_wpm_status wpm_widget;
-// Global widget for access from custom behavior
-struct zmk_widget_system_settings system_settings_widget;
+// static struct zmk_widget_signal_status signal_widget;  // DISABLED - info in keyboard list
+static struct zmk_widget_wpm_status wpm_widget;  // RE-ENABLED
+// System settings widget for settings screen (DYNAMIC ALLOCATION)
+static struct zmk_widget_system_settings *system_settings_widget = NULL;
+// Keyboard list widget for showing active keyboards (DYNAMIC ALLOCATION)
+static struct zmk_widget_keyboard_list *keyboard_list_widget = NULL;
 
-// Global debug widget for sensor diagnostics (positioned in modifier area)
-struct zmk_widget_debug_status debug_widget;
+// Global debug widget for sensor diagnostics - DISABLED (debug only)
+// struct zmk_widget_debug_status debug_widget;
+
+// Screen state management
+enum screen_state {
+    SCREEN_MAIN,           // Main status screen
+    SCREEN_SETTINGS,       // System settings screen
+    SCREEN_KEYBOARD_LIST   // Active keyboards list screen
+};
+
+static enum screen_state current_screen = SCREEN_MAIN;
 
 // Scanner's own battery status widget (top-right corner)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -98,22 +111,42 @@ static K_WORK_DELAYABLE_DEFINE(rx_periodic_work, periodic_rx_update_handler);
 static void battery_debug_update_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(battery_debug_work, battery_debug_update_handler);
 
+// Memory monitoring work (every 30 seconds)
+static void memory_monitor_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(memory_monitor_work, memory_monitor_handler);
+
 // Periodic signal timeout check (every 5 seconds)
 static void check_signal_timeout_handler(struct k_work *work) {
-    // Check signal widget for timeout
-    zmk_widget_signal_status_check_timeout(&signal_widget);
-    
+    // Check signal widget for timeout - DISABLED
+    // zmk_widget_signal_status_check_timeout(&signal_widget);
+
     // Schedule next check
     k_work_schedule(&signal_timeout_work, K_SECONDS(5));
 }
 
 // 1Hz periodic RX update - called every second for smooth rate decline
 static void periodic_rx_update_handler(struct k_work *work) {
-    // Call periodic update for signal widget - ensures 1Hz update even without receptions
-    zmk_widget_signal_status_periodic_update(&signal_widget);
-    
+    // Call periodic update for signal widget - DISABLED
+    // zmk_widget_signal_status_periodic_update(&signal_widget);
+
     // Schedule next update in 1 second - this ensures continuous 1Hz updates
     k_work_schedule(&rx_periodic_work, K_SECONDS(1));
+}
+
+// Memory monitoring handler - reports stack usage (DEBUG: 1s interval)
+static void memory_monitor_handler(struct k_work *work) {
+    // LVGL memory monitor doesn't work with custom allocator (LV_MEM_CUSTOM=1)
+    // Instead, report system uptime and basic stats
+
+    uint32_t uptime_sec = k_uptime_get() / 1000;
+    uint32_t uptime_min = uptime_sec / 60;
+    uint32_t uptime_hr = uptime_min / 60;
+
+    LOG_INF("UPTIME: %uh %um %us - System running normally",
+            uptime_hr, uptime_min % 60, uptime_sec % 60);
+
+    // DEBUG: Schedule next check in 10 seconds (less frequent to reduce log spam)
+    k_work_schedule(&memory_monitor_work, K_SECONDS(10));
 }
 
 // Battery debug update handler - constant display for troubleshooting
@@ -125,7 +158,7 @@ static void battery_debug_update_handler(struct k_work *work) {
     // Battery support disabled - skip battery widget update
     LOG_DBG("Battery debug update skipped - battery support disabled");
 #endif
-    
+
     // Schedule next update in 5 seconds
     k_work_schedule(&battery_debug_work, K_SECONDS(5));
 }
@@ -135,7 +168,8 @@ static void start_signal_monitoring(void) {
     k_work_schedule(&signal_timeout_work, K_SECONDS(5));
     k_work_schedule(&rx_periodic_work, K_SECONDS(1));  // Start 1Hz updates
     k_work_schedule(&battery_debug_work, K_SECONDS(2)); // Start battery debug updates (2s delay)
-    LOG_INF("Started periodic signal timeout monitoring (5s intervals), 1Hz RX updates, and 5s battery debug updates");
+    k_work_schedule(&memory_monitor_work, K_SECONDS(10)); // Uptime monitor (10s interval)
+    LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s)");
 }
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -433,9 +467,9 @@ static void start_battery_monitoring(void) {
     LOG_INF("Started periodic battery monitoring (%ds intervals) - ACTIVE MODE", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
     
     // Update debug widget to show monitoring started
-    if (debug_widget.debug_label) {
-        zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STARTED");
-    }
+    // if (debug_widget.debug_label) {
+    //     zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STARTED");
+    // }  // DISABLED
 }
 
 // Stop battery monitoring when keyboards become inactive
@@ -444,9 +478,9 @@ static void stop_battery_monitoring(void) {
     LOG_INF("Stopped periodic battery monitoring - INACTIVE MODE");
     
     // Update debug widget to show monitoring stopped
-    if (debug_widget.debug_label) {
-        zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STOPPED");
-    }
+    // if (debug_widget.debug_label) {
+    //     zmk_widget_debug_status_set_text(&debug_widget, "BATTERY MONITORING STOPPED");
+    // }  // DISABLED
 }
 #endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
 
@@ -517,9 +551,15 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         zmk_widget_scanner_battery_reset(&battery_widget);
         zmk_widget_connection_status_reset(&connection_widget);
         zmk_widget_layer_status_reset(&layer_widget);
-        zmk_widget_modifier_status_reset(&modifier_widget);
-        zmk_widget_signal_status_reset(&signal_widget);
-        zmk_widget_wpm_status_reset(&wpm_widget);
+
+        // Modifier widget - destroy if exists (dynamic allocation)
+        if (modifier_widget) {
+            zmk_widget_modifier_status_destroy(modifier_widget);
+            modifier_widget = NULL;
+        }
+
+        // zmk_widget_signal_status_reset(&signal_widget);  // DISABLED
+        zmk_widget_wpm_status_reset(&wpm_widget);  // RE-ENABLED
         
         // Reset scanner's own battery widget (don't reset - should show scanner status)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT) 
@@ -561,7 +601,29 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 zmk_widget_scanner_battery_update(&battery_widget, kbd);
                 zmk_widget_connection_status_update(&connection_widget, kbd);
                 zmk_widget_layer_status_update(&layer_widget, kbd);
-                zmk_widget_modifier_status_update(&modifier_widget, kbd);
+
+                // Modifier widget - dynamic allocation based on active modifiers
+                bool has_modifiers = (kbd->data.modifier_flags != 0);
+                if (has_modifiers) {
+                    // Create widget if modifiers are active and widget doesn't exist
+                    if (!modifier_widget) {
+                        modifier_widget = zmk_widget_modifier_status_create(main_screen);
+                        if (modifier_widget) {
+                            lv_obj_align(zmk_widget_modifier_status_obj(modifier_widget),
+                                       LV_ALIGN_CENTER, 0, 30);
+                        }
+                    }
+                    // Update widget if it exists
+                    if (modifier_widget) {
+                        zmk_widget_modifier_status_update(modifier_widget, kbd);
+                    }
+                } else {
+                    // Destroy widget if no modifiers are active
+                    if (modifier_widget) {
+                        zmk_widget_modifier_status_destroy(modifier_widget);
+                        modifier_widget = NULL;
+                    }
+                }
                 
                 // Only update signal/RX when we receive meaningful data updates
                 // Check if this is a real data update by monitoring multiple fields
@@ -578,7 +640,7 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 
                 if (data_changed) {
                     // Data actually changed - this is a real update from the keyboard
-                    zmk_widget_signal_status_update(&signal_widget, kbd->rssi);
+                    // zmk_widget_signal_status_update(&signal_widget, kbd->rssi);  // DISABLED
                     
                     // Remember last values for change detection
                     last_layer = kbd->data.active_layer;
@@ -586,9 +648,9 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                     last_battery = kbd->data.battery_level;
                     last_modifier = kbd->data.modifier_flags;
                 }
-                
-                zmk_widget_wpm_status_update(&wpm_widget, kbd);
-                
+
+                zmk_widget_wpm_status_update(&wpm_widget, kbd);  // RE-ENABLED
+
                 // Resume normal brightness control when keyboard is connected
                 // prospector_resume_brightness(); // Function removed in v1.1.1
                 
@@ -672,87 +734,94 @@ SYS_INIT(scanner_display_init, APPLICATION, 60);
 // Required function for ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
 // Following the working adapter pattern with simple, stable display
 lv_obj_t *zmk_display_status_screen() {
-    LOG_ERR("🎨 ===== zmk_display_status_screen() CALLED =====");
+    LOG_INF("🎨 ===== zmk_display_status_screen() CALLED =====");
 
+    LOG_INF("Step 1: Creating main screen object...");
     lv_obj_t *screen = lv_obj_create(NULL);
     main_screen = screen;  // Save reference for later use
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
-    
-    // Device name label at top center (larger font for better readability) - moved down 10px
+    LOG_INF("✅ Main screen created");
+
+    LOG_INF("Step 2: Creating device name label...");
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0);
-    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25); // Back to center
+    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25);
     lv_label_set_text(device_name_label, "Initializing...");
-    
-    // Scanner battery status widget in top right corner (above connection status)
+    LOG_INF("✅ Device name label created");
+
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    LOG_INF("Step 3: Init scanner battery status widget...");
     zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
     lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, 10, 0);
+    LOG_INF("✅ Scanner battery status widget initialized");
 #endif
-    
-    // Connection status widget in top right - moved down to make room for battery
+
+    LOG_INF("Step 4: Init connection status widget...");
     zmk_widget_connection_status_init(&connection_widget, screen);
-    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45); // Original position
-    
-    // Layer status widget in the center (horizontal layer display) - moved down 10px
+    lv_obj_align(zmk_widget_connection_status_obj(&connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45);
+    LOG_INF("✅ Connection status widget initialized");
+
+    LOG_INF("Step 5: Init layer status widget...");
     zmk_widget_layer_status_init(&layer_widget, screen);
-    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -10); // Back to center
-    
-    // Modifier status widget between layer and battery - moved down 10px
-    zmk_widget_modifier_status_init(&modifier_widget, screen);
-    lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30); // Back to center
-    
-    // Profile widget removed - BLE profile already shown in connection status widget
+    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, -10);
+    LOG_INF("✅ Layer status widget initialized");
 
-    // Battery widget moved down 20px more as requested (was -40, now -20)
-    // ALWAYS initialize - v1.1.1 compatibility (widget auto-hides if no battery)
+    LOG_INF("Step 6: Modifier status widget (dynamic allocation - created on modifier press)");
+    // Widget will be created dynamically when modifiers are pressed
+    // zmk_widget_modifier_status_init(&modifier_widget, screen);  // REMOVED - now dynamic
+    // lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30);
+    LOG_INF("✅ Modifier status widget setup complete");
+
+    LOG_INF("Step 7: Init battery widget...");
     zmk_widget_scanner_battery_init(&battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20); // Back to center
+    lv_obj_align(zmk_widget_scanner_battery_obj(&battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
     lv_obj_set_height(zmk_widget_scanner_battery_obj(&battery_widget), 50);
-    
-    // WPM status widget - positioned above layer display, left-aligned
+    LOG_INF("✅ Battery widget initialized");
+
+    LOG_INF("Step 8: Init WPM status widget...");
     zmk_widget_wpm_status_init(&wpm_widget, screen);
-    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50); // Top-left corner positioning
-    
-    // Signal status widget (RSSI + reception rate) at the very bottom with full width space
-    zmk_widget_signal_status_init(&signal_widget, screen);
-    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -5, -5); // More space from edge
-    
-    // Debug status widget (overlaps modifier area when no modifiers active)
-    zmk_widget_debug_status_init(&debug_widget, screen);
-    
-    // Debug widget visibility controlled by CONFIG_PROSPECTOR_DEBUG_WIDGET
-    bool debug_enabled = IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET);
-    LOG_INF("Debug widget %s by CONFIG_PROSPECTOR_DEBUG_WIDGET", debug_enabled ? "ENABLED" : "DISABLED");
-    zmk_widget_debug_status_set_visible(&debug_widget, debug_enabled);
-    // TEMPORARILY DISABLED: initial debug message to avoid overwriting brightness_control
-    // if (debug_widget.debug_label && debug_enabled) {
-    //     zmk_widget_debug_status_set_text(&debug_widget, "DEBUG: Scanner Ready");
-    //     LOG_INF("✅ Debug widget initialized for diagnostics");
-    // }
-    
-    // Initialize scanner battery widget with current status
+    lv_obj_align(zmk_widget_wpm_status_obj(&wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50);
+    LOG_INF("✅ WPM status widget initialized");  // RE-ENABLED
+
+    // LOG_INF("Step 9: Init signal status widget...");
+    // zmk_widget_signal_status_init(&signal_widget, screen);
+    // lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_RIGHT, -5, -5);
+    // LOG_INF("✅ Signal status widget initialized");  // DISABLED
+
+    // LOG_INF("Step 10: Init debug status widget...");
+    // zmk_widget_debug_status_init(&debug_widget, screen);
+    // bool debug_enabled = IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET);
+    // LOG_INF("Debug widget %s by CONFIG_PROSPECTOR_DEBUG_WIDGET", debug_enabled ? "ENABLED" : "DISABLED");
+    // zmk_widget_debug_status_set_visible(&debug_widget, debug_enabled);
+    // LOG_INF("✅ Debug status widget initialized");  // DISABLED
+
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
-    LOG_INF("Initializing scanner battery widget with current status");
+    LOG_INF("Step 11: Update scanner battery widget...");
     update_scanner_battery_widget();
-    
-    // NOTE: Battery monitoring will start automatically when keyboards become active
-    // This saves power when no keyboards are connected
+    LOG_INF("✅ Scanner battery widget updated");
 #endif
-    
-    // Start periodic signal timeout monitoring
+
+    LOG_INF("Step 12: Starting periodic signal monitoring...");
     start_signal_monitoring();
+    LOG_INF("✅ Periodic monitoring started");
 
-    // Initialize system settings widget (initially hidden)
-    zmk_widget_system_settings_init(&system_settings_widget, screen);
-    LOG_INF("System settings widget initialized");
+    LOG_INF("Step 13: System settings widget (dynamic allocation - created on demand)");
+    // Widget will be created dynamically when needed (on swipe gesture)
+    // zmk_widget_system_settings_init(&system_settings_widget, screen);  // REMOVED - now dynamic
+    LOG_INF("✅ System settings widget setup complete");
 
-    // Trigger scanner initialization after screen is ready
+    LOG_INF("Step 14: Keyboard list widget (dynamic allocation - created on demand)");
+    // Widget will be created dynamically when needed (on swipe gesture)
+    // zmk_widget_keyboard_list_init(&keyboard_list_widget, screen);  // REMOVED - now dynamic
+    LOG_INF("✅ Keyboard list widget setup complete");
+
+    LOG_INF("Step 15: Triggering scanner start...");
     trigger_scanner_start();
+    LOG_INF("✅ Scanner start triggered");
 
-    LOG_INF("Scanner screen created successfully with gesture support");
+    LOG_INF("🎉 Scanner screen created successfully with gesture support");
     return screen;
 }
 
@@ -795,6 +864,79 @@ static void trigger_scanner_start(void) {
     k_work_schedule(&scanner_start_work, K_SECONDS(3)); // Wait 3 seconds for display
 }
 
+// Helper functions for widget memory management
+static void free_main_screen_widgets(void) {
+    LOG_INF("🗑️  Freeing main screen widgets to save RAM...");
+
+    // Delete modifier widget
+    if (zmk_widget_modifier_status_obj(&modifier_widget)) {
+        lv_obj_del(zmk_widget_modifier_status_obj(&modifier_widget));
+        LOG_INF("  ✅ Modifier widget deleted");
+    }
+
+    // Delete layer widget
+    if (zmk_widget_layer_status_obj(&layer_widget)) {
+        lv_obj_del(zmk_widget_layer_status_obj(&layer_widget));
+        LOG_INF("  ✅ Layer widget deleted");
+    }
+
+    LOG_INF("🗑️  Main screen widgets freed");
+}
+
+// DEPRECATED: Now using dynamic allocation - widgets are created/destroyed on demand
+// static void free_keyboard_list_widgets(void) {
+//     LOG_INF("🗑️  Freeing keyboard list widgets to save RAM...");
+//
+//     // Delete keyboard list widget (obj and all children)
+//     if (keyboard_list_widget->obj) {
+//         lv_obj_del(keyboard_list_widget->obj);
+//         keyboard_list_widget->obj = NULL;
+//         keyboard_list_widget->title_label = NULL;
+//         LOG_INF("  ✅ Keyboard list widget deleted");
+//     }
+//
+//     LOG_INF("🗑️  Keyboard list widgets freed");
+// }
+
+static void restore_main_screen_widgets(void) {
+    LOG_INF("🔄 Restoring main screen widgets...");
+
+    if (!main_screen) {
+        LOG_ERR("❌ Cannot restore widgets - main_screen is NULL");
+        return;
+    }
+
+    // Modifier widget now uses dynamic allocation - no need to recreate
+    LOG_INF("  Modifier widget (dynamic allocation - created on demand)");
+    // zmk_widget_modifier_status_init(&modifier_widget, main_screen);  // REMOVED - now dynamic
+    // lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_BOTTOM_MID, 0, -65);
+    LOG_INF("  ✅ Modifier widget ready");
+
+    // Recreate layer widget
+    LOG_INF("  Recreating layer widget...");
+    zmk_widget_layer_status_init(&layer_widget, main_screen);
+    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, 0);
+    LOG_INF("  ✅ Layer widget recreated");
+
+    LOG_INF("🔄 Main screen widgets restored");
+}
+
+static void restore_keyboard_list_widgets(void) {
+    LOG_INF("🔄 Restoring keyboard list widgets...");
+
+    if (!main_screen) {
+        LOG_ERR("❌ Cannot restore widgets - main_screen is NULL");
+        return;
+    }
+
+    // Keyboard list widget now uses dynamic allocation - no need to recreate
+    LOG_INF("  Keyboard list widget (dynamic allocation - created on demand)");
+    // zmk_widget_keyboard_list_init(&keyboard_list_widget, main_screen);  // REMOVED - now dynamic
+    LOG_INF("  ✅ Keyboard list widget ready");
+
+    LOG_INF("🔄 Keyboard list widgets restored");
+}
+
 // Swipe gesture event listener (runs in main thread - safe for LVGL)
 static int swipe_gesture_listener(const zmk_event_t *eh) {
     const struct zmk_swipe_gesture_event *ev = as_zmk_swipe_gesture_event(eh);
@@ -811,22 +953,96 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
     }
 
     // Thread-safe LVGL operations (running in main thread via event system)
+    // Handle gestures based on current screen state
     switch (ev->direction) {
         case SWIPE_DIRECTION_DOWN:
-            LOG_INF("🔴 Setting background to RED");
-            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0xFF0000), 0);
+            if (current_screen == SCREEN_MAIN) {
+                // From main screen: create and show settings (dynamic allocation)
+                LOG_INF("⬇️  DOWN swipe from MAIN: Creating system settings widget");
+
+                // Create widget if not already created
+                if (!system_settings_widget) {
+                    system_settings_widget = zmk_widget_system_settings_create(main_screen);
+                    if (!system_settings_widget) {
+                        LOG_ERR("❌ Failed to create system settings widget");
+                        break;  // Abort if creation failed
+                    }
+                }
+
+                // Show the widget
+                zmk_widget_system_settings_show(system_settings_widget);
+                current_screen = SCREEN_SETTINGS;
+            } else if (current_screen == SCREEN_KEYBOARD_LIST) {
+                // From keyboard list: return to main (hide and destroy widget)
+                LOG_INF("⬇️  DOWN swipe from KEYBOARD_LIST: Return to main");
+                if (keyboard_list_widget) {
+                    zmk_widget_keyboard_list_hide(keyboard_list_widget);
+                    zmk_widget_keyboard_list_destroy(keyboard_list_widget);
+                    keyboard_list_widget = NULL;
+                    LOG_INF("✅ Keyboard list widget destroyed, memory freed");
+                }
+                current_screen = SCREEN_MAIN;
+            } else if (current_screen == SCREEN_SETTINGS) {
+                // Already on settings screen, do nothing
+                LOG_INF("⬇️  DOWN swipe: Already on settings screen");
+            }
             break;
+
         case SWIPE_DIRECTION_UP:
-            LOG_INF("⚫ Setting background to BLACK");
-            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x000000), 0);
+            if (current_screen == SCREEN_MAIN) {
+                // From main screen: create and show keyboard list (dynamic allocation)
+                LOG_INF("⬆️  UP swipe from MAIN: Creating keyboard list widget");
+
+                // Create widget if not already created
+                if (!keyboard_list_widget) {
+                    keyboard_list_widget = zmk_widget_keyboard_list_create(main_screen);
+                    if (!keyboard_list_widget) {
+                        LOG_ERR("❌ Failed to create keyboard list widget");
+                        break;  // Abort if creation failed
+                    }
+                }
+
+                // Show the widget
+                zmk_widget_keyboard_list_show(keyboard_list_widget);
+                current_screen = SCREEN_KEYBOARD_LIST;
+            } else if (current_screen == SCREEN_SETTINGS) {
+                // From settings: return to main (hide and destroy widget)
+                LOG_INF("⬆️  UP swipe from SETTINGS: Return to main");
+                if (system_settings_widget) {
+                    zmk_widget_system_settings_hide(system_settings_widget);
+                    zmk_widget_system_settings_destroy(system_settings_widget);
+                    system_settings_widget = NULL;
+                    LOG_INF("✅ System settings widget destroyed, memory freed");
+                }
+                current_screen = SCREEN_MAIN;
+            } else if (current_screen == SCREEN_KEYBOARD_LIST) {
+                // Already on keyboard list screen, do nothing
+                LOG_INF("⬆️  UP swipe: Already on keyboard list screen");
+            }
             break;
+
         case SWIPE_DIRECTION_LEFT:
-            LOG_INF("🔵 Setting background to BLUE");
-            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x0000FF), 0);
-            break;
         case SWIPE_DIRECTION_RIGHT:
-            LOG_INF("🟢 Setting background to GREEN");
-            lv_obj_set_style_bg_color(main_screen, lv_color_hex(0x00FF00), 0);
+            // Left/Right swipe always returns to main screen from any screen
+            LOG_INF("⬅️➡️  LEFT/RIGHT swipe: Return to main screen");
+            if (current_screen == SCREEN_SETTINGS) {
+                // Hide and destroy settings widget
+                if (system_settings_widget) {
+                    zmk_widget_system_settings_hide(system_settings_widget);
+                    zmk_widget_system_settings_destroy(system_settings_widget);
+                    system_settings_widget = NULL;
+                    LOG_INF("✅ System settings widget destroyed, memory freed");
+                }
+            } else if (current_screen == SCREEN_KEYBOARD_LIST) {
+                // Hide and destroy widget (free memory)
+                if (keyboard_list_widget) {
+                    zmk_widget_keyboard_list_hide(keyboard_list_widget);
+                    zmk_widget_keyboard_list_destroy(keyboard_list_widget);
+                    keyboard_list_widget = NULL;
+                    LOG_INF("✅ Keyboard list widget destroyed, memory freed");
+                }
+            }
+            current_screen = SCREEN_MAIN;
             break;
     }
 
