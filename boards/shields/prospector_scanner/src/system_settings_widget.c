@@ -16,37 +16,61 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static void bootloader_btn_event_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
 
-    LOG_INF("🔵 Bootloader button event: code=%d", code);
-
-    if (code != LV_EVENT_CLICKED) {
-        return;
+    // Log ALL events for debugging
+    const char *event_name = "UNKNOWN";
+    switch (code) {
+        case LV_EVENT_PRESSED: event_name = "PRESSED"; break;
+        case LV_EVENT_PRESSING: event_name = "PRESSING"; break;
+        case LV_EVENT_PRESS_LOST: event_name = "PRESS_LOST"; break;
+        case LV_EVENT_SHORT_CLICKED: event_name = "SHORT_CLICKED"; break;
+        case LV_EVENT_LONG_PRESSED: event_name = "LONG_PRESSED"; break;
+        case LV_EVENT_LONG_PRESSED_REPEAT: event_name = "LONG_PRESSED_REPEAT"; break;
+        case LV_EVENT_CLICKED: event_name = "CLICKED"; break;
+        case LV_EVENT_RELEASED: event_name = "RELEASED"; break;
+        default: break;
     }
 
-    LOG_INF("🔵🔵🔵 Bootloader button CLICKED - entering bootloader mode NOW!");
+    LOG_INF("🔵 Bootloader button: %s (code=%d)", event_name, code);
 
-    // Set GPREGRET register to signal bootloader entry
-    NRF_POWER->GPREGRET = 0x57; // Magic value for bootloader (nRF52 standard)
+    if (code == LV_EVENT_CLICKED || code == LV_EVENT_SHORT_CLICKED) {
+        LOG_INF("🔵🔵🔵 Bootloader button ACTIVATED - entering bootloader mode NOW!");
 
-    LOG_INF("🔵 GPREGRET set to 0x57, performing cold reboot...");
+        // Set GPREGRET register to signal bootloader entry
+        NRF_POWER->GPREGRET = 0x57; // Magic value for bootloader (nRF52 standard)
 
-    // Perform cold reboot to enter bootloader
-    sys_reboot(SYS_REBOOT_COLD);
+        LOG_INF("🔵 GPREGRET set to 0x57, performing cold reboot...");
+
+        // Perform cold reboot to enter bootloader
+        sys_reboot(SYS_REBOOT_COLD);
+    }
 }
 
 static void reset_btn_event_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
 
-    LOG_INF("🔴 Reset button event: code=%d", code);
-
-    if (code != LV_EVENT_CLICKED) {
-        return;
+    // Log ALL events for debugging
+    const char *event_name = "UNKNOWN";
+    switch (code) {
+        case LV_EVENT_PRESSED: event_name = "PRESSED"; break;
+        case LV_EVENT_PRESSING: event_name = "PRESSING"; break;
+        case LV_EVENT_PRESS_LOST: event_name = "PRESS_LOST"; break;
+        case LV_EVENT_SHORT_CLICKED: event_name = "SHORT_CLICKED"; break;
+        case LV_EVENT_LONG_PRESSED: event_name = "LONG_PRESSED"; break;
+        case LV_EVENT_LONG_PRESSED_REPEAT: event_name = "LONG_PRESSED_REPEAT"; break;
+        case LV_EVENT_CLICKED: event_name = "CLICKED"; break;
+        case LV_EVENT_RELEASED: event_name = "RELEASED"; break;
+        default: break;
     }
 
-    LOG_INF("🔴🔴🔴 Reset button CLICKED - performing system reset NOW!");
-    LOG_INF("🔴 Performing warm reboot...");
+    LOG_INF("🔴 Reset button: %s (code=%d)", event_name, code);
 
-    // Perform warm reboot (normal restart)
-    sys_reboot(SYS_REBOOT_WARM);
+    if (code == LV_EVENT_CLICKED || code == LV_EVENT_SHORT_CLICKED) {
+        LOG_INF("🔴🔴🔴 Reset button ACTIVATED - performing system reset NOW!");
+        LOG_INF("🔴 Performing warm reboot...");
+
+        // Perform warm reboot (normal restart)
+        sys_reboot(SYS_REBOOT_WARM);
+    }
 }
 
 // ========== Helper: Create Styled Button ==========
@@ -120,23 +144,23 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
 
     LOG_INF("✅ Container created and styled");
 
-    // Title label (higher position)
+    // Title label (much higher position - more separation from buttons)
     widget->title_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->title_label, "System Settings");
     lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, LV_STATE_DEFAULT);
-    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 30);  // Y: 20→30 (more space)
+    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 40);  // Y: 30→40 (even more space)
 
     LOG_INF("✅ Title label created");
 
-    // Bootloader button (blue theme) - lower position for more spacing
+    // Bootloader button (blue theme) - moved down, buttons closer together
     LOG_INF("Creating Bootloader button...");
     widget->bootloader_btn = create_styled_button(
         widget->obj,
         "Enter Bootloader",
         lv_color_hex(0x4A90E2),  // Normal: Sky blue
         lv_color_hex(0x357ABD),  // Pressed: Darker blue
-        0, -30  // Y: -50→-30 (closer to center, more space from title)
+        0, -10  // Y: -30→-10 (buttons closer together)
     );
 
     if (!widget->bootloader_btn) {
@@ -145,23 +169,19 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
         return -ENOMEM;
     }
 
-    // Register event handler for bootloader button
-    lv_obj_add_event_cb(widget->bootloader_btn, bootloader_btn_event_cb, LV_EVENT_CLICKED, NULL);
-
-    // Make button clickable (CRITICAL for touch input)
-    lv_obj_clear_flag(widget->bootloader_btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(widget->bootloader_btn, LV_OBJ_FLAG_CLICKABLE);
+    // Register ALL event types to debug touch detection
+    lv_obj_add_event_cb(widget->bootloader_btn, bootloader_btn_event_cb, LV_EVENT_ALL, NULL);
 
     LOG_INF("✅ Bootloader button created with event handler");
 
-    // Reset button (red theme)
+    // Reset button (red theme) - buttons closer together
     LOG_INF("Creating Reset button...");
     widget->reset_btn = create_styled_button(
         widget->obj,
         "System Reset",
         lv_color_hex(0xE24A4A),  // Normal: Soft red
         lv_color_hex(0xC93A3A),  // Pressed: Darker red
-        0, 70   // Y: 50→70 (more space between buttons)
+        0, 80   // Y: 70→80 (buttons closer together, but still separated)
     );
 
     if (!widget->reset_btn) {
@@ -170,12 +190,8 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
         return -ENOMEM;
     }
 
-    // Register event handler for reset button
-    lv_obj_add_event_cb(widget->reset_btn, reset_btn_event_cb, LV_EVENT_CLICKED, NULL);
-
-    // Make button clickable (CRITICAL for touch input)
-    lv_obj_clear_flag(widget->reset_btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(widget->reset_btn, LV_OBJ_FLAG_CLICKABLE);
+    // Register ALL event types to debug touch detection
+    lv_obj_add_event_cb(widget->reset_btn, reset_btn_event_cb, LV_EVENT_ALL, NULL);
 
     LOG_INF("✅ Reset button created with event handler");
 
