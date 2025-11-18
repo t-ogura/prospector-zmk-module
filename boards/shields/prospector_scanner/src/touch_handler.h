@@ -48,3 +48,10 @@ int touch_handler_register_callback(touch_event_callback_t callback);
  * @return 0 on success, -ENODATA if no event available
  */
 int touch_handler_get_last_event(struct touch_event_data *event);
+
+/**
+ * Register LVGL input device for touch events
+ *
+ * @return 0 on success, negative errno on failure
+ */
+int touch_handler_register_lvgl_indev(void);

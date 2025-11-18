@@ -36,11 +36,12 @@ static void bootloader_btn_event_cb(lv_event_t *e) {
         LOG_INF("🔵🔵🔵 Bootloader button ACTIVATED - entering bootloader mode NOW!");
 
         // Set GPREGRET register to signal bootloader entry
-        NRF_POWER->GPREGRET = 0x57; // Magic value for bootloader (nRF52 standard)
+        // Magic value 0x57 used by Adafruit bootloader for XIAO BLE
+        NRF_POWER->GPREGRET = 0x57;
 
-        LOG_INF("🔵 GPREGRET set to 0x57, performing cold reboot...");
+        LOG_INF("🔵 GPREGRET=0x57, performing cold reboot to bootloader...");
 
-        // Perform cold reboot to enter bootloader
+        // Cold reboot to enter bootloader
         sys_reboot(SYS_REBOOT_COLD);
     }
 }
@@ -149,18 +150,18 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     lv_label_set_text(widget->title_label, "System Settings");
     lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, LV_STATE_DEFAULT);
-    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 40);  // Y: 30→40 (even more space)
+    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);  // Y: 40→20 (higher)
 
     LOG_INF("✅ Title label created");
 
-    // Bootloader button (blue theme) - moved down, buttons closer together
+    // Bootloader button (blue theme) - buttons closer together
     LOG_INF("Creating Bootloader button...");
     widget->bootloader_btn = create_styled_button(
         widget->obj,
         "Enter Bootloader",
         lv_color_hex(0x4A90E2),  // Normal: Sky blue
         lv_color_hex(0x357ABD),  // Pressed: Darker blue
-        0, -10  // Y: -30→-10 (buttons closer together)
+        0, -15  // Y: -5→-15 (moved up)
     );
 
     if (!widget->bootloader_btn) {
@@ -181,7 +182,7 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
         "System Reset",
         lv_color_hex(0xE24A4A),  // Normal: Soft red
         lv_color_hex(0xC93A3A),  // Pressed: Darker red
-        0, 80   // Y: 70→80 (buttons closer together, but still separated)
+        0, 55   // Y: 65→55 (moved up)
     );
 
     if (!widget->reset_btn) {

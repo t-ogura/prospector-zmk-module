@@ -761,6 +761,9 @@ static int scanner_display_init(void) {
         LOG_INF("✅ Touch handler initialized - will log raw coordinates");
     }
 
+    // Note: LVGL input device will be registered when Settings screen is first opened
+    // (dynamic allocation - only register when buttons are actually created)
+
     LOG_INF("✅ Scanner display initialized successfully");
     return 0;
 }
@@ -1075,6 +1078,14 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                     if (!system_settings_widget) {
                         LOG_ERR("❌ Failed to create system settings widget");
                         break;  // Abort if creation failed
+                    }
+
+                    // Register LVGL input device for button clicks (first time only)
+                    int ret = touch_handler_register_lvgl_indev();
+                    if (ret < 0) {
+                        LOG_ERR("❌ Failed to register LVGL input device: %d", ret);
+                    } else {
+                        LOG_INF("✅ LVGL input device registered for button clicks");
                     }
                 }
 

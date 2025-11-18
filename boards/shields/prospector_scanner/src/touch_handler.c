@@ -232,6 +232,16 @@ static void lvgl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     data->point.x = current_x;
     data->point.y = current_y;
     data->state = touch_active ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+
+    // Debug: Log when LVGL reads touch state
+    static uint32_t last_log_time = 0;
+    uint32_t now = k_uptime_get_32();
+    if (now - last_log_time > 500 || touch_active) {  // Log every 500ms or when touched
+        LOG_INF("🔵 LVGL read: (%d, %d) state=%s",
+                current_x, current_y,
+                touch_active ? "PRESSED" : "RELEASED");
+        last_log_time = now;
+    }
 }
 
 int touch_handler_init(void) {
@@ -245,6 +255,16 @@ int touch_handler_init(void) {
     LOG_INF("Touch handler initialized: CST816S on I2C");
     LOG_INF("Touch panel size: 240x280 (Waveshare 1.69\" Round LCD)");
     LOG_INF("✅ Using ZMK event system for thread-safe LVGL operations");
+    LOG_INF("⚠️ LVGL indev will be registered later by scanner_display.c");
+
+    return 0;
+}
+
+int touch_handler_register_lvgl_indev(void) {
+    if (lvgl_indev) {
+        LOG_WRN("LVGL input device already registered");
+        return 0;
+    }
 
     // Register LVGL input device for touch events
     static lv_indev_drv_t indev_drv;
