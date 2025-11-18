@@ -7,26 +7,25 @@
 #pragma once
 
 #include <lvgl.h>
+#include <zephyr/kernel.h>
+
+#define MAX_KEYBOARD_ENTRIES 6  // Maximum 6 keyboards displayable
+
+// Per-keyboard display elements
+struct keyboard_entry {
+    lv_obj_t *name_label;       // Keyboard name
+    lv_obj_t *rssi_bar;         // RSSI strength bar (0-5 bars)
+    lv_obj_t *rssi_label;       // RSSI dBm value
+};
 
 struct zmk_widget_keyboard_list {
     lv_obj_t *obj;              // Container object
     lv_obj_t *title_label;      // Title label
 
-    // Keyboard 1 elements
-    lv_obj_t *kb1_label;        // Keyboard name
-    lv_obj_t *kb1_rssi_bar;     // RSSI strength bar (0-5 bars)
-    lv_obj_t *kb1_rssi_label;   // RSSI dBm value
+    struct keyboard_entry entries[MAX_KEYBOARD_ENTRIES];  // Dynamic keyboard entries
+    uint8_t entry_count;        // Current number of entries displayed
 
-    // Keyboard 2 elements
-    lv_obj_t *kb2_label;        // Keyboard name
-    lv_obj_t *kb2_rssi_bar;     // RSSI strength bar (0-5 bars)
-    lv_obj_t *kb2_rssi_label;   // RSSI dBm value
-
-    // Keyboard 3 elements
-    lv_obj_t *kb3_label;        // Keyboard name
-    lv_obj_t *kb3_rssi_bar;     // RSSI strength bar (0-5 bars)
-    lv_obj_t *kb3_rssi_label;   // RSSI dBm value
-
+    struct k_work_delayable update_work;  // Periodic update timer
     lv_obj_t *parent;           // Parent screen
 };
 
