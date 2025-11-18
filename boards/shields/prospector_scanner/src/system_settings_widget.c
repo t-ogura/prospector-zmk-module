@@ -7,7 +7,6 @@
 #include "system_settings_widget.h"
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/reboot.h>
-#include <hal/nrf_power.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -35,14 +34,13 @@ static void bootloader_btn_event_cb(lv_event_t *e) {
     if (code == LV_EVENT_CLICKED || code == LV_EVENT_SHORT_CLICKED) {
         LOG_INF("🔵🔵🔵 Bootloader button ACTIVATED - entering bootloader mode NOW!");
 
-        // Set GPREGRET register to signal bootloader entry
-        // Magic value 0x57 used by Adafruit bootloader for XIAO BLE
-        NRF_POWER->GPREGRET = 0x57;
+        // Reboot with UF2 bootloader magic value
+        // CONFIG_NRF_STORE_REBOOT_TYPE_GPREGRET automatically sets GPREGRET to this value
+        // See: zmk/app/include/dt-bindings/zmk/reset.h - RST_UF2 = 0x57
+        // Adafruit bootloader checks for DFU_MAGIC_UF2_RESET = 0x57
+        LOG_INF("🔵 Rebooting with magic value 0x57 for UF2 bootloader entry...");
 
-        LOG_INF("🔵 GPREGRET=0x57, performing cold reboot to bootloader...");
-
-        // Cold reboot to enter bootloader
-        sys_reboot(SYS_REBOOT_COLD);
+        sys_reboot(0x57);  // Pass magic value directly - Zephyr sets GPREGRET automatically
     }
 }
 
