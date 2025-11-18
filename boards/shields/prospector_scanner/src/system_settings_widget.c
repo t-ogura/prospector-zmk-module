@@ -15,14 +15,19 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static void bootloader_btn_event_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
+
+    LOG_INF("🔵 Bootloader button event: code=%d", code);
+
     if (code != LV_EVENT_CLICKED) {
         return;
     }
 
-    LOG_INF("🔵 Bootloader button clicked - entering bootloader mode");
+    LOG_INF("🔵🔵🔵 Bootloader button CLICKED - entering bootloader mode NOW!");
 
     // Set GPREGRET register to signal bootloader entry
     NRF_POWER->GPREGRET = 0x57; // Magic value for bootloader (nRF52 standard)
+
+    LOG_INF("🔵 GPREGRET set to 0x57, performing cold reboot...");
 
     // Perform cold reboot to enter bootloader
     sys_reboot(SYS_REBOOT_COLD);
@@ -30,11 +35,15 @@ static void bootloader_btn_event_cb(lv_event_t *e) {
 
 static void reset_btn_event_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
+
+    LOG_INF("🔴 Reset button event: code=%d", code);
+
     if (code != LV_EVENT_CLICKED) {
         return;
     }
 
-    LOG_INF("🔴 Reset button clicked - performing system reset");
+    LOG_INF("🔴🔴🔴 Reset button CLICKED - performing system reset NOW!");
+    LOG_INF("🔴 Performing warm reboot...");
 
     // Perform warm reboot (normal restart)
     sys_reboot(SYS_REBOOT_WARM);
@@ -111,23 +120,23 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
 
     LOG_INF("✅ Container created and styled");
 
-    // Title label
+    // Title label (higher position)
     widget->title_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->title_label, "System Settings");
     lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, LV_STATE_DEFAULT);
-    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 30);  // Y: 20→30 (more space)
 
     LOG_INF("✅ Title label created");
 
-    // Bootloader button (blue theme)
+    // Bootloader button (blue theme) - lower position for more spacing
     LOG_INF("Creating Bootloader button...");
     widget->bootloader_btn = create_styled_button(
         widget->obj,
         "Enter Bootloader",
         lv_color_hex(0x4A90E2),  // Normal: Sky blue
         lv_color_hex(0x357ABD),  // Pressed: Darker blue
-        0, -50  // Center horizontally, 50px above center
+        0, -30  // Y: -50→-30 (closer to center, more space from title)
     );
 
     if (!widget->bootloader_btn) {
@@ -139,6 +148,10 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     // Register event handler for bootloader button
     lv_obj_add_event_cb(widget->bootloader_btn, bootloader_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
+    // Make button clickable (CRITICAL for touch input)
+    lv_obj_clear_flag(widget->bootloader_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(widget->bootloader_btn, LV_OBJ_FLAG_CLICKABLE);
+
     LOG_INF("✅ Bootloader button created with event handler");
 
     // Reset button (red theme)
@@ -148,7 +161,7 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
         "System Reset",
         lv_color_hex(0xE24A4A),  // Normal: Soft red
         lv_color_hex(0xC93A3A),  // Pressed: Darker red
-        0, 50   // Center horizontally, 50px below center
+        0, 70   // Y: 50→70 (more space between buttons)
     );
 
     if (!widget->reset_btn) {
@@ -159,6 +172,10 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
 
     // Register event handler for reset button
     lv_obj_add_event_cb(widget->reset_btn, reset_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    // Make button clickable (CRITICAL for touch input)
+    lv_obj_clear_flag(widget->reset_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(widget->reset_btn, LV_OBJ_FLAG_CLICKABLE);
 
     LOG_INF("✅ Reset button created with event handler");
 
