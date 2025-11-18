@@ -11,195 +11,249 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// Button click event handler
+// ========== Button Event Handlers ==========
+
 static void bootloader_btn_event_cb(lv_event_t *e) {
-    LOG_INF("Bootloader button clicked - entering bootloader mode");
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    LOG_INF("🔵 Bootloader button clicked - entering bootloader mode");
+
     // Set GPREGRET register to signal bootloader entry
-    NRF_POWER->GPREGRET = 0x57; // Magic value for bootloader
+    NRF_POWER->GPREGRET = 0x57; // Magic value for bootloader (nRF52 standard)
+
+    // Perform cold reboot to enter bootloader
     sys_reboot(SYS_REBOOT_COLD);
 }
 
 static void reset_btn_event_cb(lv_event_t *e) {
-    LOG_INF("Reset button clicked - performing system reset");
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    LOG_INF("🔴 Reset button clicked - performing system reset");
+
+    // Perform warm reboot (normal restart)
     sys_reboot(SYS_REBOOT_WARM);
 }
+
+// ========== Helper: Create Styled Button ==========
+
+static lv_obj_t *create_styled_button(lv_obj_t *parent, const char *text,
+                                       lv_color_t bg_color, lv_color_t bg_color_pressed,
+                                       int x_offset, int y_offset) {
+    // Create button using lv_btn (proper LVGL v7 button widget)
+    lv_obj_t *btn = lv_btn_create(parent);
+    if (!btn) {
+        LOG_ERR("Failed to create button");
+        return NULL;
+    }
+
+    // Set button size and position
+    lv_obj_set_size(btn, 200, 60);
+    lv_obj_align(btn, LV_ALIGN_CENTER, x_offset, y_offset);
+
+    // Style: Normal state (LV_STATE_DEFAULT)
+    lv_obj_set_style_bg_color(btn, bg_color, LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(btn, 2, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(btn, lv_color_lighten(bg_color, 60), LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(btn, LV_OPA_50, LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(btn, 8, LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(btn, 10, LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_color(btn, lv_color_make(0, 0, 0), LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_opa(btn, LV_OPA_30, LV_STATE_DEFAULT);
+
+    // Style: Pressed state (visual feedback)
+    lv_obj_set_style_bg_color(btn, bg_color_pressed, LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(btn, 5, LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_opa(btn, LV_OPA_50, LV_STATE_PRESSED);
+
+    // Create label on button
+    lv_obj_t *label = lv_label_create(btn);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_18, LV_STATE_DEFAULT);
+    lv_obj_center(label);
+
+    return btn;
+}
+
+// ========== Widget Initialization ==========
 
 int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, lv_obj_t *parent) {
     LOG_INF("🔧 System settings widget init START");
 
-    widget->parent = parent;
-
     if (!parent) {
-        LOG_ERR("❌ CRITICAL: parent is NULL!");
+        LOG_ERR("❌ Parent is NULL!");
         return -EINVAL;
     }
 
-    LOG_INF("📐 Display resolution: LV_HOR_RES=%d, LV_VER_RES=%d", LV_HOR_RES, LV_VER_RES);
+    widget->parent = parent;
 
     // Create full-screen container
-    LOG_INF("Creating container object...");
     widget->obj = lv_obj_create(parent);
     if (!widget->obj) {
-        LOG_ERR("❌ CRITICAL: lv_obj_create() returned NULL!");
+        LOG_ERR("❌ Failed to create container!");
         return -ENOMEM;
     }
-    LOG_INF("✅ Container created");
 
-    // Set to full screen size
-    LOG_INF("Setting container size and position...");
+    // Container styling (dark background)
     lv_obj_set_size(widget->obj, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(widget->obj, 0, 0);
-    lv_obj_set_style_bg_color(widget->obj, lv_color_hex(0x1A1A1A), 0);
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(widget->obj, 0, 0);
-    lv_obj_set_style_pad_all(widget->obj, 0, 0);
-    LOG_INF("✅ Container styled");
+    lv_obj_set_style_bg_color(widget->obj, lv_color_hex(0x0A0A0A), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_COVER, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(widget->obj, 0, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(widget->obj, 0, LV_STATE_DEFAULT);
 
-    // Title label at top
-    LOG_INF("Creating title label...");
+    LOG_INF("✅ Container created and styled");
+
+    // Title label
     widget->title_label = lv_label_create(widget->obj);
     lv_label_set_text(widget->title_label, "System Settings");
-    lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, LV_STATE_DEFAULT);
     lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);
+
     LOG_INF("✅ Title label created");
 
-    // ⚠️ BUTTONS DISABLED FOR DEBUGGING - Just draw placeholder rectangles
-    LOG_INF("Creating placeholder buttons (NO event handlers)...");
+    // Bootloader button (blue theme)
+    LOG_INF("Creating Bootloader button...");
+    widget->bootloader_btn = create_styled_button(
+        widget->obj,
+        "Enter Bootloader",
+        lv_color_hex(0x4A90E2),  // Normal: Sky blue
+        lv_color_hex(0x357ABD),  // Pressed: Darker blue
+        0, -50  // Center horizontally, 50px above center
+    );
 
-    // Bootloader button placeholder (centered, upper) - NO EVENT HANDLER
-    widget->bootloader_btn = lv_obj_create(widget->obj);
-    lv_obj_set_size(widget->bootloader_btn, 180, 50);
-    lv_obj_align(widget->bootloader_btn, LV_ALIGN_CENTER, 0, -40);
-    lv_obj_set_style_bg_color(widget->bootloader_btn, lv_color_hex(0x4A90E2), 0);
-    // lv_obj_add_event_cb(widget->bootloader_btn, bootloader_btn_event_cb, LV_EVENT_CLICKED, NULL);  // DISABLED
+    if (!widget->bootloader_btn) {
+        LOG_ERR("❌ Failed to create bootloader button");
+        lv_obj_del(widget->obj);
+        return -ENOMEM;
+    }
 
-    widget->bootloader_label = lv_label_create(widget->bootloader_btn);
-    lv_label_set_text(widget->bootloader_label, "Enter Bootloader");
-    lv_obj_set_style_text_color(widget->bootloader_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_center(widget->bootloader_label);
-    LOG_INF("✅ Bootloader placeholder created");
+    // Register event handler for bootloader button
+    lv_obj_add_event_cb(widget->bootloader_btn, bootloader_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
-    // Reset button placeholder (centered, lower) - NO EVENT HANDLER
-    widget->reset_btn = lv_obj_create(widget->obj);
-    lv_obj_set_size(widget->reset_btn, 180, 50);
-    lv_obj_align(widget->reset_btn, LV_ALIGN_CENTER, 0, 40);
-    lv_obj_set_style_bg_color(widget->reset_btn, lv_color_hex(0xE24A4A), 0);
-    // lv_obj_add_event_cb(widget->reset_btn, reset_btn_event_cb, LV_EVENT_CLICKED, NULL);  // DISABLED
+    LOG_INF("✅ Bootloader button created with event handler");
 
-    widget->reset_label = lv_label_create(widget->reset_btn);
-    lv_label_set_text(widget->reset_label, "System Reset");
-    lv_obj_set_style_text_color(widget->reset_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_center(widget->reset_label);
-    LOG_INF("✅ Reset placeholder created");
+    // Reset button (red theme)
+    LOG_INF("Creating Reset button...");
+    widget->reset_btn = create_styled_button(
+        widget->obj,
+        "System Reset",
+        lv_color_hex(0xE24A4A),  // Normal: Soft red
+        lv_color_hex(0xC93A3A),  // Pressed: Darker red
+        0, 50   // Center horizontally, 50px below center
+    );
+
+    if (!widget->reset_btn) {
+        LOG_ERR("❌ Failed to create reset button");
+        lv_obj_del(widget->obj);
+        return -ENOMEM;
+    }
+
+    // Register event handler for reset button
+    lv_obj_add_event_cb(widget->reset_btn, reset_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    LOG_INF("✅ Reset button created with event handler");
 
     // Initially hidden
     lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    LOG_INF("✅ System settings UI created (buttons DISABLED for debugging)");
+    LOG_INF("✅ System settings widget initialized with styled buttons");
     return 0;
 }
 
-// Dynamic allocation: Create widget with memory allocation
+// ========== Dynamic Allocation Functions ==========
+
 struct zmk_widget_system_settings *zmk_widget_system_settings_create(lv_obj_t *parent) {
-    LOG_INF("🔷 Creating system settings widget (dynamic allocation)");
+    LOG_DBG("Creating system settings widget (dynamic allocation)");
 
     if (!parent) {
-        LOG_ERR("❌ Cannot create widget: parent is NULL");
+        LOG_ERR("Cannot create widget: parent is NULL");
         return NULL;
     }
 
-    // Allocate memory for widget structure using LVGL's memory allocator
+    // Allocate memory using LVGL's allocator
     struct zmk_widget_system_settings *widget =
         (struct zmk_widget_system_settings *)lv_mem_alloc(sizeof(struct zmk_widget_system_settings));
     if (!widget) {
-        LOG_ERR("❌ Failed to allocate memory for system_settings_widget (%d bytes)",
+        LOG_ERR("Failed to allocate memory for system_settings_widget (%d bytes)",
                 sizeof(struct zmk_widget_system_settings));
         return NULL;
     }
 
-    // Zero-initialize the allocated memory
+    // Zero-initialize
     memset(widget, 0, sizeof(struct zmk_widget_system_settings));
 
-    LOG_INF("✅ Allocated %d bytes for widget structure from LVGL heap",
-            sizeof(struct zmk_widget_system_settings));
-
-    // Initialize widget (this creates LVGL objects)
+    // Initialize widget
     int ret = zmk_widget_system_settings_init(widget, parent);
     if (ret != 0) {
-        LOG_ERR("❌ Widget initialization failed, freeing memory");
+        LOG_ERR("Widget initialization failed, freeing memory");
         lv_mem_free(widget);
         return NULL;
     }
 
-    LOG_INF("✅ System settings widget created successfully");
+    LOG_DBG("System settings widget created successfully");
     return widget;
 }
 
-// Dynamic deallocation: Destroy widget and free memory
 void zmk_widget_system_settings_destroy(struct zmk_widget_system_settings *widget) {
-    LOG_INF("🔶 Destroying system settings widget (dynamic deallocation)");
+    LOG_DBG("Destroying system settings widget (dynamic deallocation)");
 
     if (!widget) {
-        LOG_WRN("⚠️  Widget is NULL, nothing to destroy");
         return;
     }
 
-    // Delete LVGL objects first (in reverse order of creation)
-    if (widget->reset_label) {
-        lv_obj_del(widget->reset_label);
-        widget->reset_label = NULL;
-    }
-    if (widget->reset_btn) {
-        lv_obj_del(widget->reset_btn);
-        widget->reset_btn = NULL;
-    }
-    if (widget->bootloader_label) {
-        lv_obj_del(widget->bootloader_label);
-        widget->bootloader_label = NULL;
-    }
-    if (widget->bootloader_btn) {
-        lv_obj_del(widget->bootloader_btn);
-        widget->bootloader_btn = NULL;
-    }
-    if (widget->title_label) {
-        lv_obj_del(widget->title_label);
-        widget->title_label = NULL;
-    }
+    // Delete container (automatically deletes all children: buttons and labels)
     if (widget->obj) {
-        lv_obj_del(widget->obj);  // This also deletes all children
+        lv_obj_del(widget->obj);
         widget->obj = NULL;
     }
 
-    LOG_INF("✅ LVGL objects deleted");
+    // Clear all pointers (children already deleted by parent)
+    widget->title_label = NULL;
+    widget->bootloader_btn = NULL;
+    widget->bootloader_label = NULL;
+    widget->reset_btn = NULL;
+    widget->reset_label = NULL;
 
-    // Free the widget structure memory from LVGL heap
+    // Free widget memory
     lv_mem_free(widget);
-    LOG_INF("✅ Widget memory freed from LVGL heap");
 }
 
+// ========== Widget Control Functions ==========
+
 void zmk_widget_system_settings_show(struct zmk_widget_system_settings *widget) {
-    LOG_INF("🔵 zmk_widget_system_settings_show() CALLED");
+    LOG_INF("📱 Showing system settings widget");
 
     if (!widget || !widget->obj) {
         LOG_ERR("⚠️  Widget or widget->obj is NULL, cannot show");
         return;
     }
 
-    // UI already created in init, just show it
+    // Show the screen
     lv_obj_move_foreground(widget->obj);
     lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+
     LOG_INF("✅ System settings screen shown");
 }
 
 void zmk_widget_system_settings_hide(struct zmk_widget_system_settings *widget) {
-    LOG_INF("🔴 zmk_widget_system_settings_hide() CALLED");
+    LOG_INF("🚫 Hiding system settings widget");
 
-    if (widget && widget->obj) {
-        // Hide the overlay
-        lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
-        LOG_INF("✅ System settings screen hidden");
-    } else {
+    if (!widget || !widget->obj) {
         LOG_WRN("⚠️  Cannot hide - widget or obj is NULL");
+        return;
     }
+
+    // Hide the screen
+    lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+
+    LOG_INF("✅ System settings screen hidden");
 }
