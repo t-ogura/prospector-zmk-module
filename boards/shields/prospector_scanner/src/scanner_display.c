@@ -197,6 +197,9 @@ static K_WORK_DELAYABLE_DEFINE(memory_monitor_work, memory_monitor_handler);
 static void message_queue_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(message_queue_work, message_queue_handler);
 
+// Forward declaration for swipe processing (used by message_queue_handler)
+static void process_swipe_direction(int direction);
+
 // Periodic signal timeout check (every 5 seconds)
 static void check_signal_timeout_handler(struct k_work *work) {
     // Check signal widget for timeout - DISABLED
@@ -252,8 +255,19 @@ static void message_queue_handler(struct k_work *work) {
                 break;
 
             case SCANNER_MSG_SWIPE_GESTURE:
-                // TODO Phase 3: Process swipe gesture here
-                LOG_DBG("📥 MQ: Swipe gesture: %d", msg.swipe.direction);
+                // Phase 5: Process swipe gesture via message queue
+                // Convert scanner_swipe_direction to swipe_direction
+                {
+                    int dir;
+                    switch (msg.swipe.direction) {
+                        case SCANNER_SWIPE_UP:    dir = SWIPE_DIRECTION_UP; break;
+                        case SCANNER_SWIPE_DOWN:  dir = SWIPE_DIRECTION_DOWN; break;
+                        case SCANNER_SWIPE_LEFT:  dir = SWIPE_DIRECTION_LEFT; break;
+                        case SCANNER_SWIPE_RIGHT: dir = SWIPE_DIRECTION_RIGHT; break;
+                        default: dir = SWIPE_DIRECTION_UP; break;
+                    }
+                    process_swipe_direction(dir);
+                }
                 scanner_msg_increment_processed();
                 break;
 
@@ -1299,24 +1313,35 @@ static void restore_keyboard_list_widgets(void) {
 }
 
 // Swipe gesture event listener (runs in main thread - safe for LVGL)
+// NOTE: This listener is DEPRECATED in Phase 5 reconstruction
+// Swipe processing is now handled via message queue in message_queue_handler()
 static int swipe_gesture_listener(const zmk_event_t *eh) {
     const struct zmk_swipe_gesture_event *ev = as_zmk_swipe_gesture_event(eh);
     if (!ev) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
+    // Phase 5: Swipe is now processed via message queue
+    // This listener is kept for backward compatibility but does nothing
+    LOG_DBG("📥 ZMK swipe event received (ignored - using message queue): %d", ev->direction);
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+// Process swipe gesture - called from message queue handler
+// This is the main swipe processing function for Phase 5 reconstruction
+static void process_swipe_direction(int direction) {
     const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
-    LOG_INF("📥 Swipe event received in display thread: %s", dir_name[ev->direction]);
+    LOG_INF("📥 Processing swipe from message queue: %s", dir_name[direction]);
 
     if (!main_screen) {
         LOG_ERR("❌ main_screen is NULL!");
-        return ZMK_EV_EVENT_BUBBLE;
+        return;
     }
 
     // Processing guard: prevent concurrent swipe handling (deadlock prevention)
     if (swipe_in_progress) {
         LOG_WRN("⚠️  Swipe ignored - previous swipe still processing (deadlock prevention)");
-        return ZMK_EV_EVENT_BUBBLE;
+        return;
     }
 
     // Cooldown check: prevent rapid repeated swipes
@@ -1324,7 +1349,7 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
     if (now - last_swipe_time < SWIPE_COOLDOWN_MS) {
         LOG_DBG("⏱️  Swipe ignored (cooldown: %d ms remaining)",
                 (int)(SWIPE_COOLDOWN_MS - (now - last_swipe_time)));
-        return ZMK_EV_EVENT_BUBBLE;
+        return;
     }
     last_swipe_time = now;
 
@@ -1336,16 +1361,16 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
     if (mutex_ret != 0) {
         LOG_WRN("⚠️  Failed to acquire LVGL mutex, aborting swipe");
         swipe_in_progress = false;
-        return ZMK_EV_EVENT_BUBBLE;
+        return;
     }
 
     // Pause LVGL timer to prevent internal conflicts during widget operations
     lv_timer_enable(false);
     LOG_DBG("🔒 Swipe processing started - LVGL timer paused, mutex acquired");
 
-    // Thread-safe LVGL operations (running in main thread via event system)
+    // Thread-safe LVGL operations (running in work queue context)
     // Handle gestures based on current screen state
-    switch (ev->direction) {
+    switch (direction) {
         case SWIPE_DIRECTION_DOWN:
             if (current_screen == SCREEN_MAIN) {
                 // From main screen: create and show settings (dynamic allocation)
@@ -1692,8 +1717,6 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
     lvgl_unlock();
     swipe_in_progress = false;
     LOG_DBG("🔓 Swipe processing completed - LVGL timer resumed, mutex released");
-
-    return ZMK_EV_EVENT_BUBBLE;
 }
 
 ZMK_LISTENER(swipe_gesture, swipe_gesture_listener);
