@@ -271,15 +271,23 @@ void zmk_widget_scanner_battery_status_update(struct zmk_widget_scanner_battery_
     widget->last_charging = charging;
     widget->last_update = k_uptime_get_32();
 
-    // Widget visibility based on configuration
+    // Widget visibility is now controlled by user settings in display_settings_widget
+    // Do NOT override visibility here - let the user control it via the toggle
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_WIDGET_HIDE_WHEN_FULL)
-    // Hide when USB powered and fully charged (100%)
-    bool should_hide = usb_powered && !charging && (battery_level >= 100);
-    zmk_widget_scanner_battery_status_set_visible(widget, !should_hide);
-#else
-    // Always show when hardware is available
-    zmk_widget_scanner_battery_status_set_visible(widget, true);
+    // Only auto-hide when USB powered and fully charged (100%)
+    // This respects user's "visible" setting - only hides when BOTH conditions are met:
+    // 1. User has visibility enabled (widget->visible is true)
+    // 2. Battery is full and on USB
+    if (widget->visible) {
+        bool should_hide = usb_powered && !charging && (battery_level >= 100);
+        if (should_hide) {
+            lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 #endif
+    // If user disabled visibility via settings, do nothing - keep it hidden
 }
 
 void zmk_widget_scanner_battery_status_set_visible(struct zmk_widget_scanner_battery_status *widget,

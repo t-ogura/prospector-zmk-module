@@ -17,36 +17,64 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+#include "brightness_control.h"
+
 // Only compile brightness control if sensor mode is DISABLED
 #if !IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
 
+// Fixed brightness mode - state tracking
+static const struct device *fixed_pwm_dev = NULL;
+static uint8_t fixed_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+
+// API: Set manual brightness
+void brightness_control_set_manual(uint8_t brightness) {
+    if (brightness > 100) brightness = 100;
+    if (brightness < 10) brightness = 10;
+
+    fixed_brightness = brightness;
+
+    if (fixed_pwm_dev && device_is_ready(fixed_pwm_dev)) {
+        led_set_brightness(fixed_pwm_dev, 0, brightness);
+        LOG_INF("🔆 Manual brightness: %d%%", brightness);
+    }
+}
+
+// API: Auto brightness not available in fixed mode
+void brightness_control_set_auto(bool enabled) {
+    LOG_WRN("🔆 Auto brightness not available (no sensor)");
+}
+
+// API: Get current brightness
+uint8_t brightness_control_get_current(void) {
+    return fixed_brightness;
+}
+
+// API: Check if auto is enabled (always false in fixed mode)
+bool brightness_control_is_auto(void) {
+    return false;
+}
+
 // Fixed brightness mode implementation - safe and simple
 static int brightness_control_init(void) {
-    LOG_INF("🔆 Brightness Control: Fixed Mode (85%)");
-    
+    LOG_INF("🔆 Brightness Control: Fixed Mode");
+
     // Try to get PWM device safely
-    const struct device *pwm_dev = NULL;
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
-    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+    fixed_pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
 #endif
-    
-    if (pwm_dev && device_is_ready(pwm_dev)) {
-        uint8_t brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;  // Use configured default
-#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB
-        if (CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB > 0) {
-            brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS_USB;
-        }
-#endif
-        int ret = led_set_brightness(pwm_dev, 0, brightness);
+
+    if (fixed_pwm_dev && device_is_ready(fixed_pwm_dev)) {
+        fixed_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+        int ret = led_set_brightness(fixed_pwm_dev, 0, fixed_brightness);
         if (ret < 0) {
             LOG_WRN("Failed to set brightness: %d", ret);
         } else {
-            LOG_INF("✅ Fixed brightness set to %d%%", brightness);
+            LOG_INF("✅ Fixed brightness set to %d%%", fixed_brightness);
         }
     } else {
         LOG_INF("PWM device not found - using hardware default brightness");
     }
-    
+
     return 0;  // Always succeed
 }
 
@@ -244,8 +272,54 @@ static int brightness_control_init(void) {
     
     // Start brightness monitoring
     k_work_schedule(&brightness_update_work, K_MSEC(1000));  // Start after 1 second
-    
+
     return 0;
+}
+
+// Sensor mode state
+static bool auto_brightness_enabled = true;
+static uint8_t manual_brightness_setting = 65;
+
+// API: Set manual brightness
+void brightness_control_set_manual(uint8_t brightness) {
+    if (brightness > 100) brightness = 100;
+    if (brightness < 10) brightness = 10;
+
+    manual_brightness_setting = brightness;
+
+    if (!auto_brightness_enabled && pwm_dev && device_is_ready(pwm_dev)) {
+        target_brightness = brightness;
+        // Use fade for smooth transition
+        k_work_schedule(&fade_work, K_NO_WAIT);
+        LOG_INF("🔆 Manual brightness: %d%%", brightness);
+    }
+}
+
+// API: Enable/disable auto brightness
+void brightness_control_set_auto(bool enabled) {
+    auto_brightness_enabled = enabled;
+
+    if (enabled) {
+        // Resume auto brightness updates
+        k_work_schedule(&brightness_update_work, K_NO_WAIT);
+        LOG_INF("🔆 Auto brightness enabled");
+    } else {
+        // Stop auto updates and apply manual setting
+        k_work_cancel_delayable(&brightness_update_work);
+        target_brightness = manual_brightness_setting;
+        k_work_schedule(&fade_work, K_NO_WAIT);
+        LOG_INF("🔆 Auto brightness disabled, manual: %d%%", manual_brightness_setting);
+    }
+}
+
+// API: Get current brightness
+uint8_t brightness_control_get_current(void) {
+    return current_brightness;
+}
+
+// API: Check if auto is enabled
+bool brightness_control_is_auto(void) {
+    return auto_brightness_enabled;
 }
 
 SYS_INIT(brightness_control_init, APPLICATION, 90);

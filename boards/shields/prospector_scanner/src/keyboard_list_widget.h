@@ -27,7 +27,7 @@ struct zmk_widget_keyboard_list {
     struct keyboard_entry entries[MAX_KEYBOARD_ENTRIES];  // Dynamic keyboard entries
     uint8_t entry_count;        // Current number of entries displayed
 
-    struct k_work_delayable update_work;  // Periodic update timer
+    lv_timer_t *update_timer;   // Phase 3: LVGL timer for periodic updates (thread-safe)
     lv_obj_t *parent;           // Parent screen
 };
 

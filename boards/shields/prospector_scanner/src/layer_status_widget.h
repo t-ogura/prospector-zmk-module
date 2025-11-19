@@ -25,6 +25,7 @@ struct zmk_widget_layer_status {
     lv_obj_t *obj;
     lv_obj_t *layer_title;                    // "Layer" title label
     lv_obj_t *layer_labels[MAX_LAYER_DISPLAY]; // Individual layer number labels (0-9 max)
+    uint8_t visible_layers;                    // Number of layers to display (4-10)
 };
 
 // ========== Dynamic Allocation Functions ==========
@@ -36,6 +37,9 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
 void zmk_widget_layer_status_update(struct zmk_widget_layer_status *widget, struct zmk_keyboard_status *kbd);
 void zmk_widget_layer_status_reset(struct zmk_widget_layer_status *widget);
 lv_obj_t *zmk_widget_layer_status_obj(struct zmk_widget_layer_status *widget);
+
+// Set number of visible layers (4-10), repositions labels accordingly
+void zmk_widget_layer_status_set_visible_layers(struct zmk_widget_layer_status *widget, uint8_t count);
 
 #ifdef __cplusplus
 }

@@ -7,6 +7,7 @@
 #include "touch_handler.h"
 #include "events/swipe_gesture_event.h"
 #include "scanner_message.h"  // Message queue for thread-safe architecture
+#include "display_settings_widget.h"  // For display_settings_is_interacting()
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -53,6 +54,13 @@ static struct {
 // Helper function to raise swipe gesture event (thread-safe)
 static void raise_swipe_event(enum swipe_direction direction) {
     const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
+
+    // Block swipe during UI interaction (slider drag, etc.)
+    if (display_settings_is_interacting()) {
+        LOG_DBG("🎚️ Swipe blocked - UI interaction in progress");
+        return;
+    }
+
     LOG_INF("📤 Raising swipe event: %s", dir_name[direction]);
 
     // Phase 3: Send to message queue for thread-safe processing
@@ -71,14 +79,9 @@ static void raise_swipe_event(enum swipe_direction direction) {
         LOG_WRN("⚠️ Failed to queue swipe message: %d", msg_ret);
     }
 
-    // Use ZMK event system for thread-safe LVGL operations
-    // ZMK event listeners run in main thread (same as LVGL)
-    int rc = raise_zmk_swipe_gesture_event(
-        (struct zmk_swipe_gesture_event){.direction = direction});
-
-    if (rc < 0) {
-        LOG_ERR("❌ Failed to raise swipe event: %d", rc);
-    }
+    // Phase 5: Message queue only - ZMK event system no longer used for swipe
+    // The message will be processed in main_loop_timer_cb (LVGL main thread)
+    // This ensures all LVGL operations happen in the correct thread context
 }
 
 /**
@@ -110,15 +113,17 @@ static void touch_input_callback(struct input_event *evt) {
 
         case INPUT_KEY_LEFT:
             if (evt->value == 1) {
-                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected");
-                raise_swipe_event(SWIPE_DIRECTION_LEFT);
+                // Display is rotated 180°, so LEFT hardware gesture = RIGHT logical swipe
+                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected → RIGHT logical");
+                raise_swipe_event(SWIPE_DIRECTION_RIGHT);
             }
             break;
 
         case INPUT_KEY_RIGHT:
             if (evt->value == 1) {
-                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected");
-                raise_swipe_event(SWIPE_DIRECTION_RIGHT);
+                // Display is rotated 180°, so RIGHT hardware gesture = LEFT logical swipe
+                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected → LEFT logical");
+                raise_swipe_event(SWIPE_DIRECTION_LEFT);
             }
             break;
 

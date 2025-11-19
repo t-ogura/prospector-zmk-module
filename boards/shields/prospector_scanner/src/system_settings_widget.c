@@ -145,7 +145,7 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
 
     // Title label (much higher position - more separation from buttons)
     widget->title_label = lv_label_create(widget->obj);
-    lv_label_set_text(widget->title_label, "System Settings");
+    lv_label_set_text(widget->title_label, "Quick Actions");
     lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, LV_STATE_DEFAULT);
     lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);  // Y: 40→20 (higher)

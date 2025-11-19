@@ -20,9 +20,7 @@ extern void zmk_scanner_set_selected_keyboard(int index);
 // External flag from scanner_display.c for deadlock prevention
 extern volatile bool swipe_in_progress;
 
-// External mutex functions from scanner_display.c
-extern int scanner_lvgl_lock(void);
-extern void scanner_lvgl_unlock(void);
+// Phase 3: No longer using external mutex - LVGL timer handles thread safety
 
 // Forward declaration for widget pointer (needed in event handler)
 static struct zmk_widget_keyboard_list *g_keyboard_list_widget = NULL;
@@ -251,40 +249,25 @@ static void update_keyboard_entries(struct zmk_widget_keyboard_list *widget) {
     }
 }
 
-// ========== Periodic Update Timer ==========
+// ========== Phase 3: LVGL Timer for Periodic Updates ==========
+// This replaces the k_work_delayable approach for thread-safe LVGL operations
 
-static void update_work_handler(struct k_work *work) {
-    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
-    struct zmk_widget_keyboard_list *widget =
-        CONTAINER_OF(dwork, struct zmk_widget_keyboard_list, update_work);
+static void update_timer_cb(lv_timer_t *timer) {
+    struct zmk_widget_keyboard_list *widget = (struct zmk_widget_keyboard_list *)timer->user_data;
 
     if (!widget || !widget->obj) {
         return;
     }
 
-    // Skip update if swipe is in progress (deadlock prevention)
+    // Skip update if swipe is in progress
     if (swipe_in_progress) {
         LOG_DBG("Keyboard list update skipped - swipe in progress");
-        // Reschedule with shorter delay to retry soon
-        k_work_schedule(&widget->update_work, K_MSEC(100));
         return;
     }
 
-    // Acquire mutex for LVGL operations
-    if (scanner_lvgl_lock() != 0) {
-        LOG_DBG("Keyboard list update skipped - mutex busy");
-        k_work_schedule(&widget->update_work, K_MSEC(100));
-        return;
-    }
-
-    // Update keyboard entries (protected by mutex)
+    // Phase 3: No mutex needed - we're already in LVGL main thread
+    // Update keyboard entries directly
     update_keyboard_entries(widget);
-
-    // Release mutex
-    scanner_lvgl_unlock();
-
-    // Schedule next update
-    k_work_schedule(&widget->update_work, K_MSEC(UPDATE_INTERVAL_MS));
 }
 
 // ========== Widget Initialization ==========
@@ -333,13 +316,17 @@ int zmk_widget_keyboard_list_init(struct zmk_widget_keyboard_list *widget, lv_ob
     lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, 0);
     lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 15);
 
-    // Initialize periodic update timer
-    k_work_init_delayable(&widget->update_work, update_work_handler);
+    // Phase 3: Create LVGL timer for periodic updates (runs in LVGL main thread)
+    // Timer is initially paused - will be started when widget is shown
+    widget->update_timer = lv_timer_create(update_timer_cb, UPDATE_INTERVAL_MS, widget);
+    if (widget->update_timer) {
+        lv_timer_pause(widget->update_timer);  // Start paused
+    }
 
     // Initially hidden
     lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    LOG_INF("✅ Keyboard list widget initialized (1s auto-update)");
+    LOG_INF("✅ Keyboard list widget initialized (LVGL timer, %dms interval)", UPDATE_INTERVAL_MS);
     return 0;
 }
 
@@ -353,11 +340,13 @@ void zmk_widget_keyboard_list_show(struct zmk_widget_keyboard_list *widget) {
     LOG_INF("📱 Showing keyboard list widget");
     lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    // Don't perform initial update here - it will be done by the work handler
-    // This prevents LVGL operations during swipe processing (lv_timer_enable=false)
-    // Schedule first update with delay to ensure swipe processing completes first
-    // Mutex protection allows shorter delay (150ms instead of 600ms)
-    k_work_schedule(&widget->update_work, K_MSEC(150));
+    // Phase 3: Resume LVGL timer for periodic updates
+    // Timer runs in LVGL main thread - no mutex needed
+    if (widget->update_timer) {
+        lv_timer_resume(widget->update_timer);
+        // Trigger immediate first update
+        lv_timer_ready(widget->update_timer);
+    }
 }
 
 void zmk_widget_keyboard_list_hide(struct zmk_widget_keyboard_list *widget) {
@@ -368,9 +357,10 @@ void zmk_widget_keyboard_list_hide(struct zmk_widget_keyboard_list *widget) {
     LOG_INF("🚫 Hiding keyboard list widget");
     lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    // Stop periodic updates and wait for completion
-    struct k_work_sync sync;
-    k_work_cancel_delayable_sync(&widget->update_work, &sync);
+    // Phase 3: Pause LVGL timer
+    if (widget->update_timer) {
+        lv_timer_pause(widget->update_timer);
+    }
 }
 
 void zmk_widget_keyboard_list_update(struct zmk_widget_keyboard_list *widget) {
@@ -424,9 +414,11 @@ void zmk_widget_keyboard_list_destroy(struct zmk_widget_keyboard_list *widget) {
         g_keyboard_list_widget = NULL;
     }
 
-    // Stop timer and wait for any running work to complete
-    struct k_work_sync sync;
-    k_work_cancel_delayable_sync(&widget->update_work, &sync);
+    // Phase 3: Delete LVGL timer
+    if (widget->update_timer) {
+        lv_timer_del(widget->update_timer);
+        widget->update_timer = NULL;
+    }
 
     // Destroy all keyboard entries
     for (int i = 0; i < widget->entry_count; i++) {

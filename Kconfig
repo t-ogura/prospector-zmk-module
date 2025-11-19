@@ -106,6 +106,16 @@ config PROSPECTOR_MODE_SCANNER
       Enable scanner mode to receive status advertisements from ZMK keyboards.
       In this mode, Prospector acts as a standalone status display device.
 
+config PROSPECTOR_TOUCH_ENABLED
+    bool "Enable touch panel support"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Enable touch panel support for swipe gestures and settings screens.
+      When disabled, the scanner displays status only without user interaction.
+      Touch-enabled version includes: swipe navigation, display settings, system settings.
+      Non-touch version shows: main status display with signal strength widget.
+
 config PROSPECTOR_MULTI_KEYBOARD
     bool "Support multiple keyboards"
     default y
