@@ -87,6 +87,14 @@ enum screen_state {
 
 static enum screen_state current_screen = SCREEN_MAIN;
 
+// Swipe gesture cooldown to prevent rapid repeated swipes causing issues
+#define SWIPE_COOLDOWN_MS 500  // 500ms cooldown between swipes
+static uint32_t last_swipe_time = 0;
+
+// Swipe processing guard - prevents concurrent swipe handling
+// This flag ensures widget create/destroy operations complete atomically
+static volatile bool swipe_in_progress = false;
+
 // Scanner's own battery status widget (top-right corner)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 static struct zmk_widget_scanner_battery_status scanner_battery_widget;
@@ -164,6 +172,13 @@ static void memory_monitor_handler(struct k_work *work) {
 
 // Battery debug update handler - constant display for troubleshooting
 static void battery_debug_update_handler(struct k_work *work) {
+    // Skip if swipe in progress
+    if (swipe_in_progress) {
+        LOG_DBG("Battery debug update skipped - swipe in progress");
+        k_work_schedule(&battery_debug_work, K_MSEC(100));
+        return;
+    }
+
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     // Force battery widget update for constant debug visibility
     update_scanner_battery_widget();
@@ -330,22 +345,34 @@ static void update_scanner_battery_widget(void) {
 static int scanner_battery_listener(const zmk_event_t *eh) {
     const struct zmk_battery_state_changed *ev = as_zmk_battery_state_changed(eh);
     if (ev) {
+        // Skip updates during swipe processing to prevent widget conflicts
+        if (swipe_in_progress) {
+            LOG_DBG("Battery event skipped - swipe in progress");
+            return 0;
+        }
+
         LOG_INF("🔋 Scanner battery event: %d%% (state changed)", ev->state_of_charge);
         update_scanner_battery_widget();
         return 0;
     }
-    
+
     return -ENOTSUP;
 }
 
-// USB connection state changed event handler  
+// USB connection state changed event handler
 static int scanner_usb_listener(const zmk_event_t *eh) {
     if (as_zmk_usb_conn_state_changed(eh)) {
+        // Skip updates during swipe processing to prevent widget conflicts
+        if (swipe_in_progress) {
+            LOG_DBG("USB event skipped - swipe in progress");
+            return 0;
+        }
+
         LOG_DBG("Scanner USB connection state changed event received");
         update_scanner_battery_widget();
         return 0;
     }
-    
+
     return -ENOTSUP;
 }
 
@@ -364,9 +391,16 @@ static K_WORK_DELAYABLE_DEFINE(battery_periodic_work, battery_periodic_update_ha
 
 // Periodic battery status update work
 static void battery_periodic_update_handler(struct k_work *work) {
+    // Skip if swipe in progress
+    if (swipe_in_progress) {
+        LOG_DBG("Battery periodic update skipped - swipe in progress");
+        k_work_schedule(&battery_periodic_work, K_MSEC(100));
+        return;
+    }
+
     static uint32_t periodic_counter = 0;
     periodic_counter++;
-    
+
     LOG_INF("🔄 Periodic battery status update triggered (%ds interval)", CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S);
     
     // CRITICAL INVESTIGATION: Bypass ZMK battery cache - read from hardware directly
@@ -543,10 +577,16 @@ static void check_advertisement_frequency(void) {
 
 // Scanner event callback for display updates
 static void update_display_from_scanner(struct zmk_status_scanner_event_data *event_data) {
+    // Skip updates during swipe processing to prevent widget conflicts
+    if (swipe_in_progress) {
+        LOG_DBG("Scanner update skipped - swipe in progress");
+        return;
+    }
+
     if (!device_name_label) {
         return; // UI not ready yet
     }
-    
+
     LOG_INF("Scanner event received: %d for keyboard %d", event_data->event, event_data->keyboard_index);
     
 #if IS_ENABLED(CONFIG_PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM)
@@ -778,6 +818,10 @@ SYS_INIT(scanner_display_init, APPLICATION, 60);
 lv_obj_t *zmk_display_status_screen() {
     LOG_INF("🎨 ===== zmk_display_status_screen() CALLED =====");
 
+    // Set processing flag during initial screen creation (prevents swipe during init)
+    swipe_in_progress = true;
+    LOG_DBG("🔒 Screen init started - swipe blocked");
+
     LOG_INF("Step 1: Creating main screen object...");
     lv_obj_t *screen = lv_obj_create(NULL);
     main_screen = screen;  // Save reference for later use
@@ -892,18 +936,29 @@ lv_obj_t *zmk_display_status_screen() {
     trigger_scanner_start();
     LOG_INF("✅ Scanner start triggered");
 
+    // Clear processing flag - screen init complete, swipe now allowed
+    swipe_in_progress = false;
+    LOG_DBG("🔓 Screen init completed - swipe enabled");
+
     LOG_INF("🎉 Scanner screen created successfully with gesture support");
     return screen;
 }
 
 // Late initialization to start scanner after display is ready
 static void start_scanner_delayed(struct k_work *work) {
+    // Skip if swipe in progress
+    if (swipe_in_progress) {
+        LOG_DBG("Scanner start delayed - swipe in progress");
+        k_work_schedule(k_work_delayable_from_work(work), K_MSEC(100));
+        return;
+    }
+
     if (!device_name_label) {
         LOG_WRN("Display not ready yet, retrying scanner start...");
         k_work_schedule(k_work_delayable_from_work(work), K_SECONDS(1));
         return;
     }
-    
+
     LOG_INF("Starting BLE scanner...");
     lv_label_set_text(device_name_label, "Starting scanner...");
     
@@ -1008,11 +1063,6 @@ static void restore_keyboard_list_widgets(void) {
     LOG_INF("🔄 Keyboard list widgets restored");
 }
 
-// Swipe gesture cooldown to prevent rapid repeated swipes causing issues
-// Increased to 500ms to account for dynamic memory allocation overhead
-#define SWIPE_COOLDOWN_MS 500  // 500ms cooldown between swipes
-static uint32_t last_swipe_time = 0;
-
 // Swipe gesture event listener (runs in main thread - safe for LVGL)
 static int swipe_gesture_listener(const zmk_event_t *eh) {
     const struct zmk_swipe_gesture_event *ev = as_zmk_swipe_gesture_event(eh);
@@ -1028,6 +1078,12 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
+    // Processing guard: prevent concurrent swipe handling (deadlock prevention)
+    if (swipe_in_progress) {
+        LOG_WRN("⚠️  Swipe ignored - previous swipe still processing (deadlock prevention)");
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
     // Cooldown check: prevent rapid repeated swipes
     uint32_t now = k_uptime_get_32();
     if (now - last_swipe_time < SWIPE_COOLDOWN_MS) {
@@ -1036,6 +1092,13 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
         return ZMK_EV_EVENT_BUBBLE;
     }
     last_swipe_time = now;
+
+    // Set processing flag - prevents concurrent widget operations
+    swipe_in_progress = true;
+
+    // Pause LVGL timer to prevent internal conflicts during widget operations
+    lv_timer_enable(false);
+    LOG_DBG("🔒 Swipe processing started - LVGL timer paused");
 
     // Thread-safe LVGL operations (running in main thread via event system)
     // Handle gestures based on current screen state
@@ -1357,6 +1420,11 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
             }
             break;
     }
+
+    // Resume LVGL timer and clear processing flag
+    lv_timer_enable(true);
+    swipe_in_progress = false;
+    LOG_DBG("🔓 Swipe processing completed - LVGL timer resumed");
 
     return ZMK_EV_EVENT_BUBBLE;
 }
