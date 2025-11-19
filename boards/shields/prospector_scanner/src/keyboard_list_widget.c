@@ -13,6 +13,20 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define UPDATE_INTERVAL_MS 1000  // Update every 1 second
 
+// External functions from scanner_display.c for keyboard selection
+extern int zmk_scanner_get_selected_keyboard(void);
+extern void zmk_scanner_set_selected_keyboard(int index);
+
+// External flag from scanner_display.c for deadlock prevention
+extern volatile bool swipe_in_progress;
+
+// External mutex functions from scanner_display.c
+extern int scanner_lvgl_lock(void);
+extern void scanner_lvgl_unlock(void);
+
+// Forward declaration for widget pointer (needed in event handler)
+static struct zmk_widget_keyboard_list *g_keyboard_list_widget = NULL;
+
 // ========== RSSI Helper Functions ==========
 
 // Convert RSSI to 0-5 bar level
@@ -44,72 +58,138 @@ static lv_color_t get_rssi_color(uint8_t bars) {
 
 // ========== Dynamic Keyboard Entry Creation ==========
 
+// Forward declaration
+static void update_keyboard_entries(struct zmk_widget_keyboard_list *widget);
+
+// Click event handler for keyboard entry selection
+static void keyboard_entry_click_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED) {
+        // Get keyboard index from user data
+        int keyboard_index = (int)(intptr_t)lv_event_get_user_data(e);
+
+        LOG_INF("🎯 Keyboard entry clicked: index=%d", keyboard_index);
+
+        // Set selected keyboard
+        zmk_scanner_set_selected_keyboard(keyboard_index);
+
+        // Update visual state immediately
+        // Note: Click handlers run from LVGL timer context (main thread)
+        // No mutex needed here - we're already in the LVGL context
+        // Mutex is only needed for work queue thread operations
+        if (g_keyboard_list_widget) {
+            update_keyboard_entries(g_keyboard_list_widget);
+        }
+    }
+}
+
 // Create a single keyboard entry at specified Y position
-static void create_keyboard_entry(struct zmk_widget_keyboard_list *widget, uint8_t index, int y_pos) {
+static void create_keyboard_entry(struct zmk_widget_keyboard_list *widget, uint8_t index, int y_pos, int keyboard_index) {
     if (index >= MAX_KEYBOARD_ENTRIES) {
         return;
     }
 
     struct keyboard_entry *entry = &widget->entries[index];
+    entry->keyboard_index = keyboard_index;
 
-    // RSSI bar (compact, 30px width)
-    entry->rssi_bar = lv_bar_create(widget->obj);
+    // Create clickable container for the entire entry
+    entry->container = lv_obj_create(widget->obj);
+    lv_obj_set_size(entry->container, 220, 30);
+    lv_obj_align(entry->container, LV_ALIGN_TOP_MID, 0, y_pos - 8);
+    lv_obj_set_style_bg_color(entry->container, lv_color_hex(0x1A1A1A), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(entry->container, LV_OPA_COVER, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(entry->container, 1, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(entry->container, lv_color_hex(0x303030), LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(entry->container, 6, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(entry->container, 0, LV_STATE_DEFAULT);
+    lv_obj_add_flag(entry->container, LV_OBJ_FLAG_CLICKABLE);
+
+    // Register click event with keyboard index as user data
+    lv_obj_add_event_cb(entry->container, keyboard_entry_click_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)keyboard_index);
+
+    // RSSI bar (compact, 30px width) - child of container
+    entry->rssi_bar = lv_bar_create(entry->container);
     lv_obj_set_size(entry->rssi_bar, 30, 8);
     lv_bar_set_range(entry->rssi_bar, 0, 5);
     lv_bar_set_value(entry->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(entry->rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(entry->rssi_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(entry->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(entry->rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);  // CRITICAL for visibility
+    lv_obj_set_style_bg_opa(entry->rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(entry->rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(entry->rssi_bar, 2, LV_PART_INDICATOR);
-    lv_obj_align(entry->rssi_bar, LV_ALIGN_TOP_LEFT, 10, y_pos);
+    lv_obj_align(entry->rssi_bar, LV_ALIGN_LEFT_MID, 8, 0);
 
-    // RSSI value label (compact, montserrat_12)
-    entry->rssi_label = lv_label_create(widget->obj);
+    // RSSI value label (compact, montserrat_12) - child of container
+    entry->rssi_label = lv_label_create(entry->container);
     lv_label_set_text(entry->rssi_label, "--dBm");
     lv_obj_set_style_text_color(entry->rssi_label, lv_color_hex(0xA0A0A0), 0);
     lv_obj_set_style_text_font(entry->rssi_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(entry->rssi_label, LV_ALIGN_TOP_LEFT, 45, y_pos - 4);
+    lv_obj_align(entry->rssi_label, LV_ALIGN_LEFT_MID, 42, 0);
 
-    // Keyboard name (montserrat_16, on the right)
-    entry->name_label = lv_label_create(widget->obj);
+    // Keyboard name (montserrat_16, on the right) - child of container
+    entry->name_label = lv_label_create(entry->container);
     lv_label_set_text(entry->name_label, "");
     lv_obj_set_style_text_color(entry->name_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(entry->name_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(entry->name_label, LV_ALIGN_TOP_LEFT, 105, y_pos - 4);
+    lv_obj_align(entry->name_label, LV_ALIGN_LEFT_MID, 100, 0);
 
-    LOG_DBG("Created keyboard entry %d at Y=%d", index, y_pos);
+    LOG_DBG("Created keyboard entry %d at Y=%d (keyboard_index=%d)", index, y_pos, keyboard_index);
 }
 
 // Destroy a single keyboard entry
 static void destroy_keyboard_entry(struct keyboard_entry *entry) {
-    if (entry->rssi_bar) {
-        lv_obj_del(entry->rssi_bar);
-        entry->rssi_bar = NULL;
+    // Deleting container deletes all children (rssi_bar, rssi_label, name_label)
+    if (entry->container) {
+        lv_obj_del(entry->container);
+        entry->container = NULL;
     }
-    if (entry->rssi_label) {
-        lv_obj_del(entry->rssi_label);
-        entry->rssi_label = NULL;
-    }
-    if (entry->name_label) {
-        lv_obj_del(entry->name_label);
-        entry->name_label = NULL;
-    }
+    entry->rssi_bar = NULL;
+    entry->rssi_label = NULL;
+    entry->name_label = NULL;
+    entry->keyboard_index = -1;
 }
 
 // Update keyboard entries based on active keyboard count
 static void update_keyboard_entries(struct zmk_widget_keyboard_list *widget) {
-    // Count active keyboards
+    // Count active keyboards and collect their indices
     uint8_t active_count = 0;
+    int keyboard_indices[MAX_KEYBOARD_ENTRIES] = {-1};
     for (int i = 0; i < CONFIG_PROSPECTOR_MAX_KEYBOARDS; i++) {
         struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
-        if (kbd && kbd->active) {
+        if (kbd && kbd->active && active_count < MAX_KEYBOARD_ENTRIES) {
+            keyboard_indices[active_count] = i;
             active_count++;
         }
     }
 
     LOG_DBG("Active keyboards: %d (current entries: %d)", active_count, widget->entry_count);
+
+    // Get current selection
+    int selected = zmk_scanner_get_selected_keyboard();
+
+    // Auto-select first keyboard if none selected or selection became inactive
+    if (selected == -1 && active_count > 0) {
+        selected = keyboard_indices[0];
+        zmk_scanner_set_selected_keyboard(selected);
+    } else if (selected >= 0 && active_count > 0) {
+        // Verify selected keyboard is still active
+        bool found = false;
+        for (int i = 0; i < active_count; i++) {
+            if (keyboard_indices[i] == selected) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            // Selected keyboard became inactive, switch to first active
+            selected = keyboard_indices[0];
+            zmk_scanner_set_selected_keyboard(selected);
+            LOG_INF("Selected keyboard inactive, switching to index %d", selected);
+        }
+    }
 
     // If count changed, recreate entries
     if (active_count != widget->entry_count) {
@@ -122,18 +202,17 @@ static void update_keyboard_entries(struct zmk_widget_keyboard_list *widget) {
         }
 
         // Create new entries
-        widget->entry_count = active_count > MAX_KEYBOARD_ENTRIES ?
-                              MAX_KEYBOARD_ENTRIES : active_count;
+        widget->entry_count = active_count;
 
         int start_y = 60;  // First keyboard Y position
-        int spacing = 35;  // 35px spacing between keyboards
+        int spacing = 38;  // Increased spacing for larger containers
 
         for (int i = 0; i < widget->entry_count; i++) {
-            create_keyboard_entry(widget, i, start_y + (i * spacing));
+            create_keyboard_entry(widget, i, start_y + (i * spacing), keyboard_indices[i]);
         }
     }
 
-    // Update existing entries with current data
+    // Update existing entries with current data and selection state
     int entry_idx = 0;
     for (int i = 0; i < CONFIG_PROSPECTOR_MAX_KEYBOARDS && entry_idx < widget->entry_count; i++) {
         struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
@@ -154,6 +233,20 @@ static void update_keyboard_entries(struct zmk_widget_keyboard_list *widget) {
         lv_obj_set_style_bg_color(entry->rssi_bar, rssi_color, LV_PART_INDICATOR);
         lv_label_set_text_fmt(entry->rssi_label, "%ddBm", kbd->rssi);
 
+        // Apply selection styling
+        bool is_selected = (entry->keyboard_index == selected);
+        if (is_selected) {
+            // Selected: blue highlight background
+            lv_obj_set_style_bg_color(entry->container, lv_color_hex(0x2A4A6A), LV_STATE_DEFAULT);
+            lv_obj_set_style_border_color(entry->container, lv_color_hex(0x4A90E2), LV_STATE_DEFAULT);
+            lv_obj_set_style_border_width(entry->container, 2, LV_STATE_DEFAULT);
+        } else {
+            // Unselected: dark background
+            lv_obj_set_style_bg_color(entry->container, lv_color_hex(0x1A1A1A), LV_STATE_DEFAULT);
+            lv_obj_set_style_border_color(entry->container, lv_color_hex(0x303030), LV_STATE_DEFAULT);
+            lv_obj_set_style_border_width(entry->container, 1, LV_STATE_DEFAULT);
+        }
+
         entry_idx++;
     }
 }
@@ -169,8 +262,26 @@ static void update_work_handler(struct k_work *work) {
         return;
     }
 
-    // Update keyboard entries
+    // Skip update if swipe is in progress (deadlock prevention)
+    if (swipe_in_progress) {
+        LOG_DBG("Keyboard list update skipped - swipe in progress");
+        // Reschedule with shorter delay to retry soon
+        k_work_schedule(&widget->update_work, K_MSEC(100));
+        return;
+    }
+
+    // Acquire mutex for LVGL operations
+    if (scanner_lvgl_lock() != 0) {
+        LOG_DBG("Keyboard list update skipped - mutex busy");
+        k_work_schedule(&widget->update_work, K_MSEC(100));
+        return;
+    }
+
+    // Update keyboard entries (protected by mutex)
     update_keyboard_entries(widget);
+
+    // Release mutex
+    scanner_lvgl_unlock();
 
     // Schedule next update
     k_work_schedule(&widget->update_work, K_MSEC(UPDATE_INTERVAL_MS));
@@ -191,10 +302,15 @@ int zmk_widget_keyboard_list_init(struct zmk_widget_keyboard_list *widget, lv_ob
 
     // Initialize all entry pointers to NULL
     for (int i = 0; i < MAX_KEYBOARD_ENTRIES; i++) {
+        widget->entries[i].container = NULL;
         widget->entries[i].rssi_bar = NULL;
         widget->entries[i].rssi_label = NULL;
         widget->entries[i].name_label = NULL;
+        widget->entries[i].keyboard_index = -1;
     }
+
+    // Set global widget pointer for event handler access
+    g_keyboard_list_widget = widget;
 
     // Create full-screen container
     widget->obj = lv_obj_create(parent);
@@ -237,11 +353,11 @@ void zmk_widget_keyboard_list_show(struct zmk_widget_keyboard_list *widget) {
     LOG_INF("📱 Showing keyboard list widget");
     lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    // Perform initial update
-    update_keyboard_entries(widget);
-
-    // Start periodic updates (1 second interval)
-    k_work_schedule(&widget->update_work, K_MSEC(UPDATE_INTERVAL_MS));
+    // Don't perform initial update here - it will be done by the work handler
+    // This prevents LVGL operations during swipe processing (lv_timer_enable=false)
+    // Schedule first update with delay to ensure swipe processing completes first
+    // Mutex protection allows shorter delay (150ms instead of 600ms)
+    k_work_schedule(&widget->update_work, K_MSEC(150));
 }
 
 void zmk_widget_keyboard_list_hide(struct zmk_widget_keyboard_list *widget) {
@@ -252,8 +368,9 @@ void zmk_widget_keyboard_list_hide(struct zmk_widget_keyboard_list *widget) {
     LOG_INF("🚫 Hiding keyboard list widget");
     lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
-    // Stop periodic updates
-    k_work_cancel_delayable(&widget->update_work);
+    // Stop periodic updates and wait for completion
+    struct k_work_sync sync;
+    k_work_cancel_delayable_sync(&widget->update_work, &sync);
 }
 
 void zmk_widget_keyboard_list_update(struct zmk_widget_keyboard_list *widget) {
@@ -302,8 +419,14 @@ void zmk_widget_keyboard_list_destroy(struct zmk_widget_keyboard_list *widget) {
         return;
     }
 
-    // Stop timer
-    k_work_cancel_delayable(&widget->update_work);
+    // Clear global widget pointer first to prevent any callbacks
+    if (g_keyboard_list_widget == widget) {
+        g_keyboard_list_widget = NULL;
+    }
+
+    // Stop timer and wait for any running work to complete
+    struct k_work_sync sync;
+    k_work_cancel_delayable_sync(&widget->update_work, &sync);
 
     // Destroy all keyboard entries
     for (int i = 0; i < widget->entry_count; i++) {

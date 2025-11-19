@@ -87,13 +87,68 @@ enum screen_state {
 
 static enum screen_state current_screen = SCREEN_MAIN;
 
+// Selected keyboard index for multi-keyboard support
+// -1 means auto-select first active keyboard
+static int selected_keyboard_index = -1;
+
 // Swipe gesture cooldown to prevent rapid repeated swipes causing issues
-#define SWIPE_COOLDOWN_MS 500  // 500ms cooldown between swipes
+#define SWIPE_COOLDOWN_MS 200  // 200ms cooldown between swipes (mutex protection allows shorter delay)
 static uint32_t last_swipe_time = 0;
 
 // Swipe processing guard - prevents concurrent swipe handling
 // This flag ensures widget create/destroy operations complete atomically
-static volatile bool swipe_in_progress = false;
+// Not static - accessible from keyboard_list_widget.c for deadlock prevention
+volatile bool swipe_in_progress = false;
+
+// LVGL mutex for thread-safe operations
+// All LVGL API calls from work queues must be protected by this mutex
+static struct k_mutex lvgl_mutex;
+static bool lvgl_mutex_initialized = false;
+
+// Initialize LVGL mutex (called once during display init)
+static void lvgl_mutex_init(void) {
+    if (!lvgl_mutex_initialized) {
+        k_mutex_init(&lvgl_mutex);
+        lvgl_mutex_initialized = true;
+        LOG_DBG("🔒 LVGL mutex initialized");
+    }
+}
+
+// Lock LVGL mutex - returns 0 on success
+static int lvgl_lock(k_timeout_t timeout) {
+    if (!lvgl_mutex_initialized) {
+        return -EINVAL;
+    }
+    return k_mutex_lock(&lvgl_mutex, timeout);
+}
+
+// Unlock LVGL mutex
+static void lvgl_unlock(void) {
+    if (lvgl_mutex_initialized) {
+        k_mutex_unlock(&lvgl_mutex);
+    }
+}
+
+// Global mutex access for other files (keyboard_list_widget.c)
+int scanner_lvgl_lock(void) {
+    return lvgl_lock(K_MSEC(100));
+}
+
+void scanner_lvgl_unlock(void) {
+    lvgl_unlock();
+}
+
+// Getter/setter for selected keyboard index (used by keyboard_list_widget)
+int zmk_scanner_get_selected_keyboard(void) {
+    return selected_keyboard_index;
+}
+
+void zmk_scanner_set_selected_keyboard(int index) {
+    if (index >= -1 && index < CONFIG_PROSPECTOR_MAX_KEYBOARDS) {
+        selected_keyboard_index = index;
+        LOG_INF("🎯 Selected keyboard changed to index %d", index);
+    }
+}
 
 // Scanner's own battery status widget (top-right corner)
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -179,6 +234,13 @@ static void battery_debug_update_handler(struct k_work *work) {
         return;
     }
 
+    // Acquire mutex for LVGL operations
+    if (lvgl_lock(K_MSEC(50)) != 0) {
+        LOG_DBG("Battery debug update skipped - mutex busy");
+        k_work_schedule(&battery_debug_work, K_MSEC(100));
+        return;
+    }
+
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     // Force battery widget update for constant debug visibility
     update_scanner_battery_widget();
@@ -186,6 +248,9 @@ static void battery_debug_update_handler(struct k_work *work) {
     // Battery support disabled - skip battery widget update
     LOG_DBG("Battery debug update skipped - battery support disabled");
 #endif
+
+    // Release mutex
+    lvgl_unlock();
 
     // Schedule next update in 5 seconds
     k_work_schedule(&battery_debug_work, K_SECONDS(5));
@@ -398,6 +463,13 @@ static void battery_periodic_update_handler(struct k_work *work) {
         return;
     }
 
+    // Acquire mutex for LVGL operations
+    if (lvgl_lock(K_MSEC(50)) != 0) {
+        LOG_DBG("Battery periodic update skipped - mutex busy");
+        k_work_schedule(&battery_periodic_work, K_MSEC(100));
+        return;
+    }
+
     static uint32_t periodic_counter = 0;
     periodic_counter++;
 
@@ -502,7 +574,10 @@ static void battery_periodic_update_handler(struct k_work *work) {
     
     // Also call the original update method for comparison
     update_scanner_battery_widget();
-    
+
+    // Release mutex
+    lvgl_unlock();
+
     // Schedule next update
     k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
 }
@@ -530,6 +605,41 @@ static void stop_battery_monitoring(void) {
     // }  // DISABLED
 }
 #endif // CONFIG_PROSPECTOR_BATTERY_SUPPORT
+
+// Stop all periodic work queues (call before showing overlay screens)
+static void stop_all_periodic_work(void) {
+    LOG_DBG("⏸️  Stopping all periodic work queues");
+
+    struct k_work_sync sync;
+
+    // Stop and wait for each work queue
+    k_work_cancel_delayable_sync(&signal_timeout_work, &sync);
+    k_work_cancel_delayable_sync(&rx_periodic_work, &sync);
+    k_work_cancel_delayable_sync(&battery_debug_work, &sync);
+    k_work_cancel_delayable_sync(&memory_monitor_work, &sync);
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    k_work_cancel_delayable_sync(&battery_periodic_work, &sync);
+#endif
+
+    LOG_DBG("✅ All periodic work queues stopped");
+}
+
+// Resume all periodic work queues (call after returning to main screen)
+static void resume_all_periodic_work(void) {
+    LOG_DBG("▶️  Resuming all periodic work queues");
+
+    k_work_schedule(&signal_timeout_work, K_SECONDS(1));
+    k_work_schedule(&rx_periodic_work, K_SECONDS(1));
+    k_work_schedule(&battery_debug_work, K_SECONDS(2));
+    k_work_schedule(&memory_monitor_work, K_SECONDS(10));
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
+    k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));
+#endif
+
+    LOG_DBG("✅ All periodic work queues resumed");
+}
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_ADVERTISEMENT_FREQUENCY_DIM)
 // Advertisement frequency monitoring for automatic brightness dimming
@@ -583,7 +693,14 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         return;
     }
 
+    // Acquire mutex for LVGL operations (non-blocking - skip if busy)
+    if (lvgl_lock(K_MSEC(10)) != 0) {
+        LOG_DBG("Scanner update skipped - mutex busy");
+        return;
+    }
+
     if (!device_name_label) {
+        lvgl_unlock();
         return; // UI not ready yet
     }
 
@@ -650,10 +767,32 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
         
         LOG_INF("Display updated: No keyboards - all widgets reset, brightness reduced");
     } else {
-        // Find active keyboards and display their info  
-        for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
-            struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
-            if (kbd && kbd->active) {
+        // Use selected keyboard index, or auto-select first active if none selected
+        int selected_idx = selected_keyboard_index;
+
+        // Find selected keyboard or first active keyboard
+        struct zmk_keyboard_status *kbd = NULL;
+        if (selected_idx >= 0 && selected_idx < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+            kbd = zmk_status_scanner_get_keyboard(selected_idx);
+            if (!kbd || !kbd->active) {
+                kbd = NULL;  // Selected keyboard not active, fall through to auto-select
+            }
+        }
+
+        // Auto-select first active keyboard if no valid selection
+        if (!kbd) {
+            for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+                struct zmk_keyboard_status *check_kbd = zmk_status_scanner_get_keyboard(i);
+                if (check_kbd && check_kbd->active) {
+                    kbd = check_kbd;
+                    selected_keyboard_index = i;
+                    LOG_INF("🎯 Auto-selected keyboard index %d", i);
+                    break;
+                }
+            }
+        }
+
+        if (kbd && kbd->active) {
                 // Cache keyboard status for widget restoration
                 memcpy(&cached_keyboard_status, kbd, sizeof(struct zmk_keyboard_status));
                 cached_status_valid = true;
@@ -744,19 +883,20 @@ static void update_display_from_scanner(struct zmk_status_scanner_event_data *ev
                 // Enhanced debug logging including modifier flags
                 LOG_INF("🔧 SCANNER: Raw keyboard data - modifier_flags=0x%02X", kbd->data.modifier_flags);
                 
-                if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && 
+                if (kbd->data.device_role == ZMK_DEVICE_ROLE_CENTRAL &&
                     kbd->data.peripheral_battery[0] > 0) {
-                    LOG_INF("Split keyboard: %s, Central %d%%, Left %d%%, Layer: %d, Mods: 0x%02X", 
-                            kbd->ble_name, kbd->data.battery_level, 
+                    LOG_INF("Split keyboard: %s, Central %d%%, Left %d%%, Layer: %d, Mods: 0x%02X",
+                            kbd->ble_name, kbd->data.battery_level,
                             kbd->data.peripheral_battery[0], kbd->data.active_layer, kbd->data.modifier_flags);
                 } else {
-                    LOG_INF("Keyboard: %s, Battery %d%%, Layer: %d, Mods: 0x%02X", 
+                    LOG_INF("Keyboard: %s, Battery %d%%, Layer: %d, Mods: 0x%02X",
                             kbd->ble_name, kbd->data.battery_level, kbd->data.active_layer, kbd->data.modifier_flags);
                 }
-                break; // Only handle the first active keyboard for now
-            }
         }
     }
+
+    // Release mutex
+    lvgl_unlock();
 }
 
 // Display rotation initialization (merged from display_rotate_init.c)
@@ -817,6 +957,9 @@ SYS_INIT(scanner_display_init, APPLICATION, 60);
 // Following the working adapter pattern with simple, stable display
 lv_obj_t *zmk_display_status_screen() {
     LOG_INF("🎨 ===== zmk_display_status_screen() CALLED =====");
+
+    // Initialize LVGL mutex for thread-safe operations
+    lvgl_mutex_init();
 
     // Set processing flag during initial screen creation (prevents swipe during init)
     swipe_in_progress = true;
@@ -953,33 +1096,44 @@ static void start_scanner_delayed(struct k_work *work) {
         return;
     }
 
+    // Acquire mutex for LVGL operations
+    if (lvgl_lock(K_MSEC(50)) != 0) {
+        LOG_DBG("Scanner start delayed - mutex busy");
+        k_work_schedule(k_work_delayable_from_work(work), K_MSEC(100));
+        return;
+    }
+
     if (!device_name_label) {
         LOG_WRN("Display not ready yet, retrying scanner start...");
+        lvgl_unlock();
         k_work_schedule(k_work_delayable_from_work(work), K_SECONDS(1));
         return;
     }
 
     LOG_INF("Starting BLE scanner...");
     lv_label_set_text(device_name_label, "Starting scanner...");
-    
+
     // Register callback first
     int ret = zmk_status_scanner_register_callback(update_display_from_scanner);
     if (ret < 0) {
         LOG_ERR("Failed to register scanner callback: %d", ret);
         lv_label_set_text(device_name_label, "Scanner Error");
+        lvgl_unlock();
         return;
     }
-    
+
     // Start scanning
     ret = zmk_status_scanner_start();
     if (ret < 0) {
         LOG_ERR("Failed to start scanner: %d", ret);
         lv_label_set_text(device_name_label, "Start Error");
+        lvgl_unlock();
         return;
     }
-    
+
     LOG_INF("BLE scanner started successfully");
     lv_label_set_text(device_name_label, "Scanning...");
+    lvgl_unlock();
 }
 
 static K_WORK_DELAYABLE_DEFINE(scanner_start_work, start_scanner_delayed);
@@ -1096,9 +1250,17 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
     // Set processing flag - prevents concurrent widget operations
     swipe_in_progress = true;
 
+    // Acquire LVGL mutex for thread-safe operations
+    int mutex_ret = lvgl_lock(K_MSEC(200));
+    if (mutex_ret != 0) {
+        LOG_WRN("⚠️  Failed to acquire LVGL mutex, aborting swipe");
+        swipe_in_progress = false;
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
     // Pause LVGL timer to prevent internal conflicts during widget operations
     lv_timer_enable(false);
-    LOG_DBG("🔒 Swipe processing started - LVGL timer paused");
+    LOG_DBG("🔒 Swipe processing started - LVGL timer paused, mutex acquired");
 
     // Thread-safe LVGL operations (running in main thread via event system)
     // Handle gestures based on current screen state
@@ -1107,6 +1269,9 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
             if (current_screen == SCREEN_MAIN) {
                 // From main screen: create and show settings (dynamic allocation)
                 LOG_INF("⬇️  DOWN swipe from MAIN: Creating system settings widget");
+
+                // Stop all periodic work queues to prevent interference
+                stop_all_periodic_work();
 
                 // Destroy main screen widgets to free memory for overlay
                 if (wpm_widget) {
@@ -1220,6 +1385,9 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                         LOG_DBG("✅ Layer widget recreated for main screen");
                     }
                 }
+
+                // Resume all periodic work queues
+                resume_all_periodic_work();
             } else if (current_screen == SCREEN_SETTINGS) {
                 // Already on settings screen, do nothing
                 LOG_INF("⬇️  DOWN swipe: Already on settings screen");
@@ -1230,6 +1398,9 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
             if (current_screen == SCREEN_MAIN) {
                 // From main screen: create and show keyboard list (dynamic allocation)
                 LOG_INF("⬆️  UP swipe from MAIN: Creating keyboard list widget");
+
+                // Stop all periodic work queues to prevent interference
+                stop_all_periodic_work();
 
                 // Destroy main screen widgets to free memory for overlay
                 if (wpm_widget) {
@@ -1264,6 +1435,14 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                     if (!keyboard_list_widget) {
                         LOG_ERR("❌ Failed to create keyboard list widget");
                         break;  // Abort if creation failed
+                    }
+
+                    // Register LVGL input device for touch selection (first time only)
+                    int ret = touch_handler_register_lvgl_indev();
+                    if (ret < 0) {
+                        LOG_ERR("❌ Failed to register LVGL input device: %d", ret);
+                    } else {
+                        LOG_INF("✅ LVGL input device registered for keyboard selection");
                     }
                 }
 
@@ -1335,6 +1514,9 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                         LOG_DBG("✅ Layer widget recreated for main screen");
                     }
                 }
+
+                // Resume all periodic work queues
+                resume_all_periodic_work();
             } else if (current_screen == SCREEN_KEYBOARD_LIST) {
                 // Already on keyboard list screen, do nothing
                 LOG_INF("⬆️  UP swipe: Already on keyboard list screen");
@@ -1418,13 +1600,17 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
                     LOG_DBG("✅ Layer widget recreated for main screen");
                 }
             }
+
+            // Resume all periodic work queues
+            resume_all_periodic_work();
             break;
     }
 
-    // Resume LVGL timer and clear processing flag
+    // Resume LVGL timer, release mutex, and clear processing flag
     lv_timer_enable(true);
+    lvgl_unlock();
     swipe_in_progress = false;
-    LOG_DBG("🔓 Swipe processing completed - LVGL timer resumed");
+    LOG_DBG("🔓 Swipe processing completed - LVGL timer resumed, mutex released");
 
     return ZMK_EV_EVENT_BUBBLE;
 }

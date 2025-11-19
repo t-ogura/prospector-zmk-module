@@ -13,9 +13,11 @@
 
 // Per-keyboard display elements
 struct keyboard_entry {
+    lv_obj_t *container;        // Clickable container for selection
     lv_obj_t *name_label;       // Keyboard name
     lv_obj_t *rssi_bar;         // RSSI strength bar (0-5 bars)
     lv_obj_t *rssi_label;       // RSSI dBm value
+    int keyboard_index;         // Index in scanner's keyboard array (for selection callback)
 };
 
 struct zmk_widget_keyboard_list {

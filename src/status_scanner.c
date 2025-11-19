@@ -24,6 +24,32 @@ static zmk_status_scanner_callback_t event_callback = NULL;
 static bool scanning = false;
 static struct k_work_delayable timeout_work;
 
+// Mutex for thread-safe access to keyboards array
+// Protects against concurrent access from BLE scan callback, timeout handler, and API calls
+static struct k_mutex scanner_mutex;
+static bool scanner_mutex_initialized = false;
+
+static void scanner_mutex_init(void) {
+    if (!scanner_mutex_initialized) {
+        k_mutex_init(&scanner_mutex);
+        scanner_mutex_initialized = true;
+        LOG_DBG("🔒 Scanner mutex initialized");
+    }
+}
+
+static int scanner_lock(k_timeout_t timeout) {
+    if (!scanner_mutex_initialized) {
+        return -EINVAL;
+    }
+    return k_mutex_lock(&scanner_mutex, timeout);
+}
+
+static void scanner_unlock(void) {
+    if (scanner_mutex_initialized) {
+        k_mutex_unlock(&scanner_mutex);
+    }
+}
+
 // Timeout for considering a keyboard as lost (in milliseconds)
 #ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
 #define KEYBOARD_TIMEOUT_MS CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
@@ -95,12 +121,18 @@ static int find_empty_slot(void) {
 static const char* get_device_name(const bt_addr_le_t *addr);
 
 static void process_advertisement_with_name(const struct zmk_status_adv_data *adv_data, int8_t rssi, const bt_addr_le_t *addr) {
+    // Acquire mutex for keyboard array access (non-blocking to avoid BLE stack issues)
+    if (scanner_lock(K_MSEC(5)) != 0) {
+        LOG_DBG("Advertisement processing skipped - mutex busy");
+        return;
+    }
+
     uint32_t now = k_uptime_get_32();
     uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
-    
+
     // Get device name
     const char *device_name = get_device_name(addr);
-    
+
     const char *role_str = "UNKNOWN";
     if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
@@ -130,10 +162,17 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
-    // Only update name if it changed
-    if (strncmp(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name)) != 0) {
+    // Update name: always set if empty, otherwise only update if real name (not "Unknown")
+    if (keyboards[index].ble_name[0] == '\0') {
+        // First time - set whatever we have (even "Unknown")
         strncpy(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name) - 1);
         keyboards[index].ble_name[sizeof(keyboards[index].ble_name) - 1] = '\0';
+    } else if (strcmp(device_name, "Unknown") != 0 &&
+               strncmp(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name)) != 0) {
+        // Real name received - update from "Unknown" to actual name
+        strncpy(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name) - 1);
+        keyboards[index].ble_name[sizeof(keyboards[index].ble_name) - 1] = '\0';
+        LOG_INF("Updated keyboard name: %s (slot %d)", device_name, index);
     }
     
     // Debug: Print current active slots (at DBG level to reduce spam)
@@ -150,7 +189,9 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
         }
     }
     
-    // Notify event
+    // Notify event (release mutex before callback to prevent deadlock)
+    scanner_unlock();
+
     if (is_new) {
         const char *role_str = "UNKNOWN";
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
@@ -216,7 +257,9 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
-    
+
+    // Note: device name is updated in process_advertisement_with_name() which has access to BLE address
+
     // Debug: Print current active slots (at DBG level to reduce spam)
     if (is_new) {
         LOG_DBG("Current active slots:");
@@ -419,24 +462,45 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 }
 
 static void timeout_work_handler(struct k_work *work) {
+    // Acquire mutex for keyboard array access
+    if (scanner_lock(K_MSEC(50)) != 0) {
+        LOG_DBG("Timeout check skipped - mutex busy");
+        // Reschedule and try again
+        if (scanning) {
+            k_work_schedule(&timeout_work, K_MSEC(100));
+        }
+        return;
+    }
+
     uint32_t now = k_uptime_get_32();
 
     LOG_DBG("Timeout check at time %u", now);
+
+    // Collect timeout events first, then release mutex before notifying
+    int timeout_indices[ZMK_STATUS_SCANNER_MAX_KEYBOARDS];
+    int timeout_count = 0;
 
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) {
             uint32_t age = now - keyboards[i].last_seen;
             LOG_DBG("Slot %d age: %ums (timeout at %ums)",
                    i, age, KEYBOARD_TIMEOUT_MS);
-            
+
             if (age > KEYBOARD_TIMEOUT_MS) {
                 LOG_INF("Keyboard timeout: %s (slot %d)", keyboards[i].data.layer_name, i);
                 keyboards[i].active = false;
-                notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_LOST, i);
+                timeout_indices[timeout_count++] = i;
             }
         }
     }
-    
+
+    scanner_unlock();
+
+    // Notify events after releasing mutex to prevent deadlock
+    for (int i = 0; i < timeout_count; i++) {
+        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_LOST, timeout_indices[i]);
+    }
+
     // Reschedule timeout check
     if (scanning) {
         k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
@@ -444,10 +508,13 @@ static void timeout_work_handler(struct k_work *work) {
 }
 
 int zmk_status_scanner_init(void) {
+    // Initialize mutex first
+    scanner_mutex_init();
+
     memset(keyboards, 0, sizeof(keyboards));
     k_work_init_delayable(&timeout_work, timeout_work_handler);
-    
-    LOG_INF("Status scanner initialized");
+
+    LOG_INF("Status scanner initialized with mutex protection");
     return 0;
 }
 
@@ -503,7 +570,13 @@ struct zmk_keyboard_status *zmk_status_scanner_get_keyboard(int index) {
     if (index < 0 || index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         return NULL;
     }
-    
+
+    // Note: We don't use mutex here because:
+    // 1. This is a simple read operation
+    // 2. The caller (update_display_from_scanner) already holds LVGL mutex
+    // 3. Adding mutex here could cause deadlock with display callback
+    // The keyboards array access is atomic enough for read operations
+
     return keyboards[index].active ? &keyboards[index] : NULL;
 }
 
