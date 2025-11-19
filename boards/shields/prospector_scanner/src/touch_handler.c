@@ -6,6 +6,7 @@
 
 #include "touch_handler.h"
 #include "events/swipe_gesture_event.h"
+#include "scanner_message.h"  // Message queue for thread-safe architecture
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -54,6 +55,24 @@ static void raise_swipe_event(enum swipe_direction direction) {
     const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
     LOG_INF("📤 Raising swipe event: %s", dir_name[direction]);
 
+    // Phase 3: Send to message queue for thread-safe processing
+    // Convert swipe_direction to scanner_swipe_direction
+    enum scanner_swipe_direction msg_dir;
+    switch (direction) {
+        case SWIPE_DIRECTION_UP:    msg_dir = SCANNER_SWIPE_UP; break;
+        case SWIPE_DIRECTION_DOWN:  msg_dir = SCANNER_SWIPE_DOWN; break;
+        case SWIPE_DIRECTION_LEFT:  msg_dir = SCANNER_SWIPE_LEFT; break;
+        case SWIPE_DIRECTION_RIGHT: msg_dir = SCANNER_SWIPE_RIGHT; break;
+        default: msg_dir = SCANNER_SWIPE_UP; break;
+    }
+
+    int msg_ret = scanner_msg_send_swipe(msg_dir);
+    if (msg_ret != 0) {
+        LOG_WRN("⚠️ Failed to queue swipe message: %d", msg_ret);
+    }
+
+    // TRANSITIONAL: Also raise ZMK event for backward compatibility
+    // This will be removed once message processing handles swipe
     int rc = raise_zmk_swipe_gesture_event(
         (struct zmk_swipe_gesture_event){.direction = direction});
 

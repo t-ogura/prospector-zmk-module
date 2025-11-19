@@ -475,6 +475,16 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 }
 
 static void timeout_work_handler(struct k_work *work) {
+    // Phase 4: Send timeout check message to queue
+    // This allows the main task to handle timeout processing
+    int msg_ret = scanner_msg_send_timeout_check();
+    if (msg_ret != 0) {
+        LOG_DBG("Timeout message queue full, processing directly");
+    }
+
+    // TRANSITIONAL: Also process directly for backward compatibility
+    // This will be removed once message processing handles timeout
+
     // Acquire mutex for keyboard array access
     if (scanner_lock(K_MSEC(50)) != 0) {
         LOG_DBG("Timeout check skipped - mutex busy");
