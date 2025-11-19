@@ -193,26 +193,23 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
         }
     }
     
-    // Notify event (release mutex before callback to prevent deadlock)
+    // Release mutex
     scanner_unlock();
 
+    // Phase 5: Do NOT call notify_event from BLE callback context
+    // This would trigger LVGL operations from a non-main thread, causing freezes
+    // Display updates are handled by periodic rx_periodic_work (1Hz) instead
     if (is_new) {
         const char *role_str = "UNKNOWN";
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
 
-        LOG_INF("New %s device found: %s (slot %d)", role_str, device_name, index);
-        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
+        LOG_INF("New %s device found: %s (slot %d) - display will update on next periodic cycle",
+                role_str, device_name, index);
     } else {
-        const char *role_str = "UNKNOWN";
-        if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
-        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
-        else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-
-        LOG_DBG("%s device updated: %s, battery: %d%%",
-               role_str, device_name, adv_data->battery_level);
-        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
+        LOG_DBG("Device updated: %s, battery: %d%% - display will update on next periodic cycle",
+               device_name, adv_data->battery_level);
     }
 }
 
@@ -519,9 +516,11 @@ static void timeout_work_handler(struct k_work *work) {
 
     scanner_unlock();
 
-    // Notify events after releasing mutex to prevent deadlock
+    // Phase 5: Do NOT call notify_event from timeout work context
+    // Display updates are handled by periodic rx_periodic_work instead
     for (int i = 0; i < timeout_count; i++) {
-        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_LOST, timeout_indices[i]);
+        LOG_INF("Keyboard lost (slot %d) - display will update on next periodic cycle",
+                timeout_indices[i]);
     }
 
     // Reschedule timeout check

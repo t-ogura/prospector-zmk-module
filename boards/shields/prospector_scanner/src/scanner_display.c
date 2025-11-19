@@ -197,6 +197,11 @@ static K_WORK_DELAYABLE_DEFINE(memory_monitor_work, memory_monitor_handler);
 static void message_queue_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(message_queue_work, message_queue_handler);
 
+// Display update work - processes BLE data updates in work queue context
+// This is safe because work queue runs in same thread as LVGL
+static void display_update_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(display_update_work, display_update_work_handler);
+
 // Forward declaration for swipe processing (used by message_queue_handler)
 static void process_swipe_direction(int direction);
 
@@ -209,12 +214,105 @@ static void check_signal_timeout_handler(struct k_work *work) {
     k_work_schedule(&signal_timeout_work, K_SECONDS(5));
 }
 
+// Display update work handler - runs in work queue context (same thread as LVGL)
+// This replaces direct callback from BLE context for thread safety
+static void display_update_work_handler(struct k_work *work) {
+    // Skip updates during swipe processing
+    if (swipe_in_progress) {
+        LOG_DBG("Display update skipped - swipe in progress");
+        return;
+    }
+
+    // Acquire mutex for LVGL operations
+    if (lvgl_lock(K_MSEC(50)) != 0) {
+        LOG_DBG("Display update skipped - mutex busy");
+        return;
+    }
+
+    if (!device_name_label || !main_screen) {
+        lvgl_unlock();
+        return; // UI not ready yet
+    }
+
+    // Only update when on main screen
+    if (current_screen != SCREEN_MAIN) {
+        lvgl_unlock();
+        return;
+    }
+
+    int active_count = zmk_status_scanner_get_active_count();
+
+    if (active_count == 0) {
+        // No keyboards - show scanning state
+        lv_label_set_text(device_name_label, "Scanning...");
+
+        // Reset widgets (NULL-safe)
+        if (battery_widget) {
+            zmk_widget_scanner_battery_reset(battery_widget);
+        }
+        if (wpm_widget) {
+            zmk_widget_wpm_status_reset(wpm_widget);
+        }
+    } else {
+        // Use selected keyboard or first active
+        int selected_idx = selected_keyboard_index;
+        struct zmk_keyboard_status *kbd = NULL;
+
+        if (selected_idx >= 0 && selected_idx < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+            kbd = zmk_status_scanner_get_keyboard(selected_idx);
+            if (!kbd || !kbd->active) {
+                kbd = NULL;
+            }
+        }
+
+        // Auto-select first active
+        if (!kbd) {
+            for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+                kbd = zmk_status_scanner_get_keyboard(i);
+                if (kbd && kbd->active) {
+                    selected_keyboard_index = i;
+                    break;
+                }
+                kbd = NULL;
+            }
+        }
+
+        if (kbd) {
+            // Update device name
+            if (kbd->ble_name[0] != '\0') {
+                lv_label_set_text(device_name_label, kbd->ble_name);
+                strncpy(cached_device_name, kbd->ble_name, sizeof(cached_device_name) - 1);
+            }
+
+            // Update widgets
+            if (wpm_widget) {
+                zmk_widget_wpm_status_update(wpm_widget, kbd);
+            }
+            if (battery_widget) {
+                zmk_widget_scanner_battery_update(battery_widget, kbd);
+            }
+            if (connection_widget) {
+                zmk_widget_connection_status_update(connection_widget, kbd);
+            }
+            if (layer_widget) {
+                zmk_widget_layer_status_update(layer_widget, kbd);
+            }
+
+            // Cache for restore
+            memcpy(&cached_keyboard_status, kbd, sizeof(cached_keyboard_status));
+            cached_status_valid = true;
+        }
+    }
+
+    lvgl_unlock();
+}
+
 // 1Hz periodic RX update - called every second for smooth rate decline
 static void periodic_rx_update_handler(struct k_work *work) {
-    // Call periodic update for signal widget - DISABLED
-    // zmk_widget_signal_status_periodic_update(&signal_widget);
+    // Schedule display update (runs in work queue - same thread as LVGL)
+    k_work_schedule(&display_update_work, K_NO_WAIT);
 
-    // Schedule next update in 1 second - this ensures continuous 1Hz updates
+    // Schedule next update in 1 second
     k_work_schedule(&rx_periodic_work, K_SECONDS(1));
 }
 
