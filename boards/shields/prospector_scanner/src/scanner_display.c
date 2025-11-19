@@ -29,6 +29,7 @@
 #include "keyboard_list_widget.h"  // Keyboard list screen (shows active keyboards)
 #include "touch_handler.h"
 #include "events/swipe_gesture_event.h"
+#include "scanner_message.h"  // Message queue for thread-safe architecture
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -191,6 +192,11 @@ static K_WORK_DELAYABLE_DEFINE(battery_debug_work, battery_debug_update_handler)
 static void memory_monitor_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(memory_monitor_work, memory_monitor_handler);
 
+// Message queue processing work (Phase 2 reconstruction)
+// This processes messages from the queue in the main task context
+static void message_queue_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(message_queue_work, message_queue_handler);
+
 // Periodic signal timeout check (every 5 seconds)
 static void check_signal_timeout_handler(struct k_work *work) {
     // Check signal widget for timeout - DISABLED
@@ -223,6 +229,78 @@ static void memory_monitor_handler(struct k_work *work) {
 
     // DEBUG: Schedule next check in 10 seconds (less frequent to reduce log spam)
     k_work_schedule(&memory_monitor_work, K_SECONDS(10));
+}
+
+// Message queue handler - processes messages in main task context
+// This is the core of Phase 2 reconstruction: all message processing happens here
+static void message_queue_handler(struct k_work *work) {
+    struct scanner_message msg;
+    int processed = 0;
+    const int max_per_cycle = 8;  // Process up to 8 messages per cycle to avoid blocking
+
+    // Process available messages (non-blocking)
+    while (processed < max_per_cycle &&
+           scanner_msg_get(&msg, K_NO_WAIT) == 0) {
+
+        switch (msg.type) {
+            case SCANNER_MSG_KEYBOARD_DATA:
+                // TODO Phase 2: Process keyboard data here instead of in BLE callback
+                // For now, just log that we received the message
+                LOG_DBG("📥 MQ: Keyboard data received: %s (RSSI %d)",
+                       msg.keyboard.device_name, msg.keyboard.rssi);
+                scanner_msg_increment_processed();
+                break;
+
+            case SCANNER_MSG_SWIPE_GESTURE:
+                // TODO Phase 3: Process swipe gesture here
+                LOG_DBG("📥 MQ: Swipe gesture: %d", msg.swipe.direction);
+                scanner_msg_increment_processed();
+                break;
+
+            case SCANNER_MSG_TOUCH_TAP:
+                // TODO Phase 3: Process tap here
+                LOG_DBG("📥 MQ: Tap at (%d, %d)", msg.tap.x, msg.tap.y);
+                scanner_msg_increment_processed();
+                break;
+
+            case SCANNER_MSG_BATTERY_UPDATE:
+                // TODO Phase 4: Process battery update here
+                LOG_DBG("📥 MQ: Battery update request");
+                scanner_msg_increment_processed();
+                break;
+
+            case SCANNER_MSG_KEYBOARD_TIMEOUT:
+                // TODO Phase 4: Process keyboard timeout here
+                LOG_DBG("📥 MQ: Keyboard timeout check");
+                scanner_msg_increment_processed();
+                break;
+
+            case SCANNER_MSG_DISPLAY_REFRESH:
+                // TODO Phase 4: Process display refresh here
+                LOG_DBG("📥 MQ: Display refresh request");
+                scanner_msg_increment_processed();
+                break;
+
+            default:
+                LOG_WRN("📥 MQ: Unknown message type: %d", msg.type);
+                break;
+        }
+
+        processed++;
+    }
+
+    // Log stats periodically (every 100 cycles)
+    static int cycle_count = 0;
+    cycle_count++;
+    if (cycle_count % 100 == 0) {
+        uint32_t sent, dropped, proc;
+        scanner_msg_get_stats(&sent, &dropped, &proc);
+        LOG_INF("📊 MQ Stats: sent=%d, dropped=%d, processed=%d, queue=%d",
+                sent, dropped, proc, scanner_msg_get_queue_count());
+    }
+
+    // Schedule next processing cycle (100ms interval)
+    k_work_schedule(&message_queue_work, K_MSEC(100));
 }
 
 // Battery debug update handler - constant display for troubleshooting
@@ -262,7 +340,8 @@ static void start_signal_monitoring(void) {
     k_work_schedule(&rx_periodic_work, K_SECONDS(1));  // Start 1Hz updates
     k_work_schedule(&battery_debug_work, K_SECONDS(2)); // Start battery debug updates (2s delay)
     k_work_schedule(&memory_monitor_work, K_SECONDS(10)); // Uptime monitor (10s interval)
-    LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s)");
+    k_work_schedule(&message_queue_work, K_MSEC(100)); // Message queue processing (100ms interval)
+    LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s), MQ (100ms)");
 }
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -617,6 +696,7 @@ static void stop_all_periodic_work(void) {
     k_work_cancel_delayable_sync(&rx_periodic_work, &sync);
     k_work_cancel_delayable_sync(&battery_debug_work, &sync);
     k_work_cancel_delayable_sync(&memory_monitor_work, &sync);
+    k_work_cancel_delayable_sync(&message_queue_work, &sync);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     k_work_cancel_delayable_sync(&battery_periodic_work, &sync);
@@ -633,6 +713,7 @@ static void resume_all_periodic_work(void) {
     k_work_schedule(&rx_periodic_work, K_SECONDS(1));
     k_work_schedule(&battery_debug_work, K_SECONDS(2));
     k_work_schedule(&memory_monitor_work, K_SECONDS(10));
+    k_work_schedule(&message_queue_work, K_MSEC(100));
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
     k_work_schedule(&battery_periodic_work, K_SECONDS(CONFIG_PROSPECTOR_BATTERY_UPDATE_INTERVAL_S));

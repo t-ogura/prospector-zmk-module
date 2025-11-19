@@ -15,6 +15,10 @@
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
 
+// Message queue for thread-safe architecture (Phase 2 reconstruction)
+// Include path assumes build from zmk-config-prospector
+#include "../boards/shields/prospector_scanner/src/scanner_message.h"
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER)
@@ -456,7 +460,16 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                prospector_data->peripheral_battery[1], prospector_data->peripheral_battery[2],
                prospector_data->active_layer);
 
-        // Process advertisement with device name
+        // Phase 2: Send message to queue for thread-safe processing
+        // Get device name for the message
+        const char *device_name = get_device_name(addr);
+        int msg_ret = scanner_msg_send_keyboard_data(prospector_data, rssi, device_name);
+        if (msg_ret != 0) {
+            LOG_DBG("Message queue full, falling back to direct processing");
+        }
+
+        // TRANSITIONAL: Also process directly for backward compatibility
+        // This will be removed once message processing is implemented in main task
         process_advertisement_with_name(prospector_data, rssi, addr);
     }
 }

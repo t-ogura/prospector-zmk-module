@@ -15,6 +15,7 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
   # Main overlay provides safe defaults with I2C disabled
   
   # Essential scanner sources
+  zephyr_library_sources(src/scanner_main.c)  # Message queue infrastructure for thread-safe architecture
   zephyr_library_sources(src/scanner_display.c)
   zephyr_library_sources(src/scanner_battery_widget.c)  # Battery widget for split keyboard display
   zephyr_library_sources(src/scanner_battery_status_widget.c)  # Scanner's own battery status widget
