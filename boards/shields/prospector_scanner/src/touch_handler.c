@@ -71,8 +71,14 @@ static void raise_swipe_event(enum swipe_direction direction) {
         LOG_WRN("⚠️ Failed to queue swipe message: %d", msg_ret);
     }
 
-    // Phase 5: ZMK event no longer raised - using message queue only
-    // This ensures all LVGL operations happen in the work queue context
+    // Use ZMK event system for thread-safe LVGL operations
+    // ZMK event listeners run in main thread (same as LVGL)
+    int rc = raise_zmk_swipe_gesture_event(
+        (struct zmk_swipe_gesture_event){.direction = direction});
+
+    if (rc < 0) {
+        LOG_ERR("❌ Failed to raise swipe event: %d", rc);
+    }
 }
 
 /**

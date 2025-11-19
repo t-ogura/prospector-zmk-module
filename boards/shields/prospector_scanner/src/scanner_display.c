@@ -255,19 +255,9 @@ static void message_queue_handler(struct k_work *work) {
                 break;
 
             case SCANNER_MSG_SWIPE_GESTURE:
-                // Phase 5: Process swipe gesture via message queue
-                // Convert scanner_swipe_direction to swipe_direction
-                {
-                    int dir;
-                    switch (msg.swipe.direction) {
-                        case SCANNER_SWIPE_UP:    dir = SWIPE_DIRECTION_UP; break;
-                        case SCANNER_SWIPE_DOWN:  dir = SWIPE_DIRECTION_DOWN; break;
-                        case SCANNER_SWIPE_LEFT:  dir = SWIPE_DIRECTION_LEFT; break;
-                        case SCANNER_SWIPE_RIGHT: dir = SWIPE_DIRECTION_RIGHT; break;
-                        default: dir = SWIPE_DIRECTION_UP; break;
-                    }
-                    process_swipe_direction(dir);
-                }
+                // Swipe is processed via ZMK event system (main thread)
+                // Message queue just tracks the event for statistics
+                LOG_DBG("📥 MQ: Swipe gesture: %d (processed via ZMK event)", msg.swipe.direction);
                 scanner_msg_increment_processed();
                 break;
 
@@ -1313,17 +1303,15 @@ static void restore_keyboard_list_widgets(void) {
 }
 
 // Swipe gesture event listener (runs in main thread - safe for LVGL)
-// NOTE: This listener is DEPRECATED in Phase 5 reconstruction
-// Swipe processing is now handled via message queue in message_queue_handler()
+// This is the correct way to handle LVGL operations - via ZMK event system
 static int swipe_gesture_listener(const zmk_event_t *eh) {
     const struct zmk_swipe_gesture_event *ev = as_zmk_swipe_gesture_event(eh);
     if (!ev) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
-    // Phase 5: Swipe is now processed via message queue
-    // This listener is kept for backward compatibility but does nothing
-    LOG_DBG("📥 ZMK swipe event received (ignored - using message queue): %d", ev->direction);
+    // Process swipe in main thread context (safe for LVGL)
+    process_swipe_direction(ev->direction);
     return ZMK_EV_EVENT_BUBBLE;
 }
 
@@ -1356,17 +1344,23 @@ static void process_swipe_direction(int direction) {
     // Set processing flag - prevents concurrent widget operations
     swipe_in_progress = true;
 
-    // Acquire LVGL mutex for thread-safe operations
-    int mutex_ret = lvgl_lock(K_MSEC(200));
+    // Phase 5: Work queue runs in system work queue context
+    // We need to acquire LVGL mutex carefully to avoid deadlock
+    // Use non-blocking attempt first, then short timeout
+    int mutex_ret = lvgl_lock(K_NO_WAIT);
     if (mutex_ret != 0) {
-        LOG_WRN("⚠️  Failed to acquire LVGL mutex, aborting swipe");
-        swipe_in_progress = false;
-        return;
+        // Retry with short timeout
+        mutex_ret = lvgl_lock(K_MSEC(50));
+        if (mutex_ret != 0) {
+            LOG_WRN("⚠️  Failed to acquire LVGL mutex, aborting swipe");
+            swipe_in_progress = false;
+            return;
+        }
     }
 
-    // Pause LVGL timer to prevent internal conflicts during widget operations
-    lv_timer_enable(false);
-    LOG_DBG("🔒 Swipe processing started - LVGL timer paused, mutex acquired");
+    // Note: We don't pause LVGL timer in work queue context
+    // The mutex is sufficient for protection
+    LOG_DBG("🔒 Swipe processing started - mutex acquired");
 
     // Thread-safe LVGL operations (running in work queue context)
     // Handle gestures based on current screen state
@@ -1712,11 +1706,10 @@ static void process_swipe_direction(int direction) {
             break;
     }
 
-    // Resume LVGL timer, release mutex, and clear processing flag
-    lv_timer_enable(true);
+    // Release mutex and clear processing flag
     lvgl_unlock();
     swipe_in_progress = false;
-    LOG_DBG("🔓 Swipe processing completed - LVGL timer resumed, mutex released");
+    LOG_DBG("🔓 Swipe processing completed - mutex released");
 }
 
 ZMK_LISTENER(swipe_gesture, swipe_gesture_listener);
