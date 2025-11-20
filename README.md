@@ -40,14 +40,9 @@ The main repository contains:
 - **Multi-Keyboard Support**: Monitor multiple keyboards simultaneously
 - **Professional Widgets**: Battery, layer, modifier, and connection status
 
-### 🔌 **Dongle Mode Components** (Legacy)
-- **Traditional Dongle**: Keyboard → Dongle → PC connectivity
-- **Basic Status Display**: Layer roller and peripheral information
-- **Legacy Support**: Compatible with original Prospector hardware
-
 ## 🏗️ Architecture
 
-### Scanner Mode (Current - Recommended)
+### Scanner Mode Architecture
 ```
 ┌─────────────┐    BLE Advertisement    ┌──────────────────┐
 │             │ ─────────────────────→ │   Prospector     │
@@ -56,25 +51,14 @@ The main repository contains:
 └─────────────┘                        └──────────────────┘
        │
        ├── PC (BLE/USB)
-       ├── Tablet 
+       ├── Tablet
        ├── Phone
        └── ... (up to 5 devices)
 ```
 
-### Dongle Mode (Legacy)
-```
-┌─────────────┐    BLE Connection    ┌──────────────────┐    USB/BLE    ┌─────┐
-│  Keyboard   │ ──────────────────→ │   Prospector     │ ──────────→ │ PC  │
-│ (Peripheral)│                      │   Dongle         │              └─────┘
-└─────────────┘                      │  (Central)       │
-                                     └──────────────────┘
-```
-
 ## 🚀 Quick Start
 
-### For Scanner Mode
-
-#### 1. Add to Your Keyboard
+### 1. Add to Your Keyboard
 
 Add to your keyboard's `config/west.yml`:
 ```yaml
@@ -101,7 +85,7 @@ Add to your keyboard's `.conf` file:
 CONFIG_ZMK_STATUS_ADVERTISEMENT=y
 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME="MyBoard"
 
-# v1.1.0 enhanced power optimization (15x improvement)
+# Enhanced power optimization (15x improvement in v1.1.0)
 CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED=y
 CONFIG_ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS=100    # 10Hz active
 CONFIG_ZMK_STATUS_ADV_IDLE_INTERVAL_MS=30000    # 0.03Hz idle
@@ -110,18 +94,9 @@ CONFIG_ZMK_STATUS_ADV_IDLE_INTERVAL_MS=30000    # 0.03Hz idle
 CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING=y
 ```
 
-#### 2. Build Scanner Device
+### 2. Build Scanner Device
 
 Use the companion repository: [zmk-config-prospector](https://github.com/t-ogura/zmk-config-prospector)
-
-### For Dongle Mode (Legacy)
-
-Add to your `build.yaml`:
-```yaml
-include:
-  - board: seeeduino_xiao_ble
-    shield: [YOUR_KEYBOARD]_dongle prospector_adapter
-```
 
 ## 📡 Status Advertisement Protocol
 
