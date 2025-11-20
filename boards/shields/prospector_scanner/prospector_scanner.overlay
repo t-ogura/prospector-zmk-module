@@ -157,12 +157,9 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C and APDS9960 configuration for 4-pin operation with dummy INT
-// Solution: Use dummy INT pin to satisfy Zephyr driver requirements while using polling mode
-
-// WORKAROUND: Zephyr APDS9960 driver requires INT pin even in TRIGGER_NONE mode
-// Use Pin 2 (D2/P0.28) as dummy INT pin - it won't actually be used
-// This is a known Zephyr driver design issue: apds9960_init() always calls apds9960_init_interrupt()
+// I2C configuration for direct I2C sensor access (no Zephyr driver)
+// The APDS9960 is accessed directly via I2C in brightness_control.c
+// This bypasses the Zephyr driver requirement for an interrupt pin
 
 &i2c0 {
     status = "okay";
@@ -170,17 +167,8 @@ disp_spi: &spi3 {
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
 
-    apds9960: apds9960@39 {
-        compatible = "avago,apds9960";
-        reg = <0x39>;
-
-        // DUMMY INT PIN - Pin 2 (D2/P0.28) - NOT ACTUALLY CONNECTED OR USED
-        // This satisfies Zephyr driver initialization requirements
-        // With CONFIG_APDS9960_TRIGGER_NONE=y, this pin is only checked for existence
-        int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-
-        status = "okay";
-    };
+    // Note: APDS9960 is accessed directly via I2C at address 0x39
+    // No device tree node needed - brightness_control.c handles initialization
 
     // CST816S Touch Controller for Waveshare 1.69" Round LCD
     // I2C address: 0x15

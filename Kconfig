@@ -245,14 +245,13 @@ config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     bool "Enable ambient light sensor for automatic brightness"
     default y
     depends on PROSPECTOR_MODE_SCANNER
-    select APDS9960
     help
       Enable APDS9960 ambient light sensor for automatic brightness adjustment.
-      When enabled, uses sensor-based automatic brightness.
+      When enabled, uses direct I2C polling for sensor readings (no interrupt pin required).
       When disabled, uses fixed brightness mode.
 
-      Note: I2C and SENSOR are always enabled for battery support.
-      Disabling this option only disables automatic brightness, not the sensor subsystem.
+      Note: This uses direct I2C communication, not the Zephyr APDS9960 driver.
+      This allows 4-pin connections without an interrupt pin.
 
       Hardware connection (when enabled):
       - SDA = D4 (P0.04)
