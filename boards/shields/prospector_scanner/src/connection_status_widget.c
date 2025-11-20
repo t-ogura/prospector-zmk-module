@@ -38,15 +38,17 @@ static void update_connection_status(struct zmk_widget_connection_status *widget
     
     // Format transport text similar to YADS
     char transport_text[64];
-    // Show current active profile with > marker
-    if (kbd->data.profile_slot >= 0 && kbd->data.profile_slot <= 4) {
-        // Assume BLE is active if profile_slot is valid
-        snprintf(transport_text, sizeof(transport_text), 
-                "#%s USB#\\n> #%s BLE#", usb_color, ble_color);
-    } else {
-        // USB might be active
-        snprintf(transport_text, sizeof(transport_text), 
+    // Show current active transport with > marker
+    // USB is active when USB_HID_READY flag is set
+    // BLE is active when connected but USB is not ready
+    if (usb_hid_ready) {
+        // USB is active transport
+        snprintf(transport_text, sizeof(transport_text),
                 "> #%s USB#\\n#%s BLE#", usb_color, ble_color);
+    } else {
+        // BLE is active transport (or no transport)
+        snprintf(transport_text, sizeof(transport_text),
+                "#%s USB#\\n> #%s BLE#", usb_color, ble_color);
     }
     
     // Update transport label with colors

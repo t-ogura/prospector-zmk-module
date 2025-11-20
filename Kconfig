@@ -144,14 +144,26 @@ config PROSPECTOR_MAX_LAYERS
       This setting only applies to scanner mode and is ignored for keyboard builds.
 
 config PROSPECTOR_SCANNER_TIMEOUT_MS
-    int "Scanner timeout in milliseconds"
-    range 10000 600000
+    int "Scanner timeout in milliseconds (0 to disable)"
+    range 0 600000
     default 480000
     depends on PROSPECTOR_MODE_SCANNER
     help
       Time in milliseconds to wait before considering a keyboard as lost.
       Default is 480000ms (8 minutes) - should be longer than keyboard idle interval.
-      Range is 10-600 seconds (10min max).
+      Set to 0 to disable timeout completely.
+      Range is 0 (disabled) or 10000-600000ms (10s to 10min).
+
+config PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
+    int "Display brightness during timeout (percentage)"
+    range 1 50
+    default 5
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Display brightness percentage when scanner times out (no keyboard reception).
+      Low brightness saves power while maintaining minimal visibility.
+      Brightness automatically restores when keyboard data is received again.
+      Default is 5%. Range is 1-50%.
 
 config PROSPECTOR_SCANNER_CHANNEL
     int "Prospector scanner channel number (0-255)"

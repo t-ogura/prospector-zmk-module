@@ -36,6 +36,9 @@
 #include "signal_status_widget.h"
 #endif
 
+// Brightness control for timeout dimming
+#include "brightness_control.h"
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // Backward compatibility: provide defaults for v1.1.0 configs if not defined
@@ -90,6 +93,21 @@ static bool cached_battery_valid = false;
 static uint8_t cached_wpm_value = 0;
 static struct zmk_keyboard_status cached_keyboard_status;
 static bool cached_status_valid = false;
+
+// ========== Timeout Brightness Control ==========
+// Track reception timeout state for display dimming
+static uint32_t last_keyboard_reception_time = 0;
+static bool timeout_dimmed = false;  // True when display is dimmed due to timeout
+static uint8_t brightness_before_timeout = 0;  // Store brightness to restore after timeout
+
+// Default timeout brightness if not configured
+#ifndef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
+#define CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS 5
+#endif
+
+#ifndef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
+#define CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS 480000
+#endif
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
 // Screen state management (touch version only)
@@ -358,9 +376,45 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
         processed++;
     }
 
-    // Log stats periodically (every 100 cycles = 10 seconds at 100ms interval)
+    // 1Hz periodic updates for signal status widget (every 10 cycles = 1 second at 100ms interval)
     static int cycle_count = 0;
     cycle_count++;
+
+#if !IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
+    // Non-touch version: Update signal status widget every 1 second for stable display
+    if (cycle_count % 10 == 0 && !swipe_in_progress) {
+        zmk_widget_signal_status_periodic_update(&signal_widget);
+    }
+#endif
+
+    // Check for reception timeout and dim display (every 1 second)
+    if (cycle_count % 10 == 0) {
+        uint32_t timeout_ms = CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS;
+
+        // Only check timeout if enabled (timeout > 0)
+        if (timeout_ms > 0 && last_keyboard_reception_time > 0) {
+            uint32_t now = k_uptime_get_32();
+            uint32_t elapsed = now - last_keyboard_reception_time;
+
+            // Check if timeout exceeded and not already dimmed
+            if (elapsed >= timeout_ms && !timeout_dimmed) {
+                // Save current brightness before dimming
+                brightness_before_timeout = brightness_control_get_current();
+                if (brightness_before_timeout == 0) {
+                    brightness_before_timeout = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+                }
+
+                // Dim display to timeout brightness
+                brightness_control_set_manual(CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
+                timeout_dimmed = true;
+
+                LOG_INF("⏱️ Reception timeout (%dms) - display dimmed to %d%%",
+                        elapsed, CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
+            }
+        }
+    }
+
+    // Log stats periodically (every 100 cycles = 10 seconds at 100ms interval)
     if (cycle_count % 100 == 0) {
         uint32_t sent, dropped, proc;
         scanner_msg_get_stats(&sent, &dropped, &proc);
@@ -374,6 +428,23 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
 static void process_keyboard_data_message(struct scanner_message *msg) {
     if (!device_name_label || !main_screen) {
         return; // UI not ready yet
+    }
+
+    // Update reception time for timeout tracking
+    last_keyboard_reception_time = k_uptime_get_32();
+
+    // Restore brightness if we were dimmed due to timeout
+    if (timeout_dimmed) {
+        timeout_dimmed = false;
+        if (brightness_before_timeout > 0) {
+            brightness_control_set_manual(brightness_before_timeout);
+            LOG_INF("🔆 Brightness restored to %d%% (keyboard received)", brightness_before_timeout);
+        } else {
+            // Restore to fixed brightness if no previous value
+            brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+            LOG_INF("🔆 Brightness restored to default %d%% (keyboard received)",
+                    CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        }
     }
 
     // Only update when on main screen
