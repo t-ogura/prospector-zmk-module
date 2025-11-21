@@ -151,7 +151,7 @@ static int apds9960_read_light(uint16_t *light_val) {
 // Map light value to brightness percentage
 static uint8_t map_light_to_brightness(uint32_t light_value) {
     uint8_t min_brightness = CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS;
-    uint8_t max_brightness = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
+    uint8_t max_brightness = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
     uint32_t threshold = CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD;
 
     // Clamp to threshold
@@ -268,7 +268,7 @@ static int brightness_control_init(void) {
     LOG_INF("✅ Sensor brightness control ready (message queue mode)");
     LOG_INF("📊 Settings: Min=%u%%, Max=%u%%, Threshold=%u, Interval=%ums",
             CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS,
-            CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB,
+            CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS,
             CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD,
             CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS);
 
