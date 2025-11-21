@@ -6,6 +6,7 @@
 
 #include "display_settings_widget.h"
 #include "brightness_control.h"
+#include "scanner_message.h"  // For brightness messages
 #include <zephyr/logging/log.h>
 #include <string.h>
 
@@ -74,8 +75,8 @@ static void auto_brightness_sw_event_cb(lv_event_t *e) {
     } else {
         lv_obj_clear_state(widget->brightness_slider, LV_STATE_DISABLED);
         lv_obj_set_style_opa(widget->brightness_slider, LV_OPA_COVER, 0);
-        // Apply current manual brightness
-        brightness_control_set_manual(widget->manual_brightness);
+        // Apply current manual brightness via message
+        scanner_msg_send_brightness_set_target(widget->manual_brightness);
     }
 }
 
@@ -95,8 +96,8 @@ static void brightness_slider_event_cb(lv_event_t *e) {
     snprintf(buf, sizeof(buf), "%d%%", value);
     lv_label_set_text(widget->brightness_value, buf);
 
-    // Apply brightness immediately
-    brightness_control_set_manual((uint8_t)value);
+    // Apply brightness immediately via message
+    scanner_msg_send_brightness_set_target((uint8_t)value);
 }
 
 static void battery_sw_event_cb(lv_event_t *e) {
