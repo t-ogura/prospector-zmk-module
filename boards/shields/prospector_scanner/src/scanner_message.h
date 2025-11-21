@@ -85,7 +85,8 @@ struct scanner_message {
 };
 
 // Message queue size - needs to handle burst of BLE advertisements
-#define SCANNER_MSGQ_SIZE 16
+// Increased to 32 to handle high-frequency sensor reads + keyboard updates
+#define SCANNER_MSGQ_SIZE 32
 
 // Message queue declaration (defined in scanner_main.c)
 extern struct k_msgq scanner_msgq;

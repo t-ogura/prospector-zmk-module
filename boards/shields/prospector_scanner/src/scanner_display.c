@@ -533,19 +533,19 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
         processed++;
     }
 
-    // 1Hz periodic updates for signal status widget (every 10 cycles = 1 second at 100ms interval)
+    // 1Hz periodic updates for signal status widget (every 5 cycles = 1 second at 200ms interval)
     static int cycle_count = 0;
     cycle_count++;
 
 #if !IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
     // Non-touch version: Update signal status widget every 1 second for stable display
-    if (cycle_count % 10 == 0 && !swipe_in_progress) {
+    if (cycle_count % 5 == 0 && !swipe_in_progress) {
         zmk_widget_signal_status_periodic_update(&signal_widget);
     }
 #endif
 
     // Check for reception timeout and dim display (every 1 second)
-    if (cycle_count % 10 == 0) {
+    if (cycle_count % 5 == 0) {
         uint32_t timeout_ms = CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS;
 
         // Only check timeout if enabled (timeout > 0)
@@ -575,8 +575,8 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
         }
     }
 
-    // Log stats periodically (every 100 cycles = 10 seconds at 100ms interval)
-    if (cycle_count % 100 == 0) {
+    // Log stats periodically (every 50 cycles = 10 seconds at 200ms interval)
+    if (cycle_count % 50 == 0) {
         uint32_t sent, dropped, proc;
         scanner_msg_get_stats(&sent, &dropped, &proc);
         LOG_INF("📊 MQ Stats: sent=%d, dropped=%d, processed=%d, queue=%d",
@@ -748,11 +748,11 @@ static void start_signal_monitoring(void) {
     // Phase 2: Start LVGL timer for message queue processing
     // This runs in LVGL main thread - safe for all LVGL operations
     if (!main_loop_timer) {
-        main_loop_timer = lv_timer_create(main_loop_timer_cb, 100, NULL);  // 100ms interval
-        LOG_INF("✅ LVGL main loop timer created (100ms interval)");
+        main_loop_timer = lv_timer_create(main_loop_timer_cb, 200, NULL);  // 200ms interval (reduced from 100ms for better performance)
+        LOG_INF("✅ LVGL main loop timer created (200ms interval)");
     }
 
-    LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s), LVGL timer (100ms)");
+    LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s), LVGL timer (200ms)");
 }
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
@@ -1596,9 +1596,6 @@ static void process_swipe_direction(int direction) {
                 }
                 LOG_DBG("✅ Main widgets destroyed for display settings");
 
-                // Safety delay after widget destruction
-                k_msleep(10);
-
                 // Create display settings widget
                 if (!display_settings_widget) {
                     display_settings_widget = zmk_widget_display_settings_create(main_screen);
@@ -1655,9 +1652,6 @@ static void process_swipe_direction(int direction) {
                     connection_widget = NULL;
                 }
                 LOG_DBG("✅ Main widgets destroyed for keyboard list");
-
-                // Safety delay after widget destruction
-                k_msleep(10);
 
                 // Create widget if not already created
                 if (!keyboard_list_widget) {
@@ -1729,9 +1723,6 @@ static void process_swipe_direction(int direction) {
                 }
                 LOG_DBG("✅ Main widgets destroyed for settings");
 
-                // Safety delay after widget destruction
-                k_msleep(10);
-
                 // Create widget if not already created
                 if (!system_settings_widget) {
                     system_settings_widget = zmk_widget_system_settings_create(main_screen);
@@ -1785,9 +1776,6 @@ return_to_main:
                     LOG_INF("✅ Keyboard list widget destroyed");
                 }
             }
-
-            // Safety delay after overlay widget destruction
-            k_msleep(10);
 
             current_screen = SCREEN_MAIN;
 
@@ -1870,10 +1858,6 @@ return_to_main:
             resume_all_periodic_work();
             break;
     }
-
-    // CRITICAL: Add delay to ensure all widget operations complete
-    // before resuming timer (prevents use-after-free)
-    k_msleep(50);
 
     // Resume main loop timer
     if (main_loop_timer) {
