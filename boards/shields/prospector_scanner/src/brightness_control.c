@@ -3,14 +3,13 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Safe Brightness Control for Prospector v1.1.2
- * - CONFIG=n: Fixed brightness mode only
- * - CONFIG=y: Direct I2C sensor mode (no interrupt pin required)
+ * Thread-Safe Brightness Control for Prospector v2.0
+ * - Work Queue context: Sensor reading only, sends messages
+ * - Main thread context: All PWM access happens in scanner_display.c
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/led.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/init.h>
 #include <zephyr/logging/log.h>
@@ -18,72 +17,12 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include "brightness_control.h"
+#include "scanner_message.h"
 
-// Only compile brightness control if sensor mode is DISABLED
-#if !IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
-
-// Fixed brightness mode - state tracking
-static const struct device *fixed_pwm_dev = NULL;
-static uint8_t fixed_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
-
-// API: Set manual brightness
-void brightness_control_set_manual(uint8_t brightness) {
-    if (brightness > 100) brightness = 100;
-    if (brightness < 10) brightness = 10;
-
-    fixed_brightness = brightness;
-
-    if (fixed_pwm_dev && device_is_ready(fixed_pwm_dev)) {
-        led_set_brightness(fixed_pwm_dev, 0, brightness);
-        LOG_INF("🔆 Manual brightness: %d%%", brightness);
-    }
-}
-
-// API: Auto brightness not available in fixed mode
-void brightness_control_set_auto(bool enabled) {
-    LOG_WRN("🔆 Auto brightness not available (no sensor)");
-}
-
-// API: Get current brightness
-uint8_t brightness_control_get_current(void) {
-    return fixed_brightness;
-}
-
-// API: Check if auto is enabled (always false in fixed mode)
-bool brightness_control_is_auto(void) {
-    return false;
-}
-
-// Fixed brightness mode implementation - safe and simple
-static int brightness_control_init(void) {
-    LOG_INF("🔆 Brightness Control: Fixed Mode");
-
-    // Try to get PWM device safely
-#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
-    fixed_pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
-#endif
-
-    if (fixed_pwm_dev && device_is_ready(fixed_pwm_dev)) {
-        fixed_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
-        int ret = led_set_brightness(fixed_pwm_dev, 0, fixed_brightness);
-        if (ret < 0) {
-            LOG_WRN("Failed to set brightness: %d", ret);
-        } else {
-            LOG_INF("✅ Fixed brightness set to %d%%", fixed_brightness);
-        }
-    } else {
-        LOG_INF("PWM device not found - using hardware default brightness");
-    }
-
-    return 0;  // Always succeed
-}
-
-SYS_INIT(brightness_control_init, APPLICATION, 90);
-
-#else  // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+// Only compile sensor code if enabled
+#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
 
 // ========== Direct I2C APDS9960 Implementation ==========
-// This bypasses the Zephyr driver which requires an interrupt pin
 
 // APDS9960 I2C Address
 #define APDS9960_I2C_ADDR       0x39
@@ -118,47 +57,11 @@ SYS_INIT(brightness_control_init, APPLICATION, 90);
 // Default ADC integration time (219 = ~103ms)
 #define APDS9960_DEFAULT_ATIME  219
 
-// Sensor mode state
-static const struct device *pwm_dev = NULL;
+// Sensor state
 static const struct device *i2c_dev = NULL;
-static struct k_work_delayable brightness_update_work;
-static struct k_work_delayable fade_work;
-
-// Fade state tracking
-static uint8_t current_brightness = 50;
-static uint8_t target_brightness = 50;
-static uint8_t fade_step_count = 0;
-static uint8_t fade_total_steps = 10;
+static struct k_work_delayable brightness_sensor_work;
 static bool sensor_available = false;
-
-// Auto/manual mode state
 static bool auto_brightness_enabled = true;
-static uint8_t manual_brightness_setting = 65;
-
-// Default configuration values
-#ifndef CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
-#define CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS 20
-#endif
-
-#ifndef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB
-#define CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB 100
-#endif
-
-#ifndef CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD
-#define CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD 100
-#endif
-
-#ifndef CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS
-#define CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS 2000
-#endif
-
-#ifndef CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS
-#define CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS 1000
-#endif
-
-#ifndef CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS
-#define CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS 10
-#endif
 
 // I2C Helper functions
 static int apds9960_read_reg(uint8_t reg, uint8_t *val) {
@@ -245,6 +148,7 @@ static int apds9960_read_light(uint16_t *light_val) {
     return 0;
 }
 
+// Map light value to brightness percentage
 static uint8_t map_light_to_brightness(uint32_t light_value) {
     uint8_t min_brightness = CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS;
     uint8_t max_brightness = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
@@ -256,14 +160,12 @@ static uint8_t map_light_to_brightness(uint32_t light_value) {
     }
 
     // Non-linear mapping (square root curve for darker bias)
-    // This keeps the display darker for longer, only brightening significantly in bright light
     uint32_t brightness_range = max_brightness - min_brightness;
 
     // Normalize light value to 0-1000 range for sqrt calculation
     uint32_t normalized = (light_value * 1000) / threshold;
 
     // Apply square root for non-linear curve (darker bias)
-    // sqrt(normalized) gives values that stay low longer
     uint32_t sqrt_val = 0;
     if (normalized > 0) {
         // Integer square root approximation
@@ -282,64 +184,10 @@ static uint8_t map_light_to_brightness(uint32_t light_value) {
     return min_brightness + (uint8_t)scaled_brightness;
 }
 
-static void fade_work_handler(struct k_work *work) {
-    if (!pwm_dev) {
-        return;
-    }
-
-    if (current_brightness == target_brightness) {
-        return; // Fade complete
-    }
-
-    fade_step_count++;
-
-    // Calculate intermediate brightness value
-    int brightness_diff = (int)target_brightness - (int)current_brightness;
-    int step_change = (brightness_diff * fade_step_count) / fade_total_steps;
-    uint8_t new_brightness = current_brightness + step_change;
-
-    // Set brightness
-    int ret = led_set_brightness(pwm_dev, 0, new_brightness);
-    if (ret < 0) {
-        LOG_WRN("Failed to set fade brightness: %d", ret);
-    }
-
-    // Check if fade is complete
-    if (fade_step_count >= fade_total_steps || new_brightness == target_brightness) {
-        current_brightness = target_brightness;
-        LOG_DBG("✅ Fade complete: %u%%", current_brightness);
-        return;
-    }
-
-    // Schedule next fade step
-    uint32_t fade_interval = CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS / fade_total_steps;
-    k_work_schedule(&fade_work, K_MSEC(fade_interval));
-}
-
-static void start_brightness_fade(uint8_t new_target_brightness) {
-    if (new_target_brightness == target_brightness) {
-        return; // No change needed
-    }
-
-    // Cancel any ongoing fade
-    k_work_cancel_delayable(&fade_work);
-
-    // Set up new fade parameters
-    target_brightness = new_target_brightness;
-    fade_step_count = 0;
-    fade_total_steps = CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS;
-
-    LOG_DBG("🔄 Starting fade: %u%% -> %u%% (%u steps, %ums total)",
-            current_brightness, target_brightness, fade_total_steps,
-            CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS);
-
-    // Start immediate first step
-    uint32_t fade_interval = CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS / fade_total_steps;
-    k_work_schedule(&fade_work, K_MSEC(fade_interval));
-}
-
-static void brightness_update_work_handler(struct k_work *work) {
-    if (!sensor_available || !pwm_dev) {
+// Work Queue handler - ONLY reads sensor and sends message
+// CRITICAL: No PWM access here! Work Queue context!
+static void brightness_sensor_work_handler(struct k_work *work) {
+    if (!sensor_available) {
         goto reschedule;
     }
 
@@ -353,7 +201,7 @@ static void brightness_update_work_handler(struct k_work *work) {
 
     if (ret == -EAGAIN) {
         // Data not ready, try again soon
-        k_work_schedule(&brightness_update_work, K_MSEC(100));
+        k_work_schedule(&brightness_sensor_work, K_MSEC(100));
         return;
     }
 
@@ -362,30 +210,38 @@ static void brightness_update_work_handler(struct k_work *work) {
         goto reschedule;
     }
 
-    uint8_t new_target_brightness = map_light_to_brightness(light_val);
+    // Calculate target brightness
+    uint8_t target_brightness = map_light_to_brightness(light_val);
 
-    LOG_DBG("🌞 Light: %u -> Brightness: %u%%", light_val, new_target_brightness);
+    LOG_DBG("🌞 Light: %u -> Target: %u%%", light_val, target_brightness);
 
-    // Start smooth fade to new brightness
-    start_brightness_fade(new_target_brightness);
+    // Send message to main thread - NO PWM ACCESS HERE
+    scanner_msg_send_brightness_set_target(target_brightness);
 
 reschedule:
-    k_work_schedule(&brightness_update_work, K_MSEC(CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS));
+    k_work_schedule(&brightness_sensor_work, K_MSEC(CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS));
+}
+
+// API: Enable/disable auto brightness
+void brightness_control_set_auto(bool enabled) {
+    auto_brightness_enabled = enabled;
+
+    if (enabled && sensor_available) {
+        // Trigger immediate sensor read
+        k_work_schedule(&brightness_sensor_work, K_NO_WAIT);
+        LOG_INF("🔆 Auto brightness enabled");
+    } else {
+        LOG_INF("🔆 Auto brightness disabled");
+    }
+}
+
+// API: Check if auto is enabled
+bool brightness_control_is_auto(void) {
+    return auto_brightness_enabled;
 }
 
 static int brightness_control_init(void) {
-    LOG_INF("🌞 Brightness Control: Direct I2C Sensor Mode");
-
-    // Get PWM device
-    pwm_dev = NULL;
-#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
-    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
-#endif
-
-    if (!pwm_dev || !device_is_ready(pwm_dev)) {
-        LOG_ERR("PWM device not ready");
-        return 0;
-    }
+    LOG_INF("🌞 Brightness Control: Message Queue Mode (Sensor)");
 
     // Get I2C device (from device tree)
     i2c_dev = NULL;
@@ -394,86 +250,56 @@ static int brightness_control_init(void) {
 #endif
 
     if (!i2c_dev || !device_is_ready(i2c_dev)) {
-        LOG_WRN("I2C device not ready - using fixed brightness");
-        led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        LOG_WRN("I2C device not ready - auto brightness disabled");
+        sensor_available = false;
         return 0;
     }
 
     // Initialize APDS9960 for ALS operation
     int ret = apds9960_init_als();
     if (ret < 0) {
-        LOG_WRN("APDS9960 init failed - using fixed brightness");
-        led_set_brightness(pwm_dev, 0, CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+        LOG_WRN("APDS9960 init failed - auto brightness disabled");
+        sensor_available = false;
         return 0;
     }
 
     sensor_available = true;
 
-    LOG_INF("✅ Direct I2C brightness control ready");
+    LOG_INF("✅ Sensor brightness control ready (message queue mode)");
     LOG_INF("📊 Settings: Min=%u%%, Max=%u%%, Threshold=%u, Interval=%ums",
             CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS,
             CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB,
             CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD,
             CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS);
-    LOG_INF("🔄 Fade: Duration=%ums, Steps=%u",
-            CONFIG_PROSPECTOR_BRIGHTNESS_FADE_DURATION_MS,
-            CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS);
 
-    // Initialize work queues
-    k_work_init_delayable(&brightness_update_work, brightness_update_work_handler);
-    k_work_init_delayable(&fade_work, fade_work_handler);
+    // Initialize work queue
+    k_work_init_delayable(&brightness_sensor_work, brightness_sensor_work_handler);
 
-    // Set initial brightness state
-    current_brightness = CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS;
-    target_brightness = CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS;
-    led_set_brightness(pwm_dev, 0, current_brightness);
-
-    // Start brightness monitoring after 1 second
-    k_work_schedule(&brightness_update_work, K_MSEC(1000));
+    // Start sensor monitoring after 1 second
+    k_work_schedule(&brightness_sensor_work, K_MSEC(1000));
 
     return 0;
 }
 
-// API: Set manual brightness
-void brightness_control_set_manual(uint8_t brightness) {
-    if (brightness > 100) brightness = 100;
-    if (brightness < 10) brightness = 10;
+SYS_INIT(brightness_control_init, APPLICATION, 90);
 
-    manual_brightness_setting = brightness;
+#else  // CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n
 
-    if (!auto_brightness_enabled && pwm_dev && device_is_ready(pwm_dev)) {
-        target_brightness = brightness;
-        fade_step_count = 0;
-        k_work_schedule(&fade_work, K_NO_WAIT);
-        LOG_INF("🔆 Manual brightness: %d%%", brightness);
-    }
-}
+// Fixed brightness mode - no sensor, no work queues
+// All brightness control happens in scanner_display.c via messages
 
-// API: Enable/disable auto brightness
 void brightness_control_set_auto(bool enabled) {
-    auto_brightness_enabled = enabled;
-
-    if (enabled) {
-        // Resume auto brightness updates
-        k_work_schedule(&brightness_update_work, K_NO_WAIT);
-        LOG_INF("🔆 Auto brightness enabled");
-    } else {
-        // Apply manual setting
-        target_brightness = manual_brightness_setting;
-        fade_step_count = 0;
-        k_work_schedule(&fade_work, K_NO_WAIT);
-        LOG_INF("🔆 Auto brightness disabled, manual: %d%%", manual_brightness_setting);
-    }
+    LOG_WRN("🔆 Auto brightness not available (no sensor)");
 }
 
-// API: Get current brightness
-uint8_t brightness_control_get_current(void) {
-    return current_brightness;
-}
-
-// API: Check if auto is enabled
 bool brightness_control_is_auto(void) {
-    return auto_brightness_enabled;
+    return false;
+}
+
+static int brightness_control_init(void) {
+    LOG_INF("🔆 Brightness Control: Message Queue Mode (Fixed)");
+    LOG_INF("ℹ️ All brightness control via scanner_display.c");
+    return 0;
 }
 
 SYS_INIT(brightness_control_init, APPLICATION, 90);

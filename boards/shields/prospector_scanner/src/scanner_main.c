@@ -168,6 +168,80 @@ int scanner_msg_send_timeout_wake(void) {
     return ret;
 }
 
+int scanner_msg_send_brightness_sensor_read(void) {
+    struct scanner_message msg = {
+        .type = SCANNER_MSG_BRIGHTNESS_SENSOR_READ,
+        .timestamp = k_uptime_get_32(),
+    };
+
+    int ret = k_msgq_put(&scanner_msgq, &msg, K_NO_WAIT);
+    if (ret == 0) {
+        msgs_sent++;
+        LOG_DBG("📨 Brightness sensor read queued");
+    } else {
+        msgs_dropped++;
+        LOG_WRN("⚠️ Message queue full - brightness sensor read dropped");
+    }
+
+    return ret;
+}
+
+int scanner_msg_send_brightness_set_target(uint8_t target_brightness) {
+    struct scanner_message msg = {
+        .type = SCANNER_MSG_BRIGHTNESS_SET_TARGET,
+        .timestamp = k_uptime_get_32(),
+        .brightness_target.target_brightness = target_brightness,
+    };
+
+    int ret = k_msgq_put(&scanner_msgq, &msg, K_NO_WAIT);
+    if (ret == 0) {
+        msgs_sent++;
+        LOG_DBG("📨 Brightness target %d%% queued", target_brightness);
+    } else {
+        msgs_dropped++;
+        LOG_WRN("⚠️ Message queue full - brightness target dropped");
+    }
+
+    return ret;
+}
+
+int scanner_msg_send_brightness_fade_step(void) {
+    struct scanner_message msg = {
+        .type = SCANNER_MSG_BRIGHTNESS_FADE_STEP,
+        .timestamp = k_uptime_get_32(),
+    };
+
+    int ret = k_msgq_put(&scanner_msgq, &msg, K_NO_WAIT);
+    if (ret == 0) {
+        msgs_sent++;
+        LOG_DBG("📨 Brightness fade step queued");
+    } else {
+        msgs_dropped++;
+        LOG_WRN("⚠️ Message queue full - brightness fade step dropped");
+    }
+
+    return ret;
+}
+
+int scanner_msg_send_brightness_set_auto(bool enabled) {
+    struct scanner_message msg = {
+        .type = SCANNER_MSG_BRIGHTNESS_SET_AUTO,
+        .timestamp = k_uptime_get_32(),
+        .brightness_auto.enabled = enabled,
+    };
+
+    int ret = k_msgq_put(&scanner_msgq, &msg, K_NO_WAIT);
+    if (ret == 0) {
+        msgs_sent++;
+        LOG_DBG("📨 Brightness auto %s queued", enabled ? "enable" : "disable");
+    } else {
+        msgs_dropped++;
+        LOG_WRN("⚠️ Message queue full - brightness auto dropped");
+    }
+
+    return ret;
+}
+
 // ========== Queue Statistics ==========
 
 void scanner_msg_get_stats(uint32_t *sent, uint32_t *dropped, uint32_t *processed) {

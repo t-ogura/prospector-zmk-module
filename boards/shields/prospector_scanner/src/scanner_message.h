@@ -23,6 +23,12 @@ enum scanner_msg_type {
     SCANNER_MSG_TOUCH_TAP,          // Tap detected (for keyboard selection)
     SCANNER_MSG_TIMEOUT_WAKE,       // Wake from timeout (touch detected)
 
+    // Brightness control messages
+    SCANNER_MSG_BRIGHTNESS_SENSOR_READ,  // Request sensor read (from timer)
+    SCANNER_MSG_BRIGHTNESS_SET_TARGET,   // Set target brightness (from sensor/timeout)
+    SCANNER_MSG_BRIGHTNESS_FADE_STEP,    // Execute fade step
+    SCANNER_MSG_BRIGHTNESS_SET_AUTO,     // Enable/disable auto brightness
+
     // Periodic update messages
     SCANNER_MSG_BATTERY_UPDATE,     // Battery status update request
     SCANNER_MSG_DISPLAY_REFRESH,    // Display refresh request
@@ -60,9 +66,21 @@ struct scanner_message {
             int16_t y;
         } tap;
 
+        // SCANNER_MSG_BRIGHTNESS_SET_TARGET
+        struct {
+            uint8_t target_brightness;
+        } brightness_target;
+
+        // SCANNER_MSG_BRIGHTNESS_SET_AUTO
+        struct {
+            bool enabled;
+        } brightness_auto;
+
         // SCANNER_MSG_KEYBOARD_TIMEOUT (no additional data)
         // SCANNER_MSG_BATTERY_UPDATE (no additional data)
         // SCANNER_MSG_DISPLAY_REFRESH (no additional data)
+        // SCANNER_MSG_BRIGHTNESS_SENSOR_READ (no additional data)
+        // SCANNER_MSG_BRIGHTNESS_FADE_STEP (no additional data)
     };
 };
 
@@ -123,6 +141,32 @@ int scanner_msg_send_display_refresh(void);
  * @return 0 on success, -ENOMSG if queue full
  */
 int scanner_msg_send_timeout_wake(void);
+
+/**
+ * Send brightness sensor read request (from timer)
+ * @return 0 on success, -ENOMSG if queue full
+ */
+int scanner_msg_send_brightness_sensor_read(void);
+
+/**
+ * Send brightness target update
+ * @param target_brightness Target brightness percentage (0-100)
+ * @return 0 on success, -ENOMSG if queue full
+ */
+int scanner_msg_send_brightness_set_target(uint8_t target_brightness);
+
+/**
+ * Send brightness fade step request
+ * @return 0 on success, -ENOMSG if queue full
+ */
+int scanner_msg_send_brightness_fade_step(void);
+
+/**
+ * Send brightness auto enable/disable
+ * @param enabled True to enable auto brightness, false for manual
+ * @return 0 on success, -ENOMSG if queue full
+ */
+int scanner_msg_send_brightness_set_auto(bool enabled);
 
 /**
  * Get message from queue (blocking with timeout)

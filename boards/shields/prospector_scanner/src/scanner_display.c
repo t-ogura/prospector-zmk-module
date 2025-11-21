@@ -109,6 +109,83 @@ static uint8_t brightness_before_timeout = 0;  // Store brightness to restore af
 #define CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS 480000
 #endif
 
+// ========== Brightness PWM Control (Main Thread Only) ==========
+// CRITICAL: All PWM access MUST happen in main thread (via message handlers)
+// NEVER call led_set_brightness from work queue context!
+
+#include <zephyr/drivers/led.h>
+
+static const struct device *pwm_dev = NULL;
+static uint8_t current_brightness = 50;  // Current actual brightness
+static uint8_t target_brightness = 50;   // Target brightness for fading
+static uint8_t fade_step_count = 0;
+static uint8_t fade_total_steps = 10;
+static bool auto_brightness_enabled = true;
+static uint8_t manual_brightness_setting = 65;
+
+// Set brightness directly (main thread only!)
+static void set_pwm_brightness(uint8_t brightness) {
+    if (!pwm_dev || !device_is_ready(pwm_dev)) {
+        return;
+    }
+
+    if (brightness > 100) brightness = 100;
+    if (brightness < 1) brightness = 1;
+
+    int ret = led_set_brightness(pwm_dev, 0, brightness);
+    if (ret < 0) {
+        LOG_WRN("Failed to set PWM brightness: %d", ret);
+        return;
+    }
+
+    current_brightness = brightness;
+    LOG_DBG("🔆 PWM brightness set: %d%%", brightness);
+}
+
+// Start brightness fade (sets target, fade steps handled by messages)
+static void start_brightness_fade(uint8_t new_target) {
+    if (new_target == target_brightness) {
+        return; // No change
+    }
+
+    target_brightness = new_target;
+    fade_step_count = 0;
+    fade_total_steps = CONFIG_PROSPECTOR_BRIGHTNESS_FADE_STEPS;
+
+    LOG_DBG("🔄 Fade start: %d%% -> %d%% (%d steps)",
+            current_brightness, target_brightness, fade_total_steps);
+
+    // Trigger first fade step via message
+    scanner_msg_send_brightness_fade_step();
+}
+
+// Execute one fade step (called from message handler)
+static void execute_fade_step(void) {
+    if (current_brightness == target_brightness) {
+        return; // Fade complete
+    }
+
+    fade_step_count++;
+
+    // Calculate intermediate brightness
+    int brightness_diff = (int)target_brightness - (int)current_brightness;
+    int step_change = (brightness_diff * fade_step_count) / fade_total_steps;
+    uint8_t new_brightness = current_brightness + step_change;
+
+    // Set brightness via PWM (main thread - safe!)
+    set_pwm_brightness(new_brightness);
+
+    // Check if fade complete
+    if (fade_step_count >= fade_total_steps || new_brightness == target_brightness) {
+        current_brightness = target_brightness;
+        LOG_DBG("✅ Fade complete: %d%%", current_brightness);
+        return;
+    }
+
+    // Schedule next fade step
+    scanner_msg_send_brightness_fade_step();
+}
+
 #if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
 // Screen state management (touch version only)
 enum screen_state {
@@ -378,18 +455,52 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
                     brightness_control_set_auto(true);
                     LOG_INF("🔆 Brightness restored (touch detected, auto brightness resumed)");
                 #else
+                    // Restore saved brightness
                     if (brightness_before_timeout > 0) {
-                        brightness_control_set_manual(brightness_before_timeout);
-                        LOG_INF("🔆 Brightness restored to %d%% (touch detected)", brightness_before_timeout);
+                        start_brightness_fade(brightness_before_timeout);
+                        LOG_INF("🔆 Brightness restoring to %d%% (touch detected)", brightness_before_timeout);
                     } else {
-                        brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-                        LOG_INF("🔆 Brightness restored to default %d%% (touch detected)",
+                        start_brightness_fade(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                        LOG_INF("🔆 Brightness restoring to default %d%% (touch detected)",
                                 CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
                     }
                 #endif
                 scanner_msg_increment_processed();
                 break;
 #endif
+
+            // ========== Brightness Control Messages ==========
+            case SCANNER_MSG_BRIGHTNESS_SET_TARGET:
+                // Set target brightness and start fade (from sensor or timeout)
+                // Main thread context - safe to call PWM
+                if (!auto_brightness_enabled) {
+                    LOG_DBG("📥 MQ: Brightness target ignored (auto disabled)");
+                } else {
+                    start_brightness_fade(msg.brightness_target.target_brightness);
+                    LOG_DBG("📥 MQ: Brightness target set: %d%%", msg.brightness_target.target_brightness);
+                }
+                scanner_msg_increment_processed();
+                break;
+
+            case SCANNER_MSG_BRIGHTNESS_FADE_STEP:
+                // Execute one fade step
+                // Main thread context - safe to call PWM
+                execute_fade_step();
+                scanner_msg_increment_processed();
+                break;
+
+            case SCANNER_MSG_BRIGHTNESS_SET_AUTO:
+                // Enable/disable auto brightness
+                auto_brightness_enabled = msg.brightness_auto.enabled;
+                if (!auto_brightness_enabled) {
+                    // Switch to manual mode
+                    start_brightness_fade(manual_brightness_setting);
+                    LOG_INF("📥 MQ: Auto brightness disabled, manual: %d%%", manual_brightness_setting);
+                } else {
+                    LOG_INF("📥 MQ: Auto brightness enabled");
+                }
+                scanner_msg_increment_processed();
+                break;
 
             default:
                 LOG_WRN("📥 MQ: Unknown message type: %d", msg.type);
@@ -422,19 +533,20 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
             // Check if timeout exceeded and not already dimmed
             if (elapsed >= timeout_ms && !timeout_dimmed) {
                 // Save current brightness before dimming
-                brightness_before_timeout = brightness_control_get_current();
+                brightness_before_timeout = current_brightness;
                 if (brightness_before_timeout == 0) {
                     brightness_before_timeout = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
                 }
 
                 // Disable auto brightness temporarily to prevent sensor overriding timeout
                 brightness_control_set_auto(false);
+                auto_brightness_enabled = false;
 
-                // Dim display to timeout brightness
-                brightness_control_set_manual(CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
+                // Dim display to timeout brightness (main thread - safe!)
+                start_brightness_fade(CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
                 timeout_dimmed = true;
 
-                LOG_INF("⏱️ Reception timeout (%dms) - display dimmed to %d%% (auto brightness paused)",
+                LOG_INF("⏱️ Reception timeout (%dms) - display dimming to %d%% (auto brightness paused)",
                         elapsed, CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
             }
         }
@@ -466,15 +578,17 @@ static void process_keyboard_data_message(struct scanner_message *msg) {
         // Re-enable auto brightness if sensor is available
         #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
             brightness_control_set_auto(true);
-            LOG_INF("🔆 Brightness restored (auto brightness resumed, keyboard received)");
+            auto_brightness_enabled = true;
+            LOG_INF("🔆 Brightness restoring (auto brightness resumed, keyboard received)");
         #else
+            // Restore saved brightness (main thread - safe!)
             if (brightness_before_timeout > 0) {
-                brightness_control_set_manual(brightness_before_timeout);
-                LOG_INF("🔆 Brightness restored to %d%% (keyboard received)", brightness_before_timeout);
+                start_brightness_fade(brightness_before_timeout);
+                LOG_INF("🔆 Brightness restoring to %d%% (keyboard received)", brightness_before_timeout);
             } else {
                 // Restore to fixed brightness if no previous value
-                brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-                LOG_INF("🔆 Brightness restored to default %d%% (keyboard received)",
+                start_brightness_fade(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                LOG_INF("🔆 Brightness restoring to default %d%% (keyboard received)",
                         CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
             }
         #endif
@@ -1017,7 +1131,25 @@ static int scanner_display_init(void) {
         LOG_WRN("Failed to turn off display blanking: %d", ret);
     }
     
-    // Note: Backlight control is now handled by brightness_control.c
+    // Initialize PWM device for brightness control (main thread only)
+    pwm_dev = NULL;
+#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+#endif
+
+    if (pwm_dev && device_is_ready(pwm_dev)) {
+        // Set initial brightness
+        uint8_t initial_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+        set_pwm_brightness(initial_brightness);
+        current_brightness = initial_brightness;
+        target_brightness = initial_brightness;
+        LOG_INF("✅ PWM brightness initialized: %d%%", initial_brightness);
+    } else {
+        LOG_WRN("⚠️ PWM device not ready - brightness control disabled");
+    }
+
+    // Note: Sensor-based brightness control is handled by brightness_control.c
+    // It sends messages to this main thread for PWM updates
 
     // Add a delay to allow display to stabilize
     k_msleep(100);
