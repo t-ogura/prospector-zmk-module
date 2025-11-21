@@ -150,6 +150,24 @@ int scanner_msg_send_display_refresh(void) {
     return ret;
 }
 
+int scanner_msg_send_timeout_wake(void) {
+    struct scanner_message msg = {
+        .type = SCANNER_MSG_TIMEOUT_WAKE,
+        .timestamp = k_uptime_get_32(),
+    };
+
+    int ret = k_msgq_put(&scanner_msgq, &msg, K_NO_WAIT);
+    if (ret == 0) {
+        msgs_sent++;
+        LOG_DBG("📨 Timeout wake request queued");
+    } else {
+        msgs_dropped++;
+        LOG_WRN("⚠️ Message queue full - timeout wake dropped");
+    }
+
+    return ret;
+}
+
 // ========== Queue Statistics ==========
 
 void scanner_msg_get_stats(uint32_t *sent, uint32_t *dropped, uint32_t *processed) {

@@ -368,6 +368,29 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
                 scanner_msg_increment_processed();
                 break;
 
+#if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
+            case SCANNER_MSG_TIMEOUT_WAKE:
+                // Restore brightness after touch wake from timeout
+                // This runs in main thread context - safe to call brightness functions
+                timeout_dimmed = false;
+
+                #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+                    brightness_control_set_auto(true);
+                    LOG_INF("🔆 Brightness restored (touch detected, auto brightness resumed)");
+                #else
+                    if (brightness_before_timeout > 0) {
+                        brightness_control_set_manual(brightness_before_timeout);
+                        LOG_INF("🔆 Brightness restored to %d%% (touch detected)", brightness_before_timeout);
+                    } else {
+                        brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                        LOG_INF("🔆 Brightness restored to default %d%% (touch detected)",
+                                CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                    }
+                #endif
+                scanner_msg_increment_processed();
+                break;
+#endif
+
             default:
                 LOG_WRN("📥 MQ: Unknown message type: %d", msg.type);
                 break;
@@ -1297,22 +1320,11 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
     }
 
     // Restore brightness if dimmed due to timeout (touch wakes up display)
+    // CRITICAL: Do NOT call brightness_control functions here - Work Queue context!
+    // Send message to main loop instead for thread-safe processing
     if (timeout_dimmed) {
-        timeout_dimmed = false;
-
-        // Re-enable auto brightness if sensor is available
-        #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
-            brightness_control_set_auto(true);
-            LOG_INF("🔆 Brightness restored (touch detected, auto brightness resumed)");
-        #else
-            if (brightness_before_timeout > 0) {
-                brightness_control_set_manual(brightness_before_timeout);
-                LOG_INF("🔆 Brightness restored to %d%% (touch detected)", brightness_before_timeout);
-            } else {
-                brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-                LOG_INF("🔆 Brightness restored to default %d%% (touch detected)",
-                        CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-            }
+        #if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
+            scanner_msg_send_timeout_wake();
         #endif
     }
 

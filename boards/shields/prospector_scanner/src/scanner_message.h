@@ -21,6 +21,7 @@ enum scanner_msg_type {
     // Touch/UI messages
     SCANNER_MSG_SWIPE_GESTURE,      // Swipe gesture detected
     SCANNER_MSG_TOUCH_TAP,          // Tap detected (for keyboard selection)
+    SCANNER_MSG_TIMEOUT_WAKE,       // Wake from timeout (touch detected)
 
     // Periodic update messages
     SCANNER_MSG_BATTERY_UPDATE,     // Battery status update request
@@ -116,6 +117,12 @@ int scanner_msg_send_timeout_check(void);
  * @return 0 on success, -ENOMSG if queue full
  */
 int scanner_msg_send_display_refresh(void);
+
+/**
+ * Send timeout wake request (from touch gesture)
+ * @return 0 on success, -ENOMSG if queue full
+ */
+int scanner_msg_send_timeout_wake(void);
 
 /**
  * Get message from queue (blocking with timeout)
