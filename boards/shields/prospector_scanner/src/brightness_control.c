@@ -250,14 +250,34 @@ static uint8_t map_light_to_brightness(uint32_t light_value) {
     uint8_t max_brightness = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS_USB;
     uint32_t threshold = CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD;
 
-    // Linear mapping: 0 -> min_brightness, threshold+ -> max_brightness
+    // Clamp to threshold
     if (light_value >= threshold) {
         return max_brightness;
     }
 
-    // Calculate brightness as percentage between min and max
+    // Non-linear mapping (square root curve for darker bias)
+    // This keeps the display darker for longer, only brightening significantly in bright light
     uint32_t brightness_range = max_brightness - min_brightness;
-    uint32_t scaled_brightness = (light_value * brightness_range) / threshold;
+
+    // Normalize light value to 0-1000 range for sqrt calculation
+    uint32_t normalized = (light_value * 1000) / threshold;
+
+    // Apply square root for non-linear curve (darker bias)
+    // sqrt(normalized) gives values that stay low longer
+    uint32_t sqrt_val = 0;
+    if (normalized > 0) {
+        // Integer square root approximation
+        uint32_t x = normalized;
+        uint32_t y = (x + 1) / 2;
+        while (y < x) {
+            x = y;
+            y = (x + normalized / x) / 2;
+        }
+        sqrt_val = x; // sqrt(0-1000) = 0-31
+    }
+
+    // Map sqrt result (0-31) to brightness range
+    uint32_t scaled_brightness = (sqrt_val * brightness_range) / 32;
 
     return min_brightness + (uint8_t)scaled_brightness;
 }
