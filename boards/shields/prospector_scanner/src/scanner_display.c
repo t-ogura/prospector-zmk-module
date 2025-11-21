@@ -102,7 +102,7 @@ static uint8_t brightness_before_timeout = 0;  // Store brightness to restore af
 
 // Default timeout brightness if not configured
 #ifndef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
-#define CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS 5
+#define CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS 1
 #endif
 
 #ifndef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS

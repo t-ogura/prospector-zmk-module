@@ -157,13 +157,13 @@ config PROSPECTOR_SCANNER_TIMEOUT_MS
 config PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
     int "Display brightness during timeout (percentage)"
     range 1 50
-    default 5
+    default 1
     depends on PROSPECTOR_MODE_SCANNER
     help
       Display brightness percentage when scanner times out (no keyboard reception).
       Low brightness saves power while maintaining minimal visibility.
       Brightness automatically restores when keyboard data is received again.
-      Default is 5%. Range is 1-50%.
+      Default is 1% (very dim). Range is 1-50%.
 
 config PROSPECTOR_SCANNER_CHANNEL
     int "Prospector scanner channel number (0-255)"
