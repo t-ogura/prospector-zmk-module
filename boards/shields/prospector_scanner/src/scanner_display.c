@@ -202,7 +202,8 @@ static enum screen_state current_screen = SCREEN_MAIN;
 static int selected_keyboard_index = -1;
 
 // Swipe gesture cooldown to prevent rapid repeated swipes causing issues
-#define SWIPE_COOLDOWN_MS 200  // 200ms cooldown between swipes (mutex protection allows shorter delay)
+// Increased from 200ms to 500ms to prevent memory fragmentation during rapid swipes
+#define SWIPE_COOLDOWN_MS 500  // 500ms cooldown between swipes
 static uint32_t last_swipe_time = 0;
 
 // Swipe processing guard - prevents concurrent swipe handling
@@ -1545,10 +1546,12 @@ static void process_swipe_direction(int direction) {
     // Set processing flag - prevents concurrent widget operations
     swipe_in_progress = true;
 
-    // CRITICAL: Pause LVGL timer to prevent widget access during destruction
-    // Without this, LVGL timer may try to update widgets while we're deleting them
-    lv_timer_pause(lv_timer_get_next(NULL));
-    LOG_DBG("⏸️  LVGL timer paused for safe widget operations");
+    // CRITICAL: Pause main loop timer to prevent widget access during destruction
+    // Without this, timer may try to process messages while we're deleting widgets
+    if (main_loop_timer) {
+        lv_timer_pause(main_loop_timer);
+        LOG_DBG("⏸️  Main loop timer paused for safe widget operations");
+    }
 
     // Phase 5: ZMK event listener runs in main thread - no mutex needed
     // LVGL operations are safe here
@@ -1566,29 +1569,30 @@ static void process_swipe_direction(int direction) {
                 stop_all_periodic_work();
 
                 // Destroy main screen widgets to free memory
-                if (wpm_widget) {
-                    zmk_widget_wpm_status_destroy(wpm_widget);
-                    wpm_widget = NULL;
-                }
-                if (battery_widget) {
-                    zmk_widget_scanner_battery_destroy(battery_widget);
-                    battery_widget = NULL;
-                }
-                if (connection_widget) {
-                    zmk_widget_connection_status_destroy(connection_widget);
-                    connection_widget = NULL;
-                }
-                if (layer_widget) {
-                    zmk_widget_layer_status_destroy(layer_widget);
-                    layer_widget = NULL;
+                // Destroy in reverse order of creation to minimize fragmentation
+                if (device_name_label) {
+                    lv_obj_del(device_name_label);
+                    device_name_label = NULL;
                 }
                 if (modifier_widget) {
                     zmk_widget_modifier_status_destroy(modifier_widget);
                     modifier_widget = NULL;
                 }
-                if (device_name_label) {
-                    lv_obj_del(device_name_label);
-                    device_name_label = NULL;
+                if (layer_widget) {
+                    zmk_widget_layer_status_destroy(layer_widget);
+                    layer_widget = NULL;
+                }
+                if (battery_widget) {
+                    zmk_widget_scanner_battery_destroy(battery_widget);
+                    battery_widget = NULL;
+                }
+                if (wpm_widget) {
+                    zmk_widget_wpm_status_destroy(wpm_widget);
+                    wpm_widget = NULL;
+                }
+                if (connection_widget) {
+                    zmk_widget_connection_status_destroy(connection_widget);
+                    connection_widget = NULL;
                 }
                 LOG_DBG("✅ Main widgets destroyed for display settings");
 
@@ -1625,29 +1629,30 @@ static void process_swipe_direction(int direction) {
                 stop_all_periodic_work();
 
                 // Destroy main screen widgets to free memory for overlay
-                if (wpm_widget) {
-                    zmk_widget_wpm_status_destroy(wpm_widget);
-                    wpm_widget = NULL;
-                }
-                if (battery_widget) {
-                    zmk_widget_scanner_battery_destroy(battery_widget);
-                    battery_widget = NULL;
-                }
-                if (connection_widget) {
-                    zmk_widget_connection_status_destroy(connection_widget);
-                    connection_widget = NULL;
-                }
-                if (layer_widget) {
-                    zmk_widget_layer_status_destroy(layer_widget);
-                    layer_widget = NULL;
+                // Destroy in reverse order of creation
+                if (device_name_label) {
+                    lv_obj_del(device_name_label);
+                    device_name_label = NULL;
                 }
                 if (modifier_widget) {
                     zmk_widget_modifier_status_destroy(modifier_widget);
                     modifier_widget = NULL;
                 }
-                if (device_name_label) {
-                    lv_obj_del(device_name_label);
-                    device_name_label = NULL;
+                if (layer_widget) {
+                    zmk_widget_layer_status_destroy(layer_widget);
+                    layer_widget = NULL;
+                }
+                if (battery_widget) {
+                    zmk_widget_scanner_battery_destroy(battery_widget);
+                    battery_widget = NULL;
+                }
+                if (wpm_widget) {
+                    zmk_widget_wpm_status_destroy(wpm_widget);
+                    wpm_widget = NULL;
+                }
+                if (connection_widget) {
+                    zmk_widget_connection_status_destroy(connection_widget);
+                    connection_widget = NULL;
                 }
                 LOG_DBG("✅ Main widgets destroyed for keyboard list");
 
@@ -1697,29 +1702,30 @@ static void process_swipe_direction(int direction) {
                 stop_all_periodic_work();
 
                 // Destroy main screen widgets to free memory for overlay
-                if (wpm_widget) {
-                    zmk_widget_wpm_status_destroy(wpm_widget);
-                    wpm_widget = NULL;
-                }
-                if (battery_widget) {
-                    zmk_widget_scanner_battery_destroy(battery_widget);
-                    battery_widget = NULL;
-                }
-                if (connection_widget) {
-                    zmk_widget_connection_status_destroy(connection_widget);
-                    connection_widget = NULL;
-                }
-                if (layer_widget) {
-                    zmk_widget_layer_status_destroy(layer_widget);
-                    layer_widget = NULL;
+                // Destroy in reverse order of creation
+                if (device_name_label) {
+                    lv_obj_del(device_name_label);
+                    device_name_label = NULL;
                 }
                 if (modifier_widget) {
                     zmk_widget_modifier_status_destroy(modifier_widget);
                     modifier_widget = NULL;
                 }
-                if (device_name_label) {
-                    lv_obj_del(device_name_label);
-                    device_name_label = NULL;
+                if (layer_widget) {
+                    zmk_widget_layer_status_destroy(layer_widget);
+                    layer_widget = NULL;
+                }
+                if (battery_widget) {
+                    zmk_widget_scanner_battery_destroy(battery_widget);
+                    battery_widget = NULL;
+                }
+                if (wpm_widget) {
+                    zmk_widget_wpm_status_destroy(wpm_widget);
+                    wpm_widget = NULL;
+                }
+                if (connection_widget) {
+                    zmk_widget_connection_status_destroy(connection_widget);
+                    connection_widget = NULL;
                 }
                 LOG_DBG("✅ Main widgets destroyed for settings");
 
@@ -1866,12 +1872,14 @@ return_to_main:
     }
 
     // CRITICAL: Add delay to ensure all widget operations complete
-    // before resuming LVGL timer (prevents use-after-free)
+    // before resuming timer (prevents use-after-free)
     k_msleep(50);
 
-    // Resume LVGL timer
-    lv_timer_resume(lv_timer_get_next(NULL));
-    LOG_DBG("▶️  LVGL timer resumed after widget operations");
+    // Resume main loop timer
+    if (main_loop_timer) {
+        lv_timer_resume(main_loop_timer);
+        LOG_DBG("▶️  Main loop timer resumed after widget operations");
+    }
 
     // Phase 5: Clear processing flag (no mutex to release)
     swipe_in_progress = false;
