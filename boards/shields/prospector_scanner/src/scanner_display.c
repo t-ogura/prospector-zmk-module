@@ -470,14 +470,36 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
 #endif
 
             // ========== Brightness Control Messages ==========
+            case SCANNER_MSG_BRIGHTNESS_SENSOR_READ:
+                // Read sensor and calculate target brightness
+                // Main thread context - safe for I2C access!
+                #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+                if (auto_brightness_enabled && brightness_control_sensor_available()) {
+                    uint16_t light_val = 0;
+                    int ret = brightness_control_read_sensor(&light_val);
+
+                    if (ret == 0) {
+                        // Sensor read successful, calculate and set target
+                        uint8_t target = brightness_control_map_light_to_brightness(light_val);
+                        start_brightness_fade(target);
+                        LOG_DBG("📥 MQ: Sensor read: light=%u -> brightness=%u%%", light_val, target);
+                    } else if (ret != -EAGAIN) {
+                        LOG_WRN("📥 MQ: Sensor read failed: %d", ret);
+                    }
+                }
+                #endif
+                scanner_msg_increment_processed();
+                break;
+
             case SCANNER_MSG_BRIGHTNESS_SET_TARGET:
-                // Set target brightness and start fade (from sensor or timeout)
+                // Set target brightness directly (from manual control)
                 // Main thread context - safe to call PWM
                 if (!auto_brightness_enabled) {
-                    LOG_DBG("📥 MQ: Brightness target ignored (auto disabled)");
-                } else {
+                    // Manual mode - always apply
                     start_brightness_fade(msg.brightness_target.target_brightness);
-                    LOG_DBG("📥 MQ: Brightness target set: %d%%", msg.brightness_target.target_brightness);
+                    LOG_DBG("📥 MQ: Manual brightness target: %d%%", msg.brightness_target.target_brightness);
+                } else {
+                    LOG_DBG("📥 MQ: Brightness target ignored (auto mode active)");
                 }
                 scanner_msg_increment_processed();
                 break;

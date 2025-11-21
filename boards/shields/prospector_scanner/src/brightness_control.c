@@ -148,8 +148,23 @@ static int apds9960_read_light(uint16_t *light_val) {
     return 0;
 }
 
-// Map light value to brightness percentage
-static uint8_t map_light_to_brightness(uint32_t light_value) {
+// API: Get I2C device (main thread only!)
+const struct device *brightness_control_get_i2c_dev(void) {
+    return i2c_dev;
+}
+
+// API: Check if sensor is available
+bool brightness_control_sensor_available(void) {
+    return sensor_available;
+}
+
+// API: Read light sensor (main thread only!)
+int brightness_control_read_sensor(uint16_t *light_val) {
+    return apds9960_read_light(light_val);
+}
+
+// API: Map light value to brightness percentage
+uint8_t brightness_control_map_light_to_brightness(uint32_t light_value) {
     uint8_t min_brightness = CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS;
     uint8_t max_brightness = CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS;
     uint32_t threshold = CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD;
@@ -184,39 +199,17 @@ static uint8_t map_light_to_brightness(uint32_t light_value) {
     return min_brightness + (uint8_t)scaled_brightness;
 }
 
-// Work Queue handler - ONLY reads sensor and sends message
-// CRITICAL: No PWM access here! Work Queue context!
+// Work Queue handler - ONLY sends periodic sensor read request
+// CRITICAL: No I2C or PWM access here! Work Queue context!
+// All sensor reading happens in main thread via message handler
 static void brightness_sensor_work_handler(struct k_work *work) {
     if (!sensor_available) {
         goto reschedule;
     }
 
-    if (!auto_brightness_enabled) {
-        // Auto mode disabled, don't read sensor
-        goto reschedule;
-    }
-
-    uint16_t light_val = 0;
-    int ret = apds9960_read_light(&light_val);
-
-    if (ret == -EAGAIN) {
-        // Data not ready, try again soon
-        k_work_schedule(&brightness_sensor_work, K_MSEC(100));
-        return;
-    }
-
-    if (ret < 0) {
-        LOG_WRN("Failed to read light sensor: %d", ret);
-        goto reschedule;
-    }
-
-    // Calculate target brightness
-    uint8_t target_brightness = map_light_to_brightness(light_val);
-
-    LOG_DBG("🌞 Light: %u -> Target: %u%%", light_val, target_brightness);
-
-    // Send message to main thread - NO PWM ACCESS HERE
-    scanner_msg_send_brightness_set_target(target_brightness);
+    // Send message to main thread to read sensor
+    // Main thread will do I2C access safely
+    scanner_msg_send_brightness_sensor_read();
 
 reschedule:
     k_work_schedule(&brightness_sensor_work, K_MSEC(CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS));
