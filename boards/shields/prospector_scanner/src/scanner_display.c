@@ -1296,6 +1296,26 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
+    // Restore brightness if dimmed due to timeout (touch wakes up display)
+    if (timeout_dimmed) {
+        timeout_dimmed = false;
+
+        // Re-enable auto brightness if sensor is available
+        #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+            brightness_control_set_auto(true);
+            LOG_INF("🔆 Brightness restored (touch detected, auto brightness resumed)");
+        #else
+            if (brightness_before_timeout > 0) {
+                brightness_control_set_manual(brightness_before_timeout);
+                LOG_INF("🔆 Brightness restored to %d%% (touch detected)", brightness_before_timeout);
+            } else {
+                brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                LOG_INF("🔆 Brightness restored to default %d%% (touch detected)",
+                        CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+            }
+        #endif
+    }
+
     // Map swipe direction to scanner_swipe_direction enum
     enum scanner_swipe_direction dir;
     switch (ev->direction) {
