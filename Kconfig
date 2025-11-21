@@ -327,6 +327,15 @@ config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
       Lower values = more responsive but higher power consumption.
       Default is 2000ms (2 seconds). Range is 0.5-10 seconds.
 
+config PROSPECTOR_BRIGHTNESS_FADE_STEPS
+    int "Number of brightness fade steps"
+    range 5 20
+    default 10
+    help
+      Number of steps for smooth brightness transitions.
+      More steps = smoother but slower fades.
+      Default is 10 steps. Range is 5-20.
+
 config PROSPECTOR_ALS_SENSOR_THRESHOLD
     int "Light sensor threshold for maximum brightness"
     range 50 500
