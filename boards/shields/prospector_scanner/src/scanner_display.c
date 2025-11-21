@@ -1545,6 +1545,11 @@ static void process_swipe_direction(int direction) {
     // Set processing flag - prevents concurrent widget operations
     swipe_in_progress = true;
 
+    // CRITICAL: Pause LVGL timer to prevent widget access during destruction
+    // Without this, LVGL timer may try to update widgets while we're deleting them
+    lv_timer_pause(lv_timer_get_next(NULL));
+    LOG_DBG("⏸️  LVGL timer paused for safe widget operations");
+
     // Phase 5: ZMK event listener runs in main thread - no mutex needed
     // LVGL operations are safe here
     LOG_DBG("🔒 Swipe processing started");
@@ -1586,6 +1591,9 @@ static void process_swipe_direction(int direction) {
                     device_name_label = NULL;
                 }
                 LOG_DBG("✅ Main widgets destroyed for display settings");
+
+                // Safety delay after widget destruction
+                k_msleep(10);
 
                 // Create display settings widget
                 if (!display_settings_widget) {
@@ -1642,6 +1650,9 @@ static void process_swipe_direction(int direction) {
                     device_name_label = NULL;
                 }
                 LOG_DBG("✅ Main widgets destroyed for keyboard list");
+
+                // Safety delay after widget destruction
+                k_msleep(10);
 
                 // Create widget if not already created
                 if (!keyboard_list_widget) {
@@ -1712,6 +1723,9 @@ static void process_swipe_direction(int direction) {
                 }
                 LOG_DBG("✅ Main widgets destroyed for settings");
 
+                // Safety delay after widget destruction
+                k_msleep(10);
+
                 // Create widget if not already created
                 if (!system_settings_widget) {
                     system_settings_widget = zmk_widget_system_settings_create(main_screen);
@@ -1765,6 +1779,10 @@ return_to_main:
                     LOG_INF("✅ Keyboard list widget destroyed");
                 }
             }
+
+            // Safety delay after overlay widget destruction
+            k_msleep(10);
+
             current_screen = SCREEN_MAIN;
 
             // Apply scanner battery widget visibility from settings
@@ -1846,6 +1864,14 @@ return_to_main:
             resume_all_periodic_work();
             break;
     }
+
+    // CRITICAL: Add delay to ensure all widget operations complete
+    // before resuming LVGL timer (prevents use-after-free)
+    k_msleep(50);
+
+    // Resume LVGL timer
+    lv_timer_resume(lv_timer_get_next(NULL));
+    LOG_DBG("▶️  LVGL timer resumed after widget operations");
 
     // Phase 5: Clear processing flag (no mutex to release)
     swipe_in_progress = false;
