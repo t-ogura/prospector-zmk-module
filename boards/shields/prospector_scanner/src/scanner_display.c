@@ -404,11 +404,14 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
                     brightness_before_timeout = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
                 }
 
+                // Disable auto brightness temporarily to prevent sensor overriding timeout
+                brightness_control_set_auto(false);
+
                 // Dim display to timeout brightness
                 brightness_control_set_manual(CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
                 timeout_dimmed = true;
 
-                LOG_INF("⏱️ Reception timeout (%dms) - display dimmed to %d%%",
+                LOG_INF("⏱️ Reception timeout (%dms) - display dimmed to %d%% (auto brightness paused)",
                         elapsed, CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
             }
         }
@@ -436,15 +439,22 @@ static void process_keyboard_data_message(struct scanner_message *msg) {
     // Restore brightness if we were dimmed due to timeout
     if (timeout_dimmed) {
         timeout_dimmed = false;
-        if (brightness_before_timeout > 0) {
-            brightness_control_set_manual(brightness_before_timeout);
-            LOG_INF("🔆 Brightness restored to %d%% (keyboard received)", brightness_before_timeout);
-        } else {
-            // Restore to fixed brightness if no previous value
-            brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-            LOG_INF("🔆 Brightness restored to default %d%% (keyboard received)",
-                    CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-        }
+
+        // Re-enable auto brightness if sensor is available
+        #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+            brightness_control_set_auto(true);
+            LOG_INF("🔆 Brightness restored (auto brightness resumed, keyboard received)");
+        #else
+            if (brightness_before_timeout > 0) {
+                brightness_control_set_manual(brightness_before_timeout);
+                LOG_INF("🔆 Brightness restored to %d%% (keyboard received)", brightness_before_timeout);
+            } else {
+                // Restore to fixed brightness if no previous value
+                brightness_control_set_manual(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                LOG_INF("🔆 Brightness restored to default %d%% (keyboard received)",
+                        CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+            }
+        #endif
     }
 
     // Only update when on main screen
