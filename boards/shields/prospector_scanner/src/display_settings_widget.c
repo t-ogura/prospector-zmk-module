@@ -16,7 +16,12 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static bool ui_interaction_active = false;
 
 // Global settings that persist even when widget is destroyed
-static bool g_auto_brightness_enabled = false;
+// Auto brightness: enabled by default only if sensor is available
+#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+static bool g_auto_brightness_enabled = true;   // Sensor available: auto ON by default
+#else
+static bool g_auto_brightness_enabled = false;  // No sensor: manual mode only
+#endif
 static uint8_t g_manual_brightness = 65;
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
 static bool g_battery_widget_visible = true;
