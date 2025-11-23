@@ -110,11 +110,17 @@ config PROSPECTOR_TOUCH_ENABLED
     bool "Enable touch panel support"
     default y
     depends on PROSPECTOR_MODE_SCANNER
+    select INPUT
+    select INPUT_CST816S
+    select INPUT_CST816S_INTERRUPT
+    select ZMK_POINTING
     help
       Enable touch panel support for swipe gestures and settings screens.
       When disabled, the scanner displays status only without user interaction.
       Touch-enabled version includes: swipe navigation, display settings, system settings.
       Non-touch version shows: main status display with signal strength widget.
+
+      This automatically enables INPUT, INPUT_CST816S drivers when selected.
 
 config PROSPECTOR_MULTI_KEYBOARD
     bool "Support multiple keyboards"
