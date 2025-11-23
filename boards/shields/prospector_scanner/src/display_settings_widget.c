@@ -65,7 +65,11 @@ static void auto_brightness_sw_event_cb(lv_event_t *e) {
     widget->auto_brightness_enabled = checked;
     g_auto_brightness_enabled = checked;  // Update global setting
 
-    // Apply to brightness control system
+    // CRITICAL: Sync with scanner_display.c auto_brightness_enabled via message
+    // This ensures manual brightness slider works correctly
+    scanner_msg_send_brightness_set_auto(checked);
+
+    // Apply to brightness control system (sensor timer control)
     brightness_control_set_auto(checked);
 
     // Enable/disable manual slider based on auto state
@@ -400,6 +404,18 @@ void zmk_widget_display_settings_show(struct zmk_widget_display_settings *widget
     LOG_INF("⚙️ Showing display settings");
 
     if (!widget || !widget->obj) return;
+
+    // Restore slider state based on current auto brightness setting
+    // CRITICAL: Widget is reused, must sync UI state when showing
+    if (widget->auto_brightness_enabled) {
+        // Auto brightness ON: disable manual slider
+        lv_obj_add_state(widget->brightness_slider, LV_STATE_DISABLED);
+        lv_obj_set_style_opa(widget->brightness_slider, LV_OPA_50, 0);
+    } else {
+        // Auto brightness OFF: enable manual slider
+        lv_obj_clear_state(widget->brightness_slider, LV_STATE_DISABLED);
+        lv_obj_set_style_opa(widget->brightness_slider, LV_OPA_COVER, 0);
+    }
 
     lv_obj_move_foreground(widget->obj);
     lv_obj_clear_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
