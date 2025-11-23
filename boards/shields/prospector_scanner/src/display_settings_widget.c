@@ -277,7 +277,7 @@ static int zmk_widget_display_settings_init(struct zmk_widget_display_settings *
 
     // Red warning label - positioned under Auto toggle for clarity
     lv_obj_t *warning_label = lv_label_create(widget->obj);
-    lv_label_set_text(warning_label, "No sensor");
+    lv_label_set_text(warning_label, "Disabled");
     lv_obj_set_style_text_color(warning_label, lv_color_hex(0xFF3B30), 0);  // iOS red
     lv_obj_set_style_text_font(warning_label, &lv_font_montserrat_12, 0);
     lv_obj_align(warning_label, LV_ALIGN_TOP_RIGHT, -15, y_pos + 22);  // Right-aligned under toggle
@@ -318,7 +318,7 @@ static int zmk_widget_display_settings_init(struct zmk_widget_display_settings *
 
     // Red warning label - positioned under toggle
     lv_obj_t *battery_warning = lv_label_create(widget->obj);
-    lv_label_set_text(battery_warning, "Not enabled");
+    lv_label_set_text(battery_warning, "Disabled");
     lv_obj_set_style_text_color(battery_warning, lv_color_hex(0xFF3B30), 0);  // iOS red
     lv_obj_set_style_text_font(battery_warning, &lv_font_montserrat_12, 0);
     lv_obj_align(battery_warning, LV_ALIGN_TOP_RIGHT, -15, y_pos + 22);
