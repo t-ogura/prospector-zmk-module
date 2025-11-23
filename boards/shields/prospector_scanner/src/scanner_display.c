@@ -120,7 +120,12 @@ static uint8_t current_brightness = 50;  // Current actual brightness
 static uint8_t target_brightness = 50;   // Target brightness for fading
 static uint8_t fade_step_count = 0;
 static uint8_t fade_total_steps = 10;
-static bool auto_brightness_enabled = true;
+// Auto brightness: enabled by default only if sensor is available
+#if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+static bool auto_brightness_enabled = true;   // Sensor available: auto ON by default
+#else
+static bool auto_brightness_enabled = false;  // No sensor: manual mode only
+#endif
 static uint8_t manual_brightness_setting = 65;
 
 // Set brightness directly (main thread only!)
