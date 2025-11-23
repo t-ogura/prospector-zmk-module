@@ -533,19 +533,22 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
         processed++;
     }
 
-    // 1Hz periodic updates for signal status widget (every 5 cycles = 1 second at 200ms interval)
+    // Calculate cycles per second based on configured interval
+    // Example: 150ms interval → 1000/150 ≈ 6.67 → 7 cycles per second
+    #define CYCLES_PER_SECOND ((1000 + CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS - 1) / CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS)
+
     static int cycle_count = 0;
     cycle_count++;
 
 #if !IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
     // Non-touch version: Update signal status widget every 1 second for stable display
-    if (cycle_count % 5 == 0 && !swipe_in_progress) {
+    if (cycle_count % CYCLES_PER_SECOND == 0 && !swipe_in_progress) {
         zmk_widget_signal_status_periodic_update(&signal_widget);
     }
 #endif
 
     // Check for reception timeout and dim display (every 1 second)
-    if (cycle_count % 5 == 0) {
+    if (cycle_count % CYCLES_PER_SECOND == 0) {
         uint32_t timeout_ms = CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS;
 
         // Only check timeout if enabled (timeout > 0)
@@ -575,8 +578,9 @@ static void main_loop_timer_cb(lv_timer_t *timer) {
         }
     }
 
-    // Log stats periodically (every 50 cycles = 10 seconds at 200ms interval)
-    if (cycle_count % 50 == 0) {
+    // Log stats periodically (every 10 seconds)
+    #define CYCLES_PER_10_SECONDS (CYCLES_PER_SECOND * 10)
+    if (cycle_count % CYCLES_PER_10_SECONDS == 0) {
         uint32_t sent, dropped, proc;
         scanner_msg_get_stats(&sent, &dropped, &proc);
         LOG_INF("📊 MQ Stats: sent=%d, dropped=%d, processed=%d, queue=%d",
@@ -748,11 +752,11 @@ static void start_signal_monitoring(void) {
     // Phase 2: Start LVGL timer for message queue processing
     // This runs in LVGL main thread - safe for all LVGL operations
     if (!main_loop_timer) {
-        main_loop_timer = lv_timer_create(main_loop_timer_cb, 200, NULL);  // 200ms interval (reduced from 100ms for better performance)
-        LOG_INF("✅ LVGL main loop timer created (200ms interval)");
+        main_loop_timer = lv_timer_create(main_loop_timer_cb, CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS, NULL);
+        LOG_INF("✅ LVGL main loop timer created (%dms interval)", CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS);
     }
 
-    LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s), LVGL timer (200ms)");
+    LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s), LVGL timer (%dms)", CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS);
 }
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)

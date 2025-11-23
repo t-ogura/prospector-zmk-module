@@ -154,6 +154,23 @@ config PROSPECTOR_SCANNER_TIMEOUT_MS
       Set to 0 to disable timeout completely.
       Range is 0 (disabled) or 10000-600000ms (10s to 10min).
 
+config PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS
+    int "Main loop timer interval in milliseconds"
+    range 50 500
+    default 150
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Main loop timer interval for UI updates and message processing.
+      Lower values provide more responsive UI but use more CPU power.
+      Higher values save battery but may feel less responsive.
+
+      Recommended values:
+      - 100ms: Very responsive (high CPU usage)
+      - 150ms: Balanced responsiveness and efficiency (default)
+      - 200ms: Power-saving mode (may feel slightly laggy)
+
+      Range is 50-500ms. Default is 150ms for balanced performance.
+
 config PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
     int "Display brightness during timeout (percentage)"
     range 1 50
