@@ -30,7 +30,7 @@ config ZMK_STATUS_ADV_INTERVAL_MS
 
 config ZMK_STATUS_ADV_KEYBOARD_NAME
     string "Keyboard name for status advertisement"
-    default "ZMK Keyboard"
+    default ZMK_KEYBOARD_NAME
     depends on ZMK_STATUS_ADVERTISEMENT
     help
       Name to identify this keyboard in status advertisements.
