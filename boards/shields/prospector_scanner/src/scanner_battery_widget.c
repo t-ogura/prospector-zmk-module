@@ -148,12 +148,15 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     lv_obj_set_style_pad_hor(widget->obj, 16, LV_PART_MAIN);
     
     // Create containers for up to 4 batteries (R, L, Aux, 4th)
-    // Containers will be dynamically shown/hidden based on actual battery data
-    // Using opacity instead of HIDDEN flag for thread safety
+    // All containers start in disconnected state and will be shown/hidden dynamically
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = create_battery_container(widget->obj);
-        // Initially set opacity to 0 (will be set to 255 in update when needed)
-        lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
+        // Initialize in disconnected state (will be updated when keyboard connects)
+        set_battery_bar_value(container, 0, false, "");
+        // Hide containers 2-3 by default (only show first 2 like v2.0.0)
+        if (i >= 2) {
+            lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
+        }
     }
     
     sys_slist_append(&widgets, &widget->node);
