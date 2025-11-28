@@ -8,15 +8,21 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
 // Battery bar widget structure mirrors the original design
-static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool connected) {
+static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool connected, const char *label_text) {
     if (!container) return;
-    
+
     lv_obj_t *bar = lv_obj_get_child(container, 0);
     lv_obj_t *num = lv_obj_get_child(container, 1);
     lv_obj_t *nc_bar = lv_obj_get_child(container, 2);
     lv_obj_t *nc_num = lv_obj_get_child(container, 3);
-    
-    if (!bar || !num || !nc_bar || !nc_num) return;
+    lv_obj_t *label = lv_obj_get_child(container, 4);
+
+    if (!bar || !num || !nc_bar || !nc_num || !label) return;
+
+    // Update label (R/L/Aux/4th)
+    if (label_text && label_text[0] != '\0') {
+        lv_label_set_text(label, label_text);
+    }
     
     if (connected) {
         // Show battery bar and percentage (no animation to prevent flickering)
@@ -116,7 +122,15 @@ static lv_obj_t *create_battery_container(lv_obj_t *parent) {
     lv_obj_align(nc_num, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(nc_num, LV_SYMBOL_CLOSE);
     lv_obj_set_style_opa(nc_num, 255, 0);
-    
+
+    // Battery label (R/L/Aux/4th) - initially empty
+    lv_obj_t *label = lv_label_create(info_container);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, -2);
+    lv_label_set_text(label, "");
+    lv_obj_set_style_opa(label, 255, 0);
+
     return info_container;
 }
 
@@ -133,13 +147,12 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     lv_obj_set_style_pad_bottom(widget->obj, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(widget->obj, 16, LV_PART_MAIN);
     
-    // Central/Peripheral labels removed - cleaner display without positioning issues
-    
-    // Create containers for Central and Peripheral devices
-    // For now, create 2 containers (Central + 1 Peripheral)
-    // This can be expanded later for more peripherals
-    for (int i = 0; i < 2; i++) {
-        create_battery_container(widget->obj);
+    // Create containers for up to 4 batteries (R, L, Aux, 4th)
+    // Containers will be dynamically shown/hidden based on actual battery data
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *container = create_battery_container(widget->obj);
+        // Initially hide all containers (will be shown dynamically in update)
+        lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
     }
     
     sys_slist_append(&widgets, &widget->node);
@@ -202,54 +215,66 @@ void zmk_widget_scanner_battery_destroy(struct zmk_widget_scanner_battery *widge
     lv_mem_free(widget);
 }
 
-void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget, 
+void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget,
                                        struct zmk_keyboard_status *status) {
     if (!widget || !widget->obj || !status) {
         return;
     }
-    
-    LOG_DBG("Battery widget update - Role:%d, Central:%d%%, Peripheral:[%d,%d,%d]", 
+
+    LOG_DBG("Battery widget update - Role:%d, Central:%d%%, Peripheral:[%d,%d,%d]",
             status->data.device_role, status->data.battery_level,
-            status->data.peripheral_battery[0], status->data.peripheral_battery[1], 
+            status->data.peripheral_battery[0], status->data.peripheral_battery[1],
             status->data.peripheral_battery[2]);
-    
-    // Handle split keyboard display - check if any peripheral is connected
-    bool has_peripheral = (status->data.peripheral_battery[0] > 0 || 
-                          status->data.peripheral_battery[1] > 0 || 
-                          status->data.peripheral_battery[2] > 0);
-    
-    if (status->data.device_role == ZMK_DEVICE_ROLE_CENTRAL && has_peripheral) {
-        // Split keyboard: show both Central and Peripheral batteries
-        
-        // Container 0: Peripheral (Left side) - Left display for Left keyboard
-        lv_obj_t *peripheral_container = lv_obj_get_child(widget->obj, 0);
-        if (peripheral_container) {
-            set_battery_bar_value(peripheral_container, status->data.peripheral_battery[0], true);
-            // peripheral_battery[0] is always LEFT keyboard according to protocol
-            LOG_INF("✅ Split mode: Left=%d%%, Right=%d%%", 
-               status->data.peripheral_battery[0], status->data.battery_level);
-        }
-        
-        // Container 1: Central (Right side) - Right display for Right keyboard  
-        lv_obj_t *central_container = lv_obj_get_child(widget->obj, 1);
-        if (central_container) {
-            set_battery_bar_value(central_container, status->data.battery_level, true);
-        }
-    } else {
-        // Single device or Central without connected peripherals
-        LOG_INF("⚠️  Single mode: Central only %d%% (no peripheral connected)", 
-               status->data.battery_level);
-        
-        // Use first container for Central device
-        lv_obj_t *main_container = lv_obj_get_child(widget->obj, 0);
-        if (main_container) {
-            set_battery_bar_value(main_container, status->data.battery_level, true);
-        }
-        
-        // Clear the second container
-        lv_obj_t *other_container = lv_obj_get_child(widget->obj, 1);
-        if (other_container) {
-            set_battery_bar_value(other_container, 0, false);
+
+    // Dynamic battery display logic
+    uint8_t batteries[4] = {0};
+    const char *labels[4] = {NULL};
+    int battery_count = 0;
+
+    // According to protocol: battery_level=Right, peripheral_battery[0]=Left
+    // (Keyboard side swaps if Central is on Left)
+
+    // Always add Right (Central battery)
+    batteries[battery_count] = status->data.battery_level;
+    labels[battery_count] = "R";
+    battery_count++;
+
+    // Add Left if exists
+    if (status->data.peripheral_battery[0] > 0) {
+        batteries[battery_count] = status->data.peripheral_battery[0];
+        labels[battery_count] = "L";
+        battery_count++;
+    }
+
+    // Add Aux if exists
+    if (status->data.peripheral_battery[1] > 0) {
+        batteries[battery_count] = status->data.peripheral_battery[1];
+        labels[battery_count] = "Aux";
+        battery_count++;
+    }
+
+    // Add 4th if exists
+    if (status->data.peripheral_battery[2] > 0) {
+        batteries[battery_count] = status->data.peripheral_battery[2];
+        labels[battery_count] = "4th";
+        battery_count++;
+    }
+
+    LOG_INF("Dynamic battery display: %d batteries detected", battery_count);
+
+    // Show only the required containers, hide the rest
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *container = lv_obj_get_child(widget->obj, i);
+        if (!container) continue;
+
+        if (i < battery_count) {
+            // Show and update this container
+            lv_obj_clear_flag(container, LV_OBJ_FLAG_HIDDEN);
+            set_battery_bar_value(container, batteries[i], true, labels[i]);
+            LOG_DBG("  [%d] %s: %d%%", i, labels[i], batteries[i]);
+        } else {
+            // Hide this container
+            lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
@@ -258,14 +283,15 @@ void zmk_widget_scanner_battery_reset(struct zmk_widget_scanner_battery *widget)
     if (!widget || !widget->obj) {
         return;
     }
-    
+
     LOG_INF("Battery widget reset - clearing all displays");
-    
-    // Clear both containers (Central and Peripheral)
-    for (int i = 0; i < 2; i++) {
+
+    // Clear all 4 containers and hide them
+    for (int i = 0; i < 4; i++) {
         lv_obj_t *container = lv_obj_get_child(widget->obj, i);
         if (container) {
-            set_battery_bar_value(container, 0, false);
+            set_battery_bar_value(container, 0, false, "");
+            lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
