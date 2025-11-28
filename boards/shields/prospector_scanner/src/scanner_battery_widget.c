@@ -135,15 +135,10 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     
     // Central/Peripheral labels removed - cleaner display without positioning issues
 
-    // Create containers for up to 4 batteries (dynamic display)
-    // Containers 0-1: Visible by default (standard split keyboards)
-    // Containers 2-3: Hidden by default, shown dynamically for 3-4 battery keyboards
-    for (int i = 0; i < 4; i++) {
-        lv_obj_t *container = create_battery_container(widget->obj);
-        // Hide containers 2-3 initially (will be shown if needed)
-        if (i >= 2) {
-            lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
-        }
+    // Create 2 containers exactly like v2.0.0
+    // TODO: Dynamic 3-4 battery support requires further investigation
+    for (int i = 0; i < 2; i++) {
+        create_battery_container(widget->obj);
     }
     
     sys_slist_append(&widgets, &widget->node);
