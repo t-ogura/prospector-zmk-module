@@ -8,21 +8,15 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
 // Battery bar widget structure mirrors the original design
-static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool connected, const char *label_text) {
+static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool connected) {
     if (!container) return;
-
+    
     lv_obj_t *bar = lv_obj_get_child(container, 0);
     lv_obj_t *num = lv_obj_get_child(container, 1);
     lv_obj_t *nc_bar = lv_obj_get_child(container, 2);
     lv_obj_t *nc_num = lv_obj_get_child(container, 3);
-
+    
     if (!bar || !num || !nc_bar || !nc_num) return;
-
-    // Update label (R/L/Aux/4th) - optional, may not exist in older containers
-    lv_obj_t *label = lv_obj_get_child(container, 4);
-    if (label && label_text && label_text[0] != '\0') {
-        lv_label_set_text(label, label_text);
-    }
     
     if (connected) {
         // Show battery bar and percentage (no animation to prevent flickering)
@@ -122,15 +116,7 @@ static lv_obj_t *create_battery_container(lv_obj_t *parent) {
     lv_obj_align(nc_num, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(nc_num, LV_SYMBOL_CLOSE);
     lv_obj_set_style_opa(nc_num, 255, 0);
-
-    // Battery label (R/L/Aux/4th) - initially empty
-    lv_obj_t *label = lv_label_create(info_container);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xAAAAAA), 0);
-    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, -2);
-    lv_label_set_text(label, "");
-    lv_obj_set_style_opa(label, 255, 0);
-
+    
     return info_container;
 }
 
@@ -147,17 +133,17 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     lv_obj_set_style_pad_bottom(widget->obj, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(widget->obj, 16, LV_PART_MAIN);
     
-    // Create containers for up to 4 batteries (R, L, Aux, 4th)
-    // Containers 0-1 visible by default (like v2.0.0 for standard split keyboards)
-    // Containers 2-3 hidden until needed (for 3-4 battery keyboards)
+    // Central/Peripheral labels removed - cleaner display without positioning issues
+
+    // Create containers for up to 4 batteries (dynamic display)
+    // Containers 0-1: Visible by default (standard split keyboards)
+    // Containers 2-3: Hidden by default, shown dynamically for 3-4 battery keyboards
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = create_battery_container(widget->obj);
-        // Hide containers 2-3 by default (will be shown dynamically if needed)
+        // Hide containers 2-3 initially (will be shown if needed)
         if (i >= 2) {
             lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
         }
-        // Note: Containers start in disconnected state by default (red X symbol)
-        // They will be updated to connected state when keyboard data arrives
     }
     
     sys_slist_append(&widgets, &widget->node);
@@ -231,55 +217,42 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
             status->data.peripheral_battery[0], status->data.peripheral_battery[1],
             status->data.peripheral_battery[2]);
 
-    // Dynamic battery display logic
+    // Dynamic battery display: show only batteries that exist
     uint8_t batteries[4] = {0};
-    const char *labels[4] = {NULL};
     int battery_count = 0;
 
-    // According to protocol: battery_level=Right, peripheral_battery[0]=Left
-    // (Keyboard side swaps if Central is on Left)
-
-    // Always add Right (Central battery)
-    batteries[battery_count] = status->data.battery_level;
-    labels[battery_count] = "R";
-    battery_count++;
+    // Always add Right (battery_level per protocol)
+    batteries[battery_count++] = status->data.battery_level;
 
     // Add Left if exists
     if (status->data.peripheral_battery[0] > 0) {
-        batteries[battery_count] = status->data.peripheral_battery[0];
-        labels[battery_count] = "L";
-        battery_count++;
+        batteries[battery_count++] = status->data.peripheral_battery[0];
     }
 
     // Add Aux if exists
     if (status->data.peripheral_battery[1] > 0) {
-        batteries[battery_count] = status->data.peripheral_battery[1];
-        labels[battery_count] = "Aux";
-        battery_count++;
+        batteries[battery_count++] = status->data.peripheral_battery[1];
     }
 
     // Add 4th if exists
     if (status->data.peripheral_battery[2] > 0) {
-        batteries[battery_count] = status->data.peripheral_battery[2];
-        labels[battery_count] = "4th";
-        battery_count++;
+        batteries[battery_count++] = status->data.peripheral_battery[2];
     }
 
     LOG_INF("Dynamic battery display: %d batteries detected", battery_count);
 
-    // Show only the required containers, hide the rest using opacity
-    // Using opacity instead of HIDDEN flag for better thread safety
+    // Update containers: show active batteries, hide unused ones
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = lv_obj_get_child(widget->obj, i);
         if (!container) continue;
 
         if (i < battery_count) {
-            // Show this container (set opacity to fully visible)
+            // Show and update this battery
             lv_obj_set_style_opa(container, 255, LV_PART_MAIN);
-            set_battery_bar_value(container, batteries[i], true, labels[i]);
-            LOG_DBG("  [%d] %s: %d%%", i, labels[i], batteries[i]);
+            set_battery_bar_value(container, batteries[i], true);
+            LOG_DBG("  [%d]: %d%%", i, batteries[i]);
         } else {
-            // Hide this container (set opacity to invisible)
+            // Hide unused container
             lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
         }
     }
@@ -292,12 +265,15 @@ void zmk_widget_scanner_battery_reset(struct zmk_widget_scanner_battery *widget)
 
     LOG_INF("Battery widget reset - clearing all displays");
 
-    // Clear all 4 containers and hide them using opacity
+    // Clear all 4 containers and hide 2-3
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = lv_obj_get_child(widget->obj, i);
         if (container) {
-            set_battery_bar_value(container, 0, false, "");
-            lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
+            set_battery_bar_value(container, 0, false);
+            // Hide containers 2-3 (restore default state)
+            if (i >= 2) {
+                lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
+            }
         }
     }
 }
