@@ -15,12 +15,12 @@ static void set_battery_bar_value(lv_obj_t *container, uint8_t level, bool conne
     lv_obj_t *num = lv_obj_get_child(container, 1);
     lv_obj_t *nc_bar = lv_obj_get_child(container, 2);
     lv_obj_t *nc_num = lv_obj_get_child(container, 3);
+
+    if (!bar || !num || !nc_bar || !nc_num) return;
+
+    // Update label (R/L/Aux/4th) - optional, may not exist in older containers
     lv_obj_t *label = lv_obj_get_child(container, 4);
-
-    if (!bar || !num || !nc_bar || !nc_num || !label) return;
-
-    // Update label (R/L/Aux/4th)
-    if (label_text && label_text[0] != '\0') {
+    if (label && label_text && label_text[0] != '\0') {
         lv_label_set_text(label, label_text);
     }
     
@@ -148,15 +148,16 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     lv_obj_set_style_pad_hor(widget->obj, 16, LV_PART_MAIN);
     
     // Create containers for up to 4 batteries (R, L, Aux, 4th)
-    // All containers start in disconnected state and will be shown/hidden dynamically
+    // Containers 0-1 visible by default (like v2.0.0 for standard split keyboards)
+    // Containers 2-3 hidden until needed (for 3-4 battery keyboards)
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = create_battery_container(widget->obj);
-        // Initialize in disconnected state (will be updated when keyboard connects)
-        set_battery_bar_value(container, 0, false, "");
-        // Hide containers 2-3 by default (only show first 2 like v2.0.0)
+        // Hide containers 2-3 by default (will be shown dynamically if needed)
         if (i >= 2) {
             lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
         }
+        // Note: Containers start in disconnected state by default (red X symbol)
+        // They will be updated to connected state when keyboard data arrives
     }
     
     sys_slist_append(&widgets, &widget->node);
