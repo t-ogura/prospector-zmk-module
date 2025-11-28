@@ -149,10 +149,11 @@ int zmk_widget_scanner_battery_init(struct zmk_widget_scanner_battery *widget, l
     
     // Create containers for up to 4 batteries (R, L, Aux, 4th)
     // Containers will be dynamically shown/hidden based on actual battery data
+    // Using opacity instead of HIDDEN flag for thread safety
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = create_battery_container(widget->obj);
-        // Initially hide all containers (will be shown dynamically in update)
-        lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
+        // Initially set opacity to 0 (will be set to 255 in update when needed)
+        lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
     }
     
     sys_slist_append(&widgets, &widget->node);
@@ -262,19 +263,20 @@ void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget
 
     LOG_INF("Dynamic battery display: %d batteries detected", battery_count);
 
-    // Show only the required containers, hide the rest
+    // Show only the required containers, hide the rest using opacity
+    // Using opacity instead of HIDDEN flag for better thread safety
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = lv_obj_get_child(widget->obj, i);
         if (!container) continue;
 
         if (i < battery_count) {
-            // Show and update this container
-            lv_obj_clear_flag(container, LV_OBJ_FLAG_HIDDEN);
+            // Show this container (set opacity to fully visible)
+            lv_obj_set_style_opa(container, 255, LV_PART_MAIN);
             set_battery_bar_value(container, batteries[i], true, labels[i]);
             LOG_DBG("  [%d] %s: %d%%", i, labels[i], batteries[i]);
         } else {
-            // Hide this container
-            lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
+            // Hide this container (set opacity to invisible)
+            lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
         }
     }
 }
@@ -286,12 +288,12 @@ void zmk_widget_scanner_battery_reset(struct zmk_widget_scanner_battery *widget)
 
     LOG_INF("Battery widget reset - clearing all displays");
 
-    // Clear all 4 containers and hide them
+    // Clear all 4 containers and hide them using opacity
     for (int i = 0; i < 4; i++) {
         lv_obj_t *container = lv_obj_get_child(widget->obj, i);
         if (container) {
             set_battery_bar_value(container, 0, false, "");
-            lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_opa(container, 0, LV_PART_MAIN);
         }
     }
 }
