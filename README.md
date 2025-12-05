@@ -1,12 +1,21 @@
 # Prospector ZMK Module
 
-**Version**: 1.1.0  
+**Version**: 1.1.1 - **CRITICAL SAFETY UPDATE**  
 **License**: MIT  
-**Status**: Stable Release  
+**Status**: Production Ready - Critical Fix Release  
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![ZMK Compatible](https://img.shields.io/badge/ZMK-compatible-blue)](https://zmk.dev/)
-[![Version](https://img.shields.io/badge/version-v1.1.0-brightgreen)](https://github.com/t-ogura/prospector-zmk-module/releases)
+[![Version](https://img.shields.io/badge/version-v1.1.1-critical-red)](https://github.com/t-ogura/prospector-zmk-module/releases)
+
+## 🚨 **URGENT: v1.1.1 Critical Safety Update**
+
+**⚠️ IMMEDIATE UPGRADE RECOMMENDED**: v1.1.0 users experiencing startup failures should upgrade immediately.
+
+**Issue Fixed**: Scanner devices without APDS9960 ambient light sensor were failing to boot.
+**Solution**: Automatic hardware detection with safe fallback modes implemented.
+
+👉 **[See Release Notes for Upgrade Instructions →](https://github.com/t-ogura/zmk-config-prospector/blob/main/docs/RELEASES.md#v111---critical-safety-update-2025-08-26)**
 
 **Prospector ZMK Module** provides advanced status monitoring capabilities for ZMK keyboards, enabling real-time BLE advertisement of keyboard status and professional scanner-based display functionality.
 
@@ -31,14 +40,9 @@ The main repository contains:
 - **Multi-Keyboard Support**: Monitor multiple keyboards simultaneously
 - **Professional Widgets**: Battery, layer, modifier, and connection status
 
-### 🔌 **Dongle Mode Components** (Legacy)
-- **Traditional Dongle**: Keyboard → Dongle → PC connectivity
-- **Basic Status Display**: Layer roller and peripheral information
-- **Legacy Support**: Compatible with original Prospector hardware
-
 ## 🏗️ Architecture
 
-### Scanner Mode (Current - Recommended)
+### Scanner Mode Architecture
 ```
 ┌─────────────┐    BLE Advertisement    ┌──────────────────┐
 │             │ ─────────────────────→ │   Prospector     │
@@ -47,25 +51,14 @@ The main repository contains:
 └─────────────┘                        └──────────────────┘
        │
        ├── PC (BLE/USB)
-       ├── Tablet 
+       ├── Tablet
        ├── Phone
        └── ... (up to 5 devices)
 ```
 
-### Dongle Mode (Legacy)
-```
-┌─────────────┐    BLE Connection    ┌──────────────────┐    USB/BLE    ┌─────┐
-│  Keyboard   │ ──────────────────→ │   Prospector     │ ──────────→ │ PC  │
-│ (Peripheral)│                      │   Dongle         │              └─────┘
-└─────────────┘                      │  (Central)       │
-                                     └──────────────────┘
-```
-
 ## 🚀 Quick Start
 
-### For Scanner Mode
-
-#### 1. Add to Your Keyboard
+### 1. Add to Your Keyboard
 
 Add to your keyboard's `config/west.yml`:
 ```yaml
@@ -82,7 +75,7 @@ manifest:
       import: app/west.yml
     - name: prospector-zmk-module
       remote: prospector
-      revision: v1.1.0
+      revision: feature/v1.1.1-safety-fix
       path: modules/prospector-zmk-module
 ```
 
@@ -92,7 +85,7 @@ Add to your keyboard's `.conf` file:
 CONFIG_ZMK_STATUS_ADVERTISEMENT=y
 CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME="MyBoard"
 
-# v1.1.0 enhanced power optimization (15x improvement)
+# Enhanced power optimization (15x improvement in v1.1.0)
 CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED=y
 CONFIG_ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS=100    # 10Hz active
 CONFIG_ZMK_STATUS_ADV_IDLE_INTERVAL_MS=30000    # 0.03Hz idle
@@ -101,18 +94,9 @@ CONFIG_ZMK_STATUS_ADV_IDLE_INTERVAL_MS=30000    # 0.03Hz idle
 CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING=y
 ```
 
-#### 2. Build Scanner Device
+### 2. Build Scanner Device
 
 Use the companion repository: [zmk-config-prospector](https://github.com/t-ogura/zmk-config-prospector)
-
-### For Dongle Mode (Legacy)
-
-Add to your `build.yaml`:
-```yaml
-include:
-  - board: seeeduino_xiao_ble
-    shield: [YOUR_KEYBOARD]_dongle prospector_adapter
-```
 
 ## 📡 Status Advertisement Protocol
 
@@ -205,7 +189,12 @@ CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING=y
 # Core scanner features
 CONFIG_PROSPECTOR_MODE_SCANNER=y
 CONFIG_PROSPECTOR_MAX_KEYBOARDS=2
-CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+
+# v1.1.1 SAFETY: Ambient light sensor (disabled by default)
+# Only enable if you have APDS9960 hardware connected
+# CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+# CONFIG_SENSOR=y
+# CONFIG_APDS9960=y
 
 # Display customization
 CONFIG_PROSPECTOR_FIXED_BRIGHTNESS=80

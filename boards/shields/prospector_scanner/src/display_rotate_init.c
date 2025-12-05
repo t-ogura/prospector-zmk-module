@@ -4,7 +4,7 @@
 
 int disp_set_orientation(void)
 {
-	// Set the orientation
+	// Set the orientation (restored from original working configuration)
 	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 	if (!device_is_ready(display))
 	{

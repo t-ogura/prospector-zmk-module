@@ -18,6 +18,7 @@ extern "C" {
 
 struct zmk_widget_signal_status {
     lv_obj_t *obj;
+    lv_obj_t *channel_label;   // Channel number display
     lv_obj_t *rssi_bar;        // RSSI strength bar (0-5 bars)
     lv_obj_t *rssi_label;      // RSSI dBm value
     lv_obj_t *rate_label;      // Reception rate in Hz

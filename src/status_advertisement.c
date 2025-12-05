@@ -483,20 +483,18 @@ static void build_manufacturer_payload(void) {
 #ifdef CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE
     central_side = CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE;
 #endif
-    
+
     if (strcmp(central_side, "LEFT") == 0) {
-        // Central is on LEFT: 
-        // peripheral_battery[0] = RIGHT keyboard (first peripheral)
-        // peripheral_battery[1] = AUX (if exists)
-        // peripheral_battery[2] = unused
-        manufacturer_data.peripheral_battery[0] = peripheral_batteries[0]; // Right keyboard
+        // Central is on LEFT: Scanner expects battery_level=Right, peripheral_battery[0]=Left
+        // So we swap: battery_level gets peripheral, peripheral_battery[0] gets central
+        uint8_t central_battery = battery_level;
+        manufacturer_data.battery_level = peripheral_batteries[0]; // Right (peripheral) -> battery_level
+        manufacturer_data.peripheral_battery[0] = central_battery; // Left (central) -> peripheral_battery[0]
         manufacturer_data.peripheral_battery[1] = peripheral_batteries[1]; // Aux if exists
         manufacturer_data.peripheral_battery[2] = peripheral_batteries[2]; // Third peripheral
     } else {
-        // Central is on RIGHT (default):
-        // peripheral_battery[0] = LEFT keyboard (first peripheral)
-        // peripheral_battery[1] = AUX (if exists)  
-        // peripheral_battery[2] = unused
+        // Central is on RIGHT (default): Scanner expects battery_level=Right, peripheral_battery[0]=Left
+        // This matches naturally: battery_level=central(right), peripheral_battery[0]=peripheral(left)
         memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 3);
     }
            
@@ -556,8 +554,12 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.wpm_value = 0;
 #endif
     
-    // Reserved bytes (1 byte) for future expansion  
-    memset(manufacturer_data.reserved, 0, 1);
+    // Channel number (0 = broadcast to all scanners)
+#ifdef CONFIG_PROSPECTOR_CHANNEL
+    manufacturer_data.channel = CONFIG_PROSPECTOR_CHANNEL;
+#else
+    manufacturer_data.channel = 0;  // Default: broadcast to all
+#endif
     
     const char *role_str = 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -579,19 +581,19 @@ static void build_manufacturer_payload(void) {
 #endif
 }
 
-// RESTORE WORKING APPROACH: Complete advertising replacement
+// RESTORE v1.1.1 APPROACH: Complete advertising replacement
 // This was the ONLY approach that worked with LED + Split communication
 static int stop_default_advertising(const struct device *dev) {
     if (default_adv_stopped) {
         return 0;
     }
-    
-    LOG_INF("Prospector: Stopping default ZMK advertising (WORKING APPROACH)");
+
+    LOG_INF("Prospector: Stopping default ZMK advertising (v1.1.1 working approach)");
     int err = bt_le_adv_stop();
     if (err && err != -EALREADY) {
         LOG_ERR("bt_le_adv_stop failed: %d", err);
     } else {
-        LOG_INF("Default advertising stopped - this approach worked before");
+        LOG_INF("Default advertising stopped - this approach worked in v1.1.1");
         default_adv_stopped = true;
     }
     return 0;
@@ -609,7 +611,7 @@ static void start_custom_advertising(void) {
         stop_default_advertising(NULL);
         k_sleep(K_MSEC(50)); // Wait for stop to complete
     }
-    
+
     build_manufacturer_payload();
     
     // Prepare device name for scan response (respecting 31-byte limit)
@@ -629,18 +631,15 @@ static void start_custom_advertising(void) {
     LOG_DBG("Prospector: Starting separated adv/scan_rsp advertising");
     LOG_DBG("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
     LOG_DBG("SCAN_RSP: Name + Appearance = %d bytes", 2 + actual_name_len + 3);
-    
-    // This approach keeps manufacturer_data at full 26 bytes while device name in scan response
-    LOG_INF("✅ Advertisement stays within 31-byte limit: %d bytes", 3 + 2 + sizeof(manufacturer_data));
-    
+
     // Start advertising with separated adv_data and scan_rsp
-    int err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array), 
+    int err = bt_le_adv_start(&adv_params, adv_data_array, ARRAY_SIZE(adv_data_array),
                               scan_rsp, ARRAY_SIZE(scan_rsp));
-    
+
     if (err == 0) {
         LOG_INF("✅ Advertising started successfully");
     } else if (err == -E2BIG) {
-        LOG_ERR("❌ Advertising failed: -E2BIG (payload too large - %d bytes exceeds 31-byte limit)", 
+        LOG_ERR("❌ Advertising failed: -E2BIG (payload too large - %d bytes exceeds 31-byte limit)",
                 3 + 2 + sizeof(manufacturer_data)); // Flags + ManufData header + payload
     } else {
         LOG_ERR("❌ Advertising failed with error: %d", err);

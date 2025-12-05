@@ -38,15 +38,17 @@ static void update_connection_status(struct zmk_widget_connection_status *widget
     
     // Format transport text similar to YADS
     char transport_text[64];
-    // Show current active profile with > marker
-    if (kbd->data.profile_slot >= 0 && kbd->data.profile_slot <= 4) {
-        // Assume BLE is active if profile_slot is valid
-        snprintf(transport_text, sizeof(transport_text), 
-                "#%s USB#\\n> #%s BLE#", usb_color, ble_color);
-    } else {
-        // USB might be active
-        snprintf(transport_text, sizeof(transport_text), 
+    // Show current active transport with > marker
+    // USB is active when USB_HID_READY flag is set
+    // BLE is active when connected but USB is not ready
+    if (usb_hid_ready) {
+        // USB is active transport
+        snprintf(transport_text, sizeof(transport_text),
                 "> #%s USB#\\n#%s BLE#", usb_color, ble_color);
+    } else {
+        // BLE is active transport (or no transport)
+        snprintf(transport_text, sizeof(transport_text),
+                "#%s USB#\\n> #%s BLE#", usb_color, ble_color);
     }
     
     // Update transport label with colors
@@ -59,10 +61,11 @@ static void update_connection_status(struct zmk_widget_connection_status *widget
     snprintf(profile_text, sizeof(profile_text), "%d", kbd->data.profile_slot);
     lv_label_set_text(widget->ble_profile_label, profile_text);
     
-    LOG_INF("Connection status: USB:%s BLE:%s Profile:%d", 
+    LOG_INF("Connection status: USB:%s BLE:%s Profile:%d (status_flags=0x%02X)",
             usb_hid_ready ? "Ready" : "NotReady",
             ble_connected ? "Connected" : (ble_bonded ? "Bonded" : "Open"),
-            kbd->data.profile_slot);
+            kbd->data.profile_slot,
+            kbd->data.status_flags);
 }
 
 int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widget, lv_obj_t *parent) {
@@ -114,4 +117,55 @@ void zmk_widget_connection_status_reset(struct zmk_widget_connection_status *wid
 
 lv_obj_t *zmk_widget_connection_status_obj(struct zmk_widget_connection_status *widget) {
     return widget ? widget->obj : NULL;
+}
+
+// ========== Dynamic Allocation Functions ==========
+
+struct zmk_widget_connection_status *zmk_widget_connection_status_create(lv_obj_t *parent) {
+    LOG_DBG("Creating connection status widget (dynamic allocation)");
+
+    if (!parent) {
+        LOG_ERR("Cannot create widget: parent is NULL");
+        return NULL;
+    }
+
+    // Allocate memory for widget structure using LVGL's memory allocator
+    struct zmk_widget_connection_status *widget =
+        (struct zmk_widget_connection_status *)lv_mem_alloc(sizeof(struct zmk_widget_connection_status));
+    if (!widget) {
+        LOG_ERR("Failed to allocate memory for connection_status_widget (%d bytes)",
+                sizeof(struct zmk_widget_connection_status));
+        return NULL;
+    }
+
+    // Zero-initialize the allocated memory
+    memset(widget, 0, sizeof(struct zmk_widget_connection_status));
+
+    // Initialize widget (this creates LVGL objects)
+    int ret = zmk_widget_connection_status_init(widget, parent);
+    if (ret != 0) {
+        LOG_ERR("Widget initialization failed, freeing memory");
+        lv_mem_free(widget);
+        return NULL;
+    }
+
+    LOG_DBG("Connection status widget created successfully");
+    return widget;
+}
+
+void zmk_widget_connection_status_destroy(struct zmk_widget_connection_status *widget) {
+    LOG_DBG("Destroying connection status widget (dynamic deallocation)");
+
+    if (!widget) {
+        return;
+    }
+
+    // Delete LVGL objects (parent obj will delete all children including transport_label and ble_profile_label)
+    if (widget->obj) {
+        lv_obj_del(widget->obj);
+        widget->obj = NULL;
+    }
+
+    // Free the widget structure memory from LVGL heap
+    lv_mem_free(widget);
 }

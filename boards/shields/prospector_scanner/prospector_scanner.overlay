@@ -13,6 +13,7 @@
         zmk,kscan = &kscan0;
         zmk,physical-layout = &default_layout;  // ZMK Studio compatibility: no matrix_transform!
         zephyr,display = &st7789v;
+        zephyr,console = &cdc_acm_uart;  // USB logging console
     };
 
     default_layout: default_layout {
@@ -55,9 +56,13 @@
         };
     };
 
-    // Ambient light sensor (optional)
-    aliases {
-        als = &apds9960;
+    // Ambient light sensor alias removed - pure Kconfig control
+};
+
+// USB CDC ACM device for logging
+&zephyr_udc0 {
+    cdc_acm_uart: cdc_acm_uart {
+        compatible = "zephyr,cdc-acm-uart";
     };
 };
 
@@ -99,17 +104,18 @@
         };
     };
 
+    // I2C pinctrl for APDS9960 sensor (4-pin mode)
     i2c0_default: i2c0_default {
         group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,   // D4 = P0.04 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;   // D5 = P0.05 = SCL
         };
     };
 
     i2c0_sleep: i2c0_sleep {
         group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // Pin 4 (D4) = P0.04 = SDA ✅ FIXED
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // Pin 5 (D5) = P0.05 = SCL ✅ FIXED
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,   // D4 = P0.04 = SDA
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;   // D5 = P0.05 = SCL
             low-power-enable;
         };
     };
@@ -132,7 +138,7 @@ disp_spi: &spi3 {
         width = <240>;
         height = <280>;
         x-offset = <0>;
-        y-offset = <0>;
+        y-offset = <20>;
         vcom = <0x19>;
         gctrl = <0x35>;
         vrhs = <0x12>;
@@ -151,20 +157,46 @@ disp_spi: &spi3 {
     };
 };
 
-// I2C configuration with correct Prospector pinouts
+// I2C configuration for direct I2C sensor access (no Zephyr driver)
+// The APDS9960 is accessed directly via I2C in brightness_control.c
+// This bypasses the Zephyr driver requirement for an interrupt pin
+
 &i2c0 {
     status = "okay";
     pinctrl-0 = <&i2c0_default>;
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
-    clock-frequency = <I2C_BITRATE_STANDARD>; // 100kHz - most compatible speed
 
-    apds9960: apds9960@39 {
-        compatible = "avago,apds9960";
+    // Note: APDS9960 is accessed directly via I2C at address 0x39
+    // No device tree node needed - brightness_control.c handles initialization
+
+    // CST816S Touch Controller for Waveshare 1.69" Round LCD
+    // I2C address: 0x15
+    // SDA/SCL shared with APDS9960 (both on D4/D5)
+    touch_sensor: cst816s@15 {
+        compatible = "hynitron,cst816s";
+        reg = <0x15>;
         status = "okay";
-        reg = <0x39>;
-        // Remove interrupt pin - might cause issues if not connected
-        // int-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+        // Touch panel control pins
+        // TP_IRQ → D0 = P0.02 (interrupt pin)
+        // TP_RST → D1 = P0.28 (reset pin)
+        irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        rst-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
+    };
+};
+
+// Touch Input - Direct CST816S driver events via INPUT_CALLBACK_DEFINE
+// No zmk,input-listener needed - touch_handler.c uses INPUT_CALLBACK_DEFINE instead
+// This avoids the input processing pipeline and mouse gesture system
+
+/ {
+    // Custom settings toggle behavior for gesture (future use)
+    behaviors {
+        settings_toggle: behavior_settings_toggle {
+            compatible = "zmk,behavior-settings-toggle";
+            #binding-cells = <0>;
+        };
     };
 };
 

@@ -18,7 +18,11 @@ struct zmk_widget_modifier_status {
     lv_obj_t *label; // Single label for YADS-style display
 };
 
-int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, lv_obj_t *parent);
+// Dynamic allocation functions
+struct zmk_widget_modifier_status *zmk_widget_modifier_status_create(lv_obj_t *parent);
+void zmk_widget_modifier_status_destroy(struct zmk_widget_modifier_status *widget);
+
+// Widget control functions
 void zmk_widget_modifier_status_update(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd);
 void zmk_widget_modifier_status_reset(struct zmk_widget_modifier_status *widget);
 lv_obj_t *zmk_widget_modifier_status_obj(struct zmk_widget_modifier_status *widget);

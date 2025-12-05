@@ -26,18 +26,28 @@ struct zmk_widget_wpm_status {
     uint32_t last_activity_time;  // Timestamp of last non-zero WPM activity
 };
 
+// ========== Dynamic Allocation Functions ==========
+
 /**
- * @brief Initialize WPM status widget
- * 
- * @param widget Widget structure to initialize
+ * @brief Create WPM status widget with dynamic memory allocation
+ *
  * @param parent Parent LVGL object
- * @return 0 on success, negative error code on failure
+ * @return Pointer to allocated widget or NULL on failure
  */
-int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *parent);
+struct zmk_widget_wpm_status *zmk_widget_wpm_status_create(lv_obj_t *parent);
+
+/**
+ * @brief Destroy WPM status widget and free memory
+ *
+ * @param widget Widget to destroy
+ */
+void zmk_widget_wpm_status_destroy(struct zmk_widget_wpm_status *widget);
+
+// ========== Widget Control Functions ==========
 
 /**
  * @brief Update WPM status display
- * 
+ *
  * @param widget Widget to update
  * @param kbd Keyboard status data containing WPM value
  */
@@ -45,14 +55,14 @@ void zmk_widget_wpm_status_update(struct zmk_widget_wpm_status *widget, struct z
 
 /**
  * @brief Reset WPM status display to default state
- * 
+ *
  * @param widget Widget to reset
  */
 void zmk_widget_wpm_status_reset(struct zmk_widget_wpm_status *widget);
 
 /**
  * @brief Get widget LVGL object
- * 
+ *
  * @param widget Widget structure
  * @return LVGL object pointer or NULL
  */

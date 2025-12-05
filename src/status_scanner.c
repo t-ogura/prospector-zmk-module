@@ -15,6 +15,10 @@
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
 
+// Message queue for thread-safe architecture (Phase 2 reconstruction)
+// Include path assumes build from zmk-config-prospector
+#include "../boards/shields/prospector_scanner/src/scanner_message.h"
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER)
@@ -23,6 +27,32 @@ static struct zmk_keyboard_status keyboards[ZMK_STATUS_SCANNER_MAX_KEYBOARDS];
 static zmk_status_scanner_callback_t event_callback = NULL;
 static bool scanning = false;
 static struct k_work_delayable timeout_work;
+
+// Mutex for thread-safe access to keyboards array
+// Protects against concurrent access from BLE scan callback, timeout handler, and API calls
+static struct k_mutex scanner_mutex;
+static bool scanner_mutex_initialized = false;
+
+static void scanner_mutex_init(void) {
+    if (!scanner_mutex_initialized) {
+        k_mutex_init(&scanner_mutex);
+        scanner_mutex_initialized = true;
+        LOG_DBG("🔒 Scanner mutex initialized");
+    }
+}
+
+static int scanner_lock(k_timeout_t timeout) {
+    if (!scanner_mutex_initialized) {
+        return -EINVAL;
+    }
+    return k_mutex_lock(&scanner_mutex, timeout);
+}
+
+static void scanner_unlock(void) {
+    if (scanner_mutex_initialized) {
+        k_mutex_unlock(&scanner_mutex);
+    }
+}
 
 // Timeout for considering a keyboard as lost (in milliseconds)
 #ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
@@ -67,16 +97,16 @@ static int find_keyboard_by_id_and_role(uint32_t keyboard_id, uint8_t device_rol
         if (keyboards[i].active) {
             uint32_t stored_id = get_keyboard_id_from_data(&keyboards[i].data);
             if (stored_id == keyboard_id && keyboards[i].data.device_role == device_role) {
-                printk("*** SCANNER: Found existing slot %d for %s ID=%08X ***\n", 
-                       i, (device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+                LOG_DBG("Found existing slot %d for %s ID=%08X",
+                       i, (device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" :
                           (device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE",
                        keyboard_id);
                 return i;
             }
         }
     }
-    printk("*** SCANNER: No existing slot found for %s ID=%08X ***\n", 
-           (device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+    LOG_DBG("No existing slot found for %s ID=%08X",
+           (device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" :
            (device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE",
            keyboard_id);
     return -1;
@@ -95,18 +125,24 @@ static int find_empty_slot(void) {
 static const char* get_device_name(const bt_addr_le_t *addr);
 
 static void process_advertisement_with_name(const struct zmk_status_adv_data *adv_data, int8_t rssi, const bt_addr_le_t *addr) {
+    // Acquire mutex for keyboard array access (non-blocking to avoid BLE stack issues)
+    if (scanner_lock(K_MSEC(5)) != 0) {
+        LOG_DBG("Advertisement processing skipped - mutex busy");
+        return;
+    }
+
     uint32_t now = k_uptime_get_32();
     uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
-    
+
     // Get device name
     const char *device_name = get_device_name(addr);
-    
+
     const char *role_str = "UNKNOWN";
     if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-    
-    printk("*** SCANNER DEBUG: Received %s (%s), ID=%08X, Battery=%d%%, Layer=%d ***\n",
+
+    LOG_DBG("Received %s (%s), ID=%08X, Battery=%d%%, Layer=%d",
            role_str, device_name, keyboard_id, adv_data->battery_level, adv_data->active_layer);
     
     // Find existing keyboard by ID AND role for split keyboards
@@ -121,7 +157,7 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
             return;
         }
         is_new = true;
-        printk("*** SCANNER: Creating NEW slot %d for %s (%s) ID=%08X ***\n", 
+        LOG_DBG("Creating NEW slot %d for %s (%s) ID=%08X",
                index, role_str, device_name, keyboard_id);
     }
     
@@ -130,45 +166,50 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
-    // Only update name if it changed
-    if (strncmp(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name)) != 0) {
+    // Update name: always set if empty, otherwise only update if real name (not "Unknown")
+    if (keyboards[index].ble_name[0] == '\0') {
+        // First time - set whatever we have (even "Unknown")
         strncpy(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name) - 1);
         keyboards[index].ble_name[sizeof(keyboards[index].ble_name) - 1] = '\0';
+    } else if (strcmp(device_name, "Unknown") != 0 &&
+               strncmp(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name)) != 0) {
+        // Real name received - update from "Unknown" to actual name
+        strncpy(keyboards[index].ble_name, device_name, sizeof(keyboards[index].ble_name) - 1);
+        keyboards[index].ble_name[sizeof(keyboards[index].ble_name) - 1] = '\0';
+        LOG_INF("Updated keyboard name: %s (slot %d)", device_name, index);
     }
     
-    // Debug: Print current active slots
+    // Debug: Print current active slots (at DBG level to reduce spam)
     if (is_new) {
-        printk("*** SCANNER: Current active slots: ***\n");
+        LOG_DBG("Current active slots:");
         for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
             if (keyboards[i].active) {
                 uint32_t id = get_keyboard_id_from_data(&keyboards[i].data);
-                const char *role = (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+                const char *role = (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" :
                                   (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE";
-                printk("*** SLOT %d: %s (%s) ID=%08X Battery=%d%% ***\n", 
+                LOG_DBG("SLOT %d: %s (%s) ID=%08X Battery=%d%%",
                        i, role, keyboards[i].ble_name, id, keyboards[i].data.battery_level);
             }
         }
     }
     
-    // Notify event
+    // Release mutex
+    scanner_unlock();
+
+    // Phase 5: Do NOT call notify_event from BLE callback context
+    // This would trigger LVGL operations from a non-main thread, causing freezes
+    // Display updates are handled by periodic rx_periodic_work (1Hz) instead
     if (is_new) {
         const char *role_str = "UNKNOWN";
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-        
-        printk("*** PROSPECTOR SCANNER: New %s device found: %s (slot %d) ***\n", role_str, device_name, index);
-        LOG_INF("New %s device found: %s (slot %d)", role_str, device_name, index);
-        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
+
+        LOG_INF("New %s device found: %s (slot %d) - display will update on next periodic cycle",
+                role_str, device_name, index);
     } else {
-        const char *role_str = "UNKNOWN";
-        if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
-        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL"; 
-        else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-        
-        printk("*** PROSPECTOR SCANNER: %s device updated: %s, battery: %d%% ***\n", 
-               role_str, device_name, adv_data->battery_level);
-        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
+        LOG_DBG("Device updated: %s, battery: %d%% - display will update on next periodic cycle",
+               device_name, adv_data->battery_level);
     }
 }
 
@@ -176,13 +217,13 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     uint32_t keyboard_id = get_keyboard_id_from_data(adv_data);
     uint32_t now = k_uptime_get_32();
     
-    // Debug: Print what we received
+    // Debug: Print what we received (at DBG level to reduce spam)
     const char *role_str = "UNKNOWN";
     if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-    
-    printk("*** SCANNER DEBUG: Received %s, ID=%08X, Battery=%d%%, Layer=%d ***\n",
+
+    LOG_DBG("Received %s, ID=%08X, Battery=%d%%, Layer=%d",
            role_str, keyboard_id, adv_data->battery_level, adv_data->active_layer);
     
     // Find existing keyboard by ID AND role for split keyboards
@@ -197,10 +238,10 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
             return;
         }
         is_new = true;
-        printk("*** SCANNER: Creating NEW slot %d for %s ID=%08X ***\n", 
+        LOG_DBG("Creating NEW slot %d for %s ID=%08X",
                index, role_str, keyboard_id);
     }
-    
+
     // Check if data actually changed (to avoid duplicate update events)
     bool actual_data_change = false;
     if (!is_new) {
@@ -217,16 +258,18 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
-    
-    // Debug: Print current active slots
+
+    // Note: device name is updated in process_advertisement_with_name() which has access to BLE address
+
+    // Debug: Print current active slots (at DBG level to reduce spam)
     if (is_new) {
-        printk("*** SCANNER: Current active slots: ***\n");
+        LOG_DBG("Current active slots:");
         for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
             if (keyboards[i].active) {
                 uint32_t id = get_keyboard_id_from_data(&keyboards[i].data);
-                const char *role = (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" : 
+                const char *role = (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_CENTRAL) ? "CENTRAL" :
                                   (keyboards[i].data.device_role == ZMK_DEVICE_ROLE_PERIPHERAL) ? "PERIPHERAL" : "STANDALONE";
-                printk("*** SLOT %d: %s ID=%08X Battery=%d%% ***\n", 
+                LOG_DBG("SLOT %d: %s ID=%08X Battery=%d%%",
                        i, role, id, keyboards[i].data.battery_level);
             }
         }
@@ -238,23 +281,22 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-        
-        printk("*** PROSPECTOR SCANNER: New %s device found: %s (slot %d) ***\n", role_str, adv_data->layer_name, index);
+
         LOG_INF("New %s device found: %s (slot %d)", role_str, adv_data->layer_name, index);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
     } else if (actual_data_change) {
         // Only notify if data actually changed
         const char *role_str = "UNKNOWN";
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
-        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL"; 
+        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-        
-        printk("*** PROSPECTOR SCANNER: %s device updated: %s, battery: %d%% ***\n", 
+
+        LOG_DBG("%s device updated: %s, battery: %d%%",
                role_str, adv_data->layer_name, adv_data->battery_level);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
     } else {
         // Data unchanged - just update last_seen timestamp silently
-        printk("*** SCANNER: Heartbeat from %s (no data change) ***\n", adv_data->layer_name);
+        LOG_DBG("Heartbeat from %s (no data change)", adv_data->layer_name);
     }
 }
 
@@ -284,8 +326,8 @@ static void store_device_name(const bt_addr_le_t *addr, const char *name) {
             
             if (is_update) {
                 name_updated = true;
-                printk("*** PROSPECTOR SCANNER: Device name updated: %s ***\n", name);
-                
+                LOG_DBG("Device name updated: %s", name);
+
                 // Note: We don't immediately update keyboard entries here since
                 // zmk_keyboard_status doesn't store the BLE address.
                 // The name will be updated when process_advertisement_with_name() is called
@@ -314,10 +356,9 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
     static int scan_count = 0;
     scan_count++;
     
-    // Log every 10th scan to avoid spam
-    if (scan_count % 10 == 1) {
-        printk("*** PROSPECTOR SCANNER: Received BLE adv %d, RSSI: %d, len: %d ***\n", 
-               scan_count, rssi, buf->len);
+    // Log every 100th scan to avoid spam (or use LOG_DBG for detailed debugging)
+    if (scan_count % 100 == 1) {
+        LOG_INF("BLE scan #%d (RSSI: %d)", scan_count, rssi);
     }
     
     if (!scanning) {
@@ -343,11 +384,11 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
             memcpy(device_name, buf_copy.data, MIN(len, sizeof(device_name) - 1));
             device_name[MIN(len, sizeof(device_name) - 1)] = '\0';
             
-            // Debug: Log the exact received name and its type
-            const char *name_type = (ad_type == BT_DATA_NAME_COMPLETE) ? "COMPLETE" : "SHORTENED";
-            const char *packet_type = (type & BT_HCI_LE_ADV_EVT_TYPE_SCAN_RSP) ? "SCAN_RSP" : "ADV";
-            printk("*** SCANNER: %s packet - Found %s device name (len=%d): '%s' ***\n", 
-                   packet_type, name_type, len, device_name);
+            // Debug: Log device name (DBG level only to reduce spam)
+            LOG_DBG("%s packet - %s name (len=%d): '%s'",
+                   (type & BT_HCI_LE_ADV_EVT_TYPE_SCAN_RSP) ? "SCAN_RSP" : "ADV",
+                   (ad_type == BT_DATA_NAME_COMPLETE) ? "COMPLETE" : "SHORTENED",
+                   len, device_name);
             
             // If we received a shortened name that looks like "LalaPad", check if we can infer the full name
             if (ad_type == BT_DATA_NAME_SHORTENED && strncmp(device_name, "LalaPad", 7) == 0) {
@@ -361,26 +402,48 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         
         // Check for Prospector manufacturer data (26 bytes expected)
         if (ad_type == BT_DATA_MANUFACTURER_DATA) {
-            printk("*** SCANNER: Manufacturer data found - Length: %d, Expected: %d ***\n", 
-                   len, sizeof(struct zmk_status_adv_data));
-            
+            // Early filtering: Check if this is Prospector data FIRST to reduce log spam
             if (len >= sizeof(struct zmk_status_adv_data)) {
                 const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf_copy.data;
-                
+
                 // Check if this is Prospector data: FF FF AB CD
-                if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF && 
+                if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF &&
                     data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
-                    prospector_data = data;
-                    printk("*** PROSPECTOR SCANNER: Valid Prospector data found! Version=%d, Battery=%d%% ***\n", 
-                           data->version, data->battery_level);
+
+                    LOG_DBG("Prospector data found - Length: %d", len);
+
+                    // Channel filtering logic
+                    uint8_t scanner_channel = 0;
+#ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
+                    scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
+#endif
+                    uint8_t keyboard_channel = data->channel;
+
+                    // Accept if:
+                    // - Scanner channel is 0 (accept all)
+                    // - Keyboard channel is 0 (broadcast to all)
+                    // - Channels match
+                    bool channel_match = (scanner_channel == 0 ||
+                                        keyboard_channel == 0 ||
+                                        scanner_channel == keyboard_channel);
+
+                    if (channel_match) {
+                        prospector_data = data;
+                        LOG_DBG("Valid Prospector data: Ch:%d->%d Ver=%d Bat=%d%%",
+                               keyboard_channel, scanner_channel, data->version, data->battery_level);
+                    } else {
+                        printk("*** SCANNER: Channel mismatch - KB Ch:%d, Scanner Ch:%d (filtered) ***\n",
+                               keyboard_channel, scanner_channel);
+                    }
                 } else {
-                    printk("*** SCANNER: Wrong manufacturer signature: %02X%02X %02X%02X (expected FFFF ABCD) ***\n",
+                    // Silently ignore non-Prospector devices to reduce log spam
+                    LOG_DBG("Non-Prospector device: %02X%02X %02X%02X",
                            data->manufacturer_id[0], data->manufacturer_id[1],
                            data->service_uuid[0], data->service_uuid[1]);
                 }
             } else {
-                printk("*** SCANNER: Manufacturer data too short (%d < %d bytes) ***\n", 
-                       len, sizeof(struct zmk_status_adv_data));
+                // Silently ignore short manufacturer data (common for other BLE devices)
+                LOG_DBG("Manufacturer data too short: %d bytes", len);
             }
         }
         
@@ -389,37 +452,77 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
     
     // Process Prospector data if found
     if (prospector_data) {
-        printk("*** PROSPECTOR SCANNER: Central=%d%%, Peripheral=[%d,%d,%d], Layer=%d ***\n",
-               prospector_data->battery_level, prospector_data->peripheral_battery[0], 
-               prospector_data->peripheral_battery[1], prospector_data->peripheral_battery[2], 
+        LOG_DBG("Central=%d%%, Peripheral=[%d,%d,%d], Layer=%d",
+               prospector_data->battery_level, prospector_data->peripheral_battery[0],
+               prospector_data->peripheral_battery[1], prospector_data->peripheral_battery[2],
                prospector_data->active_layer);
-        
-        // Process advertisement with device name
+
+        // Phase 2: Send message to queue for thread-safe processing
+        // Get device name for the message
+        const char *device_name = get_device_name(addr);
+        int msg_ret = scanner_msg_send_keyboard_data(prospector_data, rssi, device_name);
+        if (msg_ret != 0) {
+            LOG_DBG("Message queue full, falling back to direct processing");
+        }
+
+        // TRANSITIONAL: Also process directly for backward compatibility
+        // This will be removed once message processing is implemented in main task
         process_advertisement_with_name(prospector_data, rssi, addr);
     }
 }
 
 static void timeout_work_handler(struct k_work *work) {
+    // Phase 4: Send timeout check message to queue
+    // This allows the main task to handle timeout processing
+    int msg_ret = scanner_msg_send_timeout_check();
+    if (msg_ret != 0) {
+        LOG_DBG("Timeout message queue full, processing directly");
+    }
+
+    // TRANSITIONAL: Also process directly for backward compatibility
+    // This will be removed once message processing handles timeout
+
+    // Acquire mutex for keyboard array access
+    if (scanner_lock(K_MSEC(50)) != 0) {
+        LOG_DBG("Timeout check skipped - mutex busy");
+        // Reschedule and try again
+        if (scanning) {
+            k_work_schedule(&timeout_work, K_MSEC(100));
+        }
+        return;
+    }
+
     uint32_t now = k_uptime_get_32();
-    
-    printk("*** PROSPECTOR SCANNER: Timeout check at time %u ***\n", now);
-    
+
+    LOG_DBG("Timeout check at time %u", now);
+
+    // Collect timeout events first, then release mutex before notifying
+    int timeout_indices[ZMK_STATUS_SCANNER_MAX_KEYBOARDS];
+    int timeout_count = 0;
+
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) {
             uint32_t age = now - keyboards[i].last_seen;
-            printk("*** SCANNER: Slot %d age: %ums (timeout at %ums) ***\n", 
+            LOG_DBG("Slot %d age: %ums (timeout at %ums)",
                    i, age, KEYBOARD_TIMEOUT_MS);
-            
+
             if (age > KEYBOARD_TIMEOUT_MS) {
-                printk("*** SCANNER: TIMEOUT! Removing keyboard %s from slot %d ***\n", 
-                       keyboards[i].data.layer_name, i);
                 LOG_INF("Keyboard timeout: %s (slot %d)", keyboards[i].data.layer_name, i);
                 keyboards[i].active = false;
-                notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_LOST, i);
+                timeout_indices[timeout_count++] = i;
             }
         }
     }
-    
+
+    scanner_unlock();
+
+    // Phase 5: Do NOT call notify_event from timeout work context
+    // Display updates are handled by periodic rx_periodic_work instead
+    for (int i = 0; i < timeout_count; i++) {
+        LOG_INF("Keyboard lost (slot %d) - display will update on next periodic cycle",
+                timeout_indices[i]);
+    }
+
     // Reschedule timeout check
     if (scanning) {
         k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
@@ -427,10 +530,13 @@ static void timeout_work_handler(struct k_work *work) {
 }
 
 int zmk_status_scanner_init(void) {
+    // Initialize mutex first
+    scanner_mutex_init();
+
     memset(keyboards, 0, sizeof(keyboards));
     k_work_init_delayable(&timeout_work, timeout_work_handler);
-    
-    LOG_INF("Status scanner initialized");
+
+    LOG_INF("Status scanner initialized with mutex protection");
     return 0;
 }
 
@@ -486,28 +592,34 @@ struct zmk_keyboard_status *zmk_status_scanner_get_keyboard(int index) {
     if (index < 0 || index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         return NULL;
     }
-    
+
+    // Note: We don't use mutex here because:
+    // 1. This is a simple read operation
+    // 2. The caller (update_display_from_scanner) already holds LVGL mutex
+    // 3. Adding mutex here could cause deadlock with display callback
+    // The keyboards array access is atomic enough for read operations
+
     return keyboards[index].active ? &keyboards[index] : NULL;
 }
 
 int zmk_status_scanner_get_active_count(void) {
     int count = 0;
     uint32_t now = k_uptime_get_32();
-    
-    printk("*** PROSPECTOR SCANNER: Active keyboard check at time %u ***\n", now);
-    
+
+    LOG_DBG("Active keyboard check at time %u", now);
+
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) {
             uint32_t age = now - keyboards[i].last_seen;
-            printk("*** SCANNER: Slot %d: ACTIVE, last_seen=%u, age=%ums, name=%s ***\n", 
+            LOG_DBG("Slot %d: ACTIVE, last_seen=%u, age=%ums, name=%s",
                    i, keyboards[i].last_seen, age, keyboards[i].data.layer_name);
             count++;
         } else {
-            printk("*** SCANNER: Slot %d: INACTIVE ***\n", i);
+            LOG_DBG("Slot %d: INACTIVE", i);
         }
     }
-    
-    printk("*** PROSPECTOR SCANNER: Total active count: %d ***\n", count);
+
+    LOG_DBG("Total active count: %d", count);
     return count;
 }
 

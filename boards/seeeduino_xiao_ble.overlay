@@ -1,0 +1,38 @@
+/*
+ * Copyright (c) 2024 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Board-level configuration for Seeeduino XIAO BLE (Prospector Scanner)
+ *
+ * I2C ALWAYS ENABLED: I2C and SENSOR subsystems are always enabled for battery support.
+ * This prevents boot crashes when CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=n.
+ *
+ * Note: APDS9960 sensor is only initialized when CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR=y
+ */
+
+&pinctrl {
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  // D4 = P0.04
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  // D5 = P0.05
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;
+            low-power-enable;
+        };
+    };
+};
+
+&i2c0 {
+    status = "okay";
+    compatible = "nordic,nrf-twim";
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
+    clock-frequency = <I2C_BITRATE_FAST>;
+};

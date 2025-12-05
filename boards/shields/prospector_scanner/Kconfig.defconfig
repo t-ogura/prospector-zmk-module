@@ -67,6 +67,19 @@ config PWM
 config LED
     default y
 
+# I2C and Sensor - Always enabled for battery support
+# Note: I2C and SENSOR are required by ZMK_BATTERY_REPORTING
+# APDS9960 is only enabled when automatic brightness is requested
+
+config I2C
+    default y
+
+config SENSOR
+    default y
+
+config APDS9960
+    default n
+
 # Ambient light sensor and brightness settings moved to main Kconfig
 # PROSPECTOR_MAX_LAYERS now defined in main Kconfig
 

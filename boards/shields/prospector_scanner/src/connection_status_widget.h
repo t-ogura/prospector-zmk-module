@@ -19,6 +19,11 @@ struct zmk_widget_connection_status {
     lv_obj_t *ble_profile_label;
 };
 
+// ========== Dynamic Allocation Functions ==========
+struct zmk_widget_connection_status *zmk_widget_connection_status_create(lv_obj_t *parent);
+void zmk_widget_connection_status_destroy(struct zmk_widget_connection_status *widget);
+
+// ========== Widget Control Functions ==========
 int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widget, lv_obj_t *parent);
 void zmk_widget_connection_status_update(struct zmk_widget_connection_status *widget, struct zmk_keyboard_status *kbd);
 void zmk_widget_connection_status_reset(struct zmk_widget_connection_status *widget);

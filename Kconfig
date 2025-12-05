@@ -36,6 +36,20 @@ config ZMK_STATUS_ADV_KEYBOARD_NAME
       Name to identify this keyboard in status advertisements.
       Limited to 8 characters including null terminator.
 
+config PROSPECTOR_CHANNEL
+    int "Prospector channel number (0-255)"
+    range 0 255
+    default 0
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      Channel number for Prospector scanner pairing.
+      0 = Broadcast to all scanners (default, maximum compatibility)
+      1-255 = Specific channel for dedicated scanner pairing
+
+      Use this to prevent interference when multiple keyboards and
+      scanners are in the same area. Set the same channel number on
+      both keyboard and scanner to create a dedicated pair.
+
 config ZMK_STATUS_ADV_ACTIVITY_BASED
     bool "Enable activity-based advertisement intervals"
     default y
@@ -92,6 +106,22 @@ config PROSPECTOR_MODE_SCANNER
       Enable scanner mode to receive status advertisements from ZMK keyboards.
       In this mode, Prospector acts as a standalone status display device.
 
+config PROSPECTOR_TOUCH_ENABLED
+    bool "Enable touch panel support"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER
+    select INPUT
+    select INPUT_CST816S
+    select INPUT_CST816S_INTERRUPT
+    select ZMK_POINTING
+    help
+      Enable touch panel support for swipe gestures and settings screens.
+      When disabled, the scanner displays status only without user interaction.
+      Touch-enabled version includes: swipe navigation, display settings, system settings.
+      Non-touch version shows: main status display with signal strength widget.
+
+      This automatically enables INPUT, INPUT_CST816S drivers when selected.
+
 config PROSPECTOR_MULTI_KEYBOARD
     bool "Support multiple keyboards"
     default y
@@ -110,23 +140,70 @@ config PROSPECTOR_MAX_KEYBOARDS
 config PROSPECTOR_MAX_LAYERS
     int "Maximum number of layers to display"
     range 4 10
-    default 6
+    default 7
     depends on PROSPECTOR_MODE_SCANNER
     help
       Maximum number of layers to display in the layer status widget (layers 0 to N-1).
-      Default is 6 layers (0-5). Increase if your keyboard has more layers.
+      Default is 7 layers (0-6). For 10-layer support set to 10 (0-9).
       Range is 4-10 layers. Display shows layers 0 through (MAX_LAYERS-1).
+      Automatically centers when fewer layers are configured.
       This setting only applies to scanner mode and is ignored for keyboard builds.
 
 config PROSPECTOR_SCANNER_TIMEOUT_MS
-    int "Scanner timeout in milliseconds"
-    range 10000 600000
+    int "Scanner timeout in milliseconds (0 to disable)"
+    range 0 600000
     default 480000
     depends on PROSPECTOR_MODE_SCANNER
     help
       Time in milliseconds to wait before considering a keyboard as lost.
       Default is 480000ms (8 minutes) - should be longer than keyboard idle interval.
-      Range is 10-600 seconds (10min max).
+      Set to 0 to disable timeout completely.
+      Range is 0 (disabled) or 10000-600000ms (10s to 10min).
+
+config PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS
+    int "Main loop timer interval in milliseconds"
+    range 50 500
+    default 150
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Main loop timer interval for UI updates and message processing.
+      Lower values provide more responsive UI but use more CPU power.
+      Higher values save battery but may feel less responsive.
+
+      Recommended values:
+      - 100ms: Very responsive (high CPU usage)
+      - 150ms: Balanced responsiveness and efficiency (default)
+      - 200ms: Power-saving mode (may feel slightly laggy)
+
+      Range is 50-500ms. Default is 150ms for balanced performance.
+
+config PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
+    int "Display brightness during timeout (percentage)"
+    range 1 50
+    default 1
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Display brightness percentage when scanner times out (no keyboard reception).
+      Low brightness saves power while maintaining minimal visibility.
+      Brightness automatically restores when keyboard data is received again.
+      Default is 1% (very dim). Range is 1-50%.
+
+config PROSPECTOR_SCANNER_CHANNEL
+    int "Prospector scanner channel number (0-255)"
+    range 0 255
+    default 0
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Channel number for receiving keyboard advertisements.
+      0 = Receive from all keyboards (default, maximum compatibility)
+      1-255 = Receive only from keyboards on the same channel
+
+      Use this to prevent interference when multiple keyboards and
+      scanners are in the same area. Set the same channel number on
+      both keyboard and scanner to create a dedicated pair.
+
+      Backward compatibility: Old keyboards (channel=0) will always
+      be received by scanners regardless of scanner channel setting.
 
 config PROSPECTOR_SCANNER_IDLE_BRIGHTNESS_MS
     int "Time before dimming display when no keyboard activity"
@@ -205,31 +282,40 @@ config PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     depends on PROSPECTOR_MODE_SCANNER
     help
       Enable APDS9960 ambient light sensor for automatic brightness adjustment.
-      If disabled, uses fixed brightness mode.
-      Requires APDS9960 sensor connected to I2C pins (SDA=D4, SCL=D5).
-      Note: You must also enable SENSOR=y, APDS9960=y, and I2C=y in your config.
+      When enabled, uses direct I2C polling for sensor readings (no interrupt pin required).
+      When disabled, uses fixed brightness mode.
+
+      Note: This uses direct I2C communication, not the Zephyr APDS9960 driver.
+      This allows 4-pin connections without an interrupt pin.
+
+      Hardware connection (when enabled):
+      - SDA = D4 (P0.04)
+      - SCL = D5 (P0.05)
+      - VCC = 3.3V, GND = GND
+
+      User-friendly: Only this one setting needs to be changed!
 
 config PROSPECTOR_ALS_MIN_BRIGHTNESS
     int "Minimum brightness percentage"
     range 1 95
-    default 10
+    default 5
     depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     help
       Minimum brightness level in percentage (1-95%).
       Display will never go darker than this value.
-      Default is 10% to keep display readable in darkness.
+      Default is 5% for true darkness support.
 
 config PROSPECTOR_ALS_MAX_BRIGHTNESS
     int "Maximum brightness percentage"
     range 10 100
-    default 60 if PROSPECTOR_BATTERY_SUPPORT
-    default 100
+    default 65 if PROSPECTOR_BATTERY_SUPPORT
+    default 80
     depends on PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR
     help
       Maximum brightness level in percentage (10-100%).
       Display will never go brighter than this value.
-      Default is 60% when battery operation enabled (to preserve battery life),
-      100% when USB powered only for maximum visibility in bright light.
+      Default is 65% when battery operation enabled (to preserve battery life),
+      80% when USB powered only for comfortable viewing without excessive brightness.
       Note: For separate battery/USB max values, use the options below instead.
 
 config PROSPECTOR_ALS_MAX_BRIGHTNESS_BATTERY
@@ -264,6 +350,15 @@ config PROSPECTOR_ALS_UPDATE_INTERVAL_MS
       Lower values = more responsive but higher power consumption.
       Default is 2000ms (2 seconds). Range is 0.5-10 seconds.
 
+config PROSPECTOR_BRIGHTNESS_FADE_STEPS
+    int "Number of brightness fade steps"
+    range 5 20
+    default 10
+    help
+      Number of steps for smooth brightness transitions.
+      More steps = smoother but slower fades.
+      Default is 10 steps. Range is 5-20.
+
 config PROSPECTOR_ALS_SENSOR_THRESHOLD
     int "Light sensor threshold for maximum brightness"
     range 50 500
@@ -278,14 +373,14 @@ config PROSPECTOR_ALS_SENSOR_THRESHOLD
 config PROSPECTOR_FIXED_BRIGHTNESS
     int "Fixed brightness percentage (when ALS disabled)"
     range 10 100
-    default 60 if PROSPECTOR_BATTERY_SUPPORT
+    default 65 if PROSPECTOR_BATTERY_SUPPORT
     default 80
     depends on PROSPECTOR_MODE_SCANNER
     help
       Fixed brightness level when ambient light sensor is disabled.
       Also used as fallback brightness when ALS sensor fails.
-      Default is 60% when battery operation enabled (to preserve battery life),
-      80% when USB powered only for good visibility.
+      Default is 65% when battery operation enabled (to preserve battery life),
+      80% when USB powered only for comfortable viewing.
       Range is 10-100%.
       Note: For separate battery/USB fixed values, use the options below instead.
 
@@ -316,12 +411,14 @@ config PROSPECTOR_BATTERY_SUPPORT
     bool "Enable scanner battery operation support"
     default n
     depends on PROSPECTOR_MODE_SCANNER
+    select ZMK_BATTERY_REPORTING
     help
       Enable battery operation for Prospector scanner device.
       Automatically detects battery presence via device tree.
       Safe to enable even without battery hardware - will auto-hide if not detected.
       Displays battery level and charging status in top-right corner.
-      Note: Requires ZMK_BATTERY_REPORTING and USB_DEVICE_STACK to be enabled separately.
+      Automatically enables ZMK_BATTERY_REPORTING.
+      Note: USB_DEVICE_STACK must be enabled manually in config file.
 
 config PROSPECTOR_BATTERY_WIDGET_POSITION
     string "Battery widget screen position"

@@ -90,6 +90,61 @@ int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, l
     return 0;
 }
 
+// Dynamic allocation: Create widget with memory allocation
+struct zmk_widget_modifier_status *zmk_widget_modifier_status_create(lv_obj_t *parent) {
+    LOG_DBG("Creating modifier status widget (dynamic allocation)");
+
+    if (!parent) {
+        LOG_ERR("Cannot create widget: parent is NULL");
+        return NULL;
+    }
+
+    // Allocate memory for widget structure using LVGL's memory allocator
+    struct zmk_widget_modifier_status *widget =
+        (struct zmk_widget_modifier_status *)lv_mem_alloc(sizeof(struct zmk_widget_modifier_status));
+    if (!widget) {
+        LOG_ERR("Failed to allocate memory for modifier_status_widget (%d bytes)",
+                sizeof(struct zmk_widget_modifier_status));
+        return NULL;
+    }
+
+    // Zero-initialize the allocated memory
+    memset(widget, 0, sizeof(struct zmk_widget_modifier_status));
+
+    // Initialize widget (this creates LVGL objects)
+    int ret = zmk_widget_modifier_status_init(widget, parent);
+    if (ret != 0) {
+        LOG_ERR("Widget initialization failed, freeing memory");
+        lv_mem_free(widget);
+        return NULL;
+    }
+
+    LOG_DBG("Modifier status widget created successfully");
+    return widget;
+}
+
+// Dynamic deallocation: Destroy widget and free memory
+void zmk_widget_modifier_status_destroy(struct zmk_widget_modifier_status *widget) {
+    LOG_DBG("Destroying modifier status widget (dynamic deallocation)");
+
+    if (!widget) {
+        return;
+    }
+
+    // Delete LVGL objects first
+    if (widget->label) {
+        lv_obj_del(widget->label);
+        widget->label = NULL;
+    }
+    if (widget->obj) {
+        lv_obj_del(widget->obj);
+        widget->obj = NULL;
+    }
+
+    // Free the widget structure memory from LVGL heap
+    lv_mem_free(widget);
+}
+
 void zmk_widget_modifier_status_update(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd) {
     update_modifier_display(widget, kbd);
 }

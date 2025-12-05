@@ -210,6 +210,17 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     lv_obj_set_flex_flow(widget->obj, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);  // Right-aligned content
 
+    // Channel label (leftmost position)
+    widget->channel_label = lv_label_create(widget->obj);
+#ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
+    lv_label_set_text_fmt(widget->channel_label, "Ch:%d", CONFIG_PROSPECTOR_SCANNER_CHANNEL);
+#else
+    lv_label_set_text(widget->channel_label, "Ch:0");
+#endif
+    lv_obj_set_style_text_font(widget->channel_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(widget->channel_label, lv_color_make(0x80, 0x80, 0x80), 0);
+    lv_obj_set_width(widget->channel_label, 40);  // Width for "Ch:255"
+
     // Signal info title/label (short abbreviation) - restore readable font
     lv_obj_t *signal_title = lv_label_create(widget->obj);
     lv_label_set_text(signal_title, "RX:");

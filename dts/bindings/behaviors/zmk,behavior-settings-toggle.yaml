@@ -1,0 +1,8 @@
+# Copyright (c) 2024 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Custom behavior for toggling settings screen
+
+compatible: "zmk,behavior-settings-toggle"
+
+include: zero_param.yaml
