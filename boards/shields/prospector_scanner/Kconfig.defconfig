@@ -31,6 +31,13 @@ endchoice
 config ZMK_DISPLAY_DEDICATED_THREAD_STACK_SIZE
     default 4096
 
+# MIPI DBI for ST7789V standard driver (Zephyr 4.1+)
+config MIPI_DBI
+    default y
+
+config SPI
+    default y
+
 choice ST7789V_PIXEL_FORMAT
 	default ST7789V_RGB565
 endchoice
