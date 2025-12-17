@@ -114,7 +114,7 @@ struct zmk_widget_wpm_status *zmk_widget_wpm_status_create(lv_obj_t *parent) {
 
     // Allocate memory for widget structure using LVGL's memory allocator
     struct zmk_widget_wpm_status *widget =
-        (struct zmk_widget_wpm_status *)lv_mem_alloc(sizeof(struct zmk_widget_wpm_status));
+        (struct zmk_widget_wpm_status *)lv_malloc(sizeof(struct zmk_widget_wpm_status));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for wpm_status_widget (%d bytes)",
                 sizeof(struct zmk_widget_wpm_status));
@@ -128,7 +128,7 @@ struct zmk_widget_wpm_status *zmk_widget_wpm_status_create(lv_obj_t *parent) {
     int ret = zmk_widget_wpm_status_init(widget, parent);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -158,7 +158,7 @@ void zmk_widget_wpm_status_destroy(struct zmk_widget_wpm_status *widget) {
     }
 
     // Free the widget structure memory from LVGL heap
-    lv_mem_free(widget);
+    lv_free(widget);
 }
 
 lv_obj_t *zmk_widget_wpm_status_obj(struct zmk_widget_wpm_status *widget) {

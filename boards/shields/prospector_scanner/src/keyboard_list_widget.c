@@ -380,7 +380,7 @@ struct zmk_widget_keyboard_list *zmk_widget_keyboard_list_create(lv_obj_t *paren
 
     // Allocate memory using LVGL's allocator
     struct zmk_widget_keyboard_list *widget =
-        (struct zmk_widget_keyboard_list *)lv_mem_alloc(sizeof(struct zmk_widget_keyboard_list));
+        (struct zmk_widget_keyboard_list *)lv_malloc(sizeof(struct zmk_widget_keyboard_list));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for keyboard_list_widget (%d bytes)",
                 sizeof(struct zmk_widget_keyboard_list));
@@ -394,7 +394,7 @@ struct zmk_widget_keyboard_list *zmk_widget_keyboard_list_create(lv_obj_t *paren
     int ret = zmk_widget_keyboard_list_init(widget, parent);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -432,5 +432,5 @@ void zmk_widget_keyboard_list_destroy(struct zmk_widget_keyboard_list *widget) {
     }
 
     // Free widget memory
-    lv_mem_free(widget);
+    lv_free(widget);
 }

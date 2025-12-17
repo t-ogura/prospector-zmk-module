@@ -372,7 +372,7 @@ struct zmk_widget_display_settings *zmk_widget_display_settings_create(lv_obj_t 
     }
 
     struct zmk_widget_display_settings *widget =
-        (struct zmk_widget_display_settings *)lv_mem_alloc(sizeof(struct zmk_widget_display_settings));
+        (struct zmk_widget_display_settings *)lv_malloc(sizeof(struct zmk_widget_display_settings));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for display_settings_widget");
         return NULL;
@@ -382,7 +382,7 @@ struct zmk_widget_display_settings *zmk_widget_display_settings_create(lv_obj_t 
 
     int ret = zmk_widget_display_settings_init(widget, parent);
     if (ret != 0) {
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -400,7 +400,7 @@ void zmk_widget_display_settings_destroy(struct zmk_widget_display_settings *wid
         widget->obj = NULL;
     }
 
-    lv_mem_free(widget);
+    lv_free(widget);
 }
 
 // ========== Widget Control Functions ==========

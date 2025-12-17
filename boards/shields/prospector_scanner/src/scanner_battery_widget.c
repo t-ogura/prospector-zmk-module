@@ -160,7 +160,7 @@ struct zmk_widget_scanner_battery *zmk_widget_scanner_battery_create(lv_obj_t *p
 
     // Allocate memory for widget structure using LVGL's memory allocator
     struct zmk_widget_scanner_battery *widget =
-        (struct zmk_widget_scanner_battery *)lv_mem_alloc(sizeof(struct zmk_widget_scanner_battery));
+        (struct zmk_widget_scanner_battery *)lv_malloc(sizeof(struct zmk_widget_scanner_battery));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for scanner_battery_widget (%d bytes)",
                 sizeof(struct zmk_widget_scanner_battery));
@@ -174,7 +174,7 @@ struct zmk_widget_scanner_battery *zmk_widget_scanner_battery_create(lv_obj_t *p
     int ret = zmk_widget_scanner_battery_init(widget, parent);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -199,7 +199,7 @@ void zmk_widget_scanner_battery_destroy(struct zmk_widget_scanner_battery *widge
     }
 
     // Free the widget structure memory from LVGL heap
-    lv_mem_free(widget);
+    lv_free(widget);
 }
 
 void zmk_widget_scanner_battery_update(struct zmk_widget_scanner_battery *widget, 

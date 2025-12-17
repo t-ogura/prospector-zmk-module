@@ -54,7 +54,8 @@ endchoice
 config LV_COLOR_16_SWAP
 	default y
 
-config LV_DISP_DEF_REFR_PERIOD
+# LVGL 9: LV_DISP_DEF_REFR_PERIOD renamed to LV_DEF_REFR_PERIOD
+config LV_DEF_REFR_PERIOD
     default 20
 
 choice LV_FONT_DEFAULT

@@ -101,7 +101,7 @@ struct zmk_widget_modifier_status *zmk_widget_modifier_status_create(lv_obj_t *p
 
     // Allocate memory for widget structure using LVGL's memory allocator
     struct zmk_widget_modifier_status *widget =
-        (struct zmk_widget_modifier_status *)lv_mem_alloc(sizeof(struct zmk_widget_modifier_status));
+        (struct zmk_widget_modifier_status *)lv_malloc(sizeof(struct zmk_widget_modifier_status));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for modifier_status_widget (%d bytes)",
                 sizeof(struct zmk_widget_modifier_status));
@@ -115,7 +115,7 @@ struct zmk_widget_modifier_status *zmk_widget_modifier_status_create(lv_obj_t *p
     int ret = zmk_widget_modifier_status_init(widget, parent);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -142,7 +142,7 @@ void zmk_widget_modifier_status_destroy(struct zmk_widget_modifier_status *widge
     }
 
     // Free the widget structure memory from LVGL heap
-    lv_mem_free(widget);
+    lv_free(widget);
 }
 
 void zmk_widget_modifier_status_update(struct zmk_widget_modifier_status *widget, struct zmk_keyboard_status *kbd) {

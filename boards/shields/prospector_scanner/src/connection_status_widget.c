@@ -131,7 +131,7 @@ struct zmk_widget_connection_status *zmk_widget_connection_status_create(lv_obj_
 
     // Allocate memory for widget structure using LVGL's memory allocator
     struct zmk_widget_connection_status *widget =
-        (struct zmk_widget_connection_status *)lv_mem_alloc(sizeof(struct zmk_widget_connection_status));
+        (struct zmk_widget_connection_status *)lv_malloc(sizeof(struct zmk_widget_connection_status));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for connection_status_widget (%d bytes)",
                 sizeof(struct zmk_widget_connection_status));
@@ -145,7 +145,7 @@ struct zmk_widget_connection_status *zmk_widget_connection_status_create(lv_obj_
     int ret = zmk_widget_connection_status_init(widget, parent);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -167,5 +167,5 @@ void zmk_widget_connection_status_destroy(struct zmk_widget_connection_status *w
     }
 
     // Free the widget structure memory from LVGL heap
-    lv_mem_free(widget);
+    lv_free(widget);
 }

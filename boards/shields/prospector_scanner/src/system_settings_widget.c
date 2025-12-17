@@ -213,7 +213,7 @@ struct zmk_widget_system_settings *zmk_widget_system_settings_create(lv_obj_t *p
 
     // Allocate memory using LVGL's allocator
     struct zmk_widget_system_settings *widget =
-        (struct zmk_widget_system_settings *)lv_mem_alloc(sizeof(struct zmk_widget_system_settings));
+        (struct zmk_widget_system_settings *)lv_malloc(sizeof(struct zmk_widget_system_settings));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for system_settings_widget (%d bytes)",
                 sizeof(struct zmk_widget_system_settings));
@@ -227,7 +227,7 @@ struct zmk_widget_system_settings *zmk_widget_system_settings_create(lv_obj_t *p
     int ret = zmk_widget_system_settings_init(widget, parent);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -256,7 +256,7 @@ void zmk_widget_system_settings_destroy(struct zmk_widget_system_settings *widge
     widget->reset_label = NULL;
 
     // Free widget memory
-    lv_mem_free(widget);
+    lv_free(widget);
 }
 
 // ========== Widget Control Functions ==========
