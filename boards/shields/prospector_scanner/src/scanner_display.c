@@ -1270,10 +1270,10 @@ lv_obj_t *zmk_display_status_screen() {
     LOG_INF("✅ Connection status widget created");
 
     // Layer widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
+    // LVGL 9 FIX: Position passed via y_center_offset parameter (no separate lv_obj_align call)
     LOG_INF("Step 5: Init layer status widget...");
-    layer_widget = zmk_widget_layer_status_create(screen);
+    layer_widget = zmk_widget_layer_status_create(screen, -10);  // y_center_offset = -10
     if (layer_widget) {
-        lv_obj_align(zmk_widget_layer_status_obj(layer_widget), LV_ALIGN_CENTER, 0, -10);
         // Restore cached values if available
         if (cached_status_valid) {
             zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);
@@ -1448,10 +1448,9 @@ static void restore_main_screen_widgets(void) {
     // lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_BOTTOM_MID, 0, -65);
     LOG_INF("  ✅ Modifier widget ready");
 
-    // Recreate layer widget
+    // Recreate layer widget - LVGL 9 FIX: Use create function with y_center_offset
     LOG_INF("  Recreating layer widget...");
-    zmk_widget_layer_status_init(&layer_widget, main_screen);
-    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, 0);
+    layer_widget = zmk_widget_layer_status_create(main_screen, 0);  // y_center_offset = 0
     LOG_INF("  ✅ Layer widget recreated");
 
     LOG_INF("🔄 Main screen widgets restored");
@@ -1841,9 +1840,9 @@ return_to_main:
                 }
             }
             if (!layer_widget) {
-                layer_widget = zmk_widget_layer_status_create(main_screen);
+                // LVGL 9 FIX: Position passed via y_center_offset parameter
+                layer_widget = zmk_widget_layer_status_create(main_screen, -10);  // y_center_offset = -10
                 if (layer_widget) {
-                    lv_obj_align(zmk_widget_layer_status_obj(layer_widget), LV_ALIGN_CENTER, 0, -10);
                     // Restore cached values
                     if (cached_status_valid) {
                         zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);

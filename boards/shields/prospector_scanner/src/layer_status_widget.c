@@ -74,10 +74,19 @@ static void update_layer_display(struct zmk_widget_layer_status *widget, struct 
     LOG_DBG("Layer display updated: active layer %d (showing %d layers)", active_layer, num_layers);
 }
 
-int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_t *parent) {
+/**
+ * LVGL 9 FIX: No container - all labels created directly on parent screen.
+ * This avoids the LVGL 9 freeze bug when setting text on labels inside containers.
+ * See: LVGL9_CONTAINER_LABEL_FREEZE_BUG.md
+ */
+int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_t *parent, int32_t y_center_offset) {
     if (!widget || !parent) {
         return -1;
     }
+
+    // Store parent and position for later use
+    widget->parent = parent;
+    widget->y_center_offset = y_center_offset;
 
     // Get visible layers from global settings (touch version) or Kconfig (non-touch version)
 #if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
@@ -88,45 +97,45 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     if (widget->visible_layers < 4) widget->visible_layers = 4;
     if (widget->visible_layers > MAX_LAYER_DISPLAY) widget->visible_layers = MAX_LAYER_DISPLAY;
 
-    // Create container widget for layer display
-    widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 200, 60); // Slightly taller for "Layer" label
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_all(widget->obj, 0, 0);
+    // LVGL 9 FIX: NO CONTAINER - Create labels directly on parent screen
+    // Previous code: widget->obj = lv_obj_create(parent); // CAUSES FREEZE IN LVGL 9
 
-    // Create stylish "Layer" title label (smaller font)
-    widget->layer_title = lv_label_create(widget->obj);
+    // Create stylish "Layer" title label directly on parent
+    widget->layer_title = lv_label_create(parent);
     lv_label_set_text(widget->layer_title, "Layer");
-    lv_obj_set_style_text_font(widget->layer_title, &lv_font_montserrat_16, 0); // Smaller title font
-    lv_obj_set_style_text_color(widget->layer_title, lv_color_make(160, 160, 160), 0); // Soft gray
+    lv_obj_set_style_text_font(widget->layer_title, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(widget->layer_title, lv_color_make(160, 160, 160), 0);
     lv_obj_set_style_text_opa(widget->layer_title, LV_OPA_70, 0);
-    lv_obj_align(widget->layer_title, LV_ALIGN_TOP_MID, 0, -5); // Above the numbers
+    // Position: center horizontally, above the layer numbers
+    lv_obj_align(widget->layer_title, LV_ALIGN_CENTER, 0, y_center_offset - 25);
+
+    // Set widget->obj to layer_title for compatibility with zmk_widget_layer_status_obj()
+    widget->obj = widget->layer_title;
 
     uint8_t num_layers = widget->visible_layers;
 
-    // Create layer number labels (0-9) in horizontal layout with dynamic centering
+    // Create layer number labels directly on parent
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
-        widget->layer_labels[i] = lv_label_create(widget->obj);
+        widget->layer_labels[i] = lv_label_create(parent);
 
         // Set larger font for better visibility
-        lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_28, 0);  // Large numbers (enabled via config)
+        lv_obj_set_style_text_font(widget->layer_labels[i], &lv_font_montserrat_28, 0);
 
         // Set layer number text (support 0-9)
-        char layer_text[3];  // Support double digits
+        char layer_text[3];
         snprintf(layer_text, sizeof(layer_text), "%d", i);
         lv_label_set_text(widget->layer_labels[i], layer_text);
 
         // Dynamic positioning - center the row based on visible layer count
-        int spacing = (num_layers <= 4) ? 35 :    // Wide spacing for 4 layers
-                      (num_layers <= 7) ? 25 :    // Medium spacing for 5-7 layers
-                                          18;     // Tight spacing for 8-10 layers
+        int spacing = (num_layers <= 4) ? 35 :
+                      (num_layers <= 7) ? 25 :
+                                          18;
 
-        // Calculate start position to center the entire row
         int total_width = (num_layers - 1) * spacing;
         int start_x = -(total_width / 2);
 
-        lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), 5); // Below title
+        // Position relative to screen center with y_center_offset
+        lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), y_center_offset + 5);
 
         // Initialize with much darker gray color (barely visible)
         lv_obj_set_style_text_color(widget->layer_labels[i], lv_color_make(40, 40, 40), 0);
@@ -142,13 +151,13 @@ int zmk_widget_layer_status_init(struct zmk_widget_layer_status *widget, lv_obj_
     lv_obj_set_style_text_color(widget->layer_labels[0], get_layer_color(0), 0);
     lv_obj_set_style_text_opa(widget->layer_labels[0], LV_OPA_COVER, 0);
 
-    LOG_INF("✨ Layer widget initialized: %d layers visible (0-%d) with dynamic centering",
+    LOG_INF("✨ Layer widget initialized (LVGL9 no-container): %d layers visible (0-%d)",
             num_layers, num_layers - 1);
     return 0;
 }
 
 void zmk_widget_layer_status_set_visible_layers(struct zmk_widget_layer_status *widget, uint8_t count) {
-    if (!widget || !widget->obj) {
+    if (!widget || !widget->layer_title) {
         return;
     }
 
@@ -159,16 +168,15 @@ void zmk_widget_layer_status_set_visible_layers(struct zmk_widget_layer_status *
     widget->visible_layers = count;
 
     // Recalculate spacing and positions for visible layers
-    int spacing = (count <= 4) ? 35 :    // Wide spacing for 4 layers
-                  (count <= 7) ? 25 :    // Medium spacing for 5-7 layers
-                                 18;     // Tight spacing for 8-10 layers
+    int spacing = (count <= 4) ? 35 :
+                  (count <= 7) ? 25 :
+                                 18;
 
     int total_width = (count - 1) * spacing;
     int start_x = -(total_width / 2);
 
-    // Update all layer label positions and visibility
+    // Update all layer label positions and visibility (LVGL 9: use stored y_center_offset)
     for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
-        // Skip if label doesn't exist
         if (!widget->layer_labels[i]) {
             continue;
         }
@@ -177,7 +185,9 @@ void zmk_widget_layer_status_set_visible_layers(struct zmk_widget_layer_status *
             lv_obj_add_flag(widget->layer_labels[i], LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_clear_flag(widget->layer_labels[i], LV_OBJ_FLAG_HIDDEN);
-            lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER, start_x + (i * spacing), 5);
+            // LVGL 9 FIX: Position relative to screen center using stored offset
+            lv_obj_align(widget->layer_labels[i], LV_ALIGN_CENTER,
+                         start_x + (i * spacing), widget->y_center_offset + 5);
         }
     }
 
@@ -216,8 +226,12 @@ lv_obj_t *zmk_widget_layer_status_obj(struct zmk_widget_layer_status *widget) {
 
 // ========== Dynamic Allocation Functions ==========
 
-struct zmk_widget_layer_status *zmk_widget_layer_status_create(lv_obj_t *parent) {
-    LOG_DBG("Creating layer status widget (dynamic allocation)");
+/**
+ * LVGL 9 FIX: y_center_offset specifies vertical position relative to screen center.
+ * This replaces the previous pattern of creating widget then calling lv_obj_align().
+ */
+struct zmk_widget_layer_status *zmk_widget_layer_status_create(lv_obj_t *parent, int32_t y_center_offset) {
+    LOG_DBG("Creating layer status widget (LVGL9 no-container, y_offset=%d)", y_center_offset);
 
     if (!parent) {
         LOG_ERR("Cannot create widget: parent is NULL");
@@ -225,8 +239,9 @@ struct zmk_widget_layer_status *zmk_widget_layer_status_create(lv_obj_t *parent)
     }
 
     // Allocate memory for widget structure using LVGL's memory allocator
+    // LVGL 9 API: lv_malloc (was lv_mem_alloc in LVGL 8)
     struct zmk_widget_layer_status *widget =
-        (struct zmk_widget_layer_status *)lv_mem_alloc(sizeof(struct zmk_widget_layer_status));
+        (struct zmk_widget_layer_status *)lv_malloc(sizeof(struct zmk_widget_layer_status));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for layer_status_widget (%d bytes)",
                 sizeof(struct zmk_widget_layer_status));
@@ -236,11 +251,11 @@ struct zmk_widget_layer_status *zmk_widget_layer_status_create(lv_obj_t *parent)
     // Zero-initialize the allocated memory
     memset(widget, 0, sizeof(struct zmk_widget_layer_status));
 
-    // Initialize widget (this creates LVGL objects)
-    int ret = zmk_widget_layer_status_init(widget, parent);
+    // Initialize widget with position (LVGL 9: no separate align call needed)
+    int ret = zmk_widget_layer_status_init(widget, parent, y_center_offset);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -249,18 +264,31 @@ struct zmk_widget_layer_status *zmk_widget_layer_status_create(lv_obj_t *parent)
 }
 
 void zmk_widget_layer_status_destroy(struct zmk_widget_layer_status *widget) {
-    LOG_DBG("Destroying layer status widget (dynamic deallocation)");
+    LOG_DBG("Destroying layer status widget (LVGL9 no-container)");
 
     if (!widget) {
         return;
     }
 
-    // Delete LVGL objects (parent obj will delete all children including layer_labels and layer_title)
-    if (widget->obj) {
-        lv_obj_del(widget->obj);
-        widget->obj = NULL;
+    // LVGL 9 FIX: Delete each label individually (no container parent)
+    // Delete layer number labels
+    for (int i = 0; i < MAX_LAYER_DISPLAY; i++) {
+        if (widget->layer_labels[i]) {
+            lv_obj_del(widget->layer_labels[i]);
+            widget->layer_labels[i] = NULL;
+        }
     }
 
+    // Delete title label
+    if (widget->layer_title) {
+        lv_obj_del(widget->layer_title);
+        widget->layer_title = NULL;
+    }
+
+    widget->obj = NULL;
+    widget->parent = NULL;
+
     // Free the widget structure memory from LVGL heap
-    lv_mem_free(widget);
+    // LVGL 9 API: lv_free (was lv_mem_free in LVGL 8)
+    lv_free(widget);
 }
