@@ -66,39 +66,43 @@ void zmk_widget_wpm_status_reset(struct zmk_widget_wpm_status *widget) {
     widget->last_activity_time = 0;
 }
 
+/**
+ * LVGL 9 FIX: NO CONTAINER - Create all elements directly on parent
+ * Widget positioned at TOP_LEFT with x=10, y=50 in scanner_display.c
+ */
 int zmk_widget_wpm_status_init(struct zmk_widget_wpm_status *widget, lv_obj_t *parent) {
     if (!widget || !parent) {
         return -1;
     }
-    
-    // Create container widget - enhanced design with title + value
-    widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 60, 35);  // Larger size for title + value
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);  // Transparent background
-    lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);  // No border
-    lv_obj_set_style_pad_all(widget->obj, 0, 0);  // No padding
-    
-    // Create WPM title label (small font) - moved down 3px
-    widget->wpm_title_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->wpm_title_label, LV_ALIGN_TOP_MID, 0, 3);
+
+    widget->parent = parent;
+
+    // Position offsets from TOP_LEFT
+    const int X_OFFSET = 10;
+    const int Y_OFFSET = 50;
+
+    // Create WPM title label (small font) - created directly on parent
+    widget->wpm_title_label = lv_label_create(parent);
+    lv_obj_align(widget->wpm_title_label, LV_ALIGN_TOP_LEFT, X_OFFSET, Y_OFFSET);
     lv_label_set_text(widget->wpm_title_label, "WPM");
-    lv_obj_set_style_text_font(widget->wpm_title_label, &lv_font_unscii_8, 0);  // Small font
-    lv_obj_set_style_text_color(widget->wpm_title_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);  // Gray text
-    lv_obj_set_style_text_align(widget->wpm_title_label, LV_TEXT_ALIGN_CENTER, 0);
-    
-    // Create WPM value label (normal font)
-    widget->wpm_value_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->wpm_value_label, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_label_set_text(widget->wpm_value_label, "0");  // Initial inactive state
-    lv_obj_set_style_text_font(widget->wpm_value_label, &lv_font_montserrat_16, 0);  // Normal size font
-    lv_obj_set_style_text_color(widget->wpm_value_label, lv_color_make(0xFF, 0xFF, 0xFF), 0);  // White text
-    lv_obj_set_style_text_align(widget->wpm_value_label, LV_TEXT_ALIGN_CENTER, 0);
-    
+    lv_obj_set_style_text_font(widget->wpm_title_label, &lv_font_unscii_8, 0);
+    lv_obj_set_style_text_color(widget->wpm_title_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
+
+    // Create WPM value label (normal font) - created directly on parent
+    widget->wpm_value_label = lv_label_create(parent);
+    lv_obj_align(widget->wpm_value_label, LV_ALIGN_TOP_LEFT, X_OFFSET, Y_OFFSET + 12);
+    lv_label_set_text(widget->wpm_value_label, "0");
+    lv_obj_set_style_text_font(widget->wpm_value_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(widget->wpm_value_label, lv_color_white(), 0);
+
+    // Set widget->obj to first element for compatibility
+    widget->obj = widget->wpm_title_label;
+
     // Initialize state
     widget->last_wpm_value = 0;
     widget->last_activity_time = 0;
-    
-    LOG_INF("Enhanced WPM status widget initialized with title + value layout");
+
+    LOG_INF("✨ WPM status widget initialized (LVGL9 no-container pattern)");
     return 0;
 }
 
@@ -137,13 +141,13 @@ struct zmk_widget_wpm_status *zmk_widget_wpm_status_create(lv_obj_t *parent) {
 }
 
 void zmk_widget_wpm_status_destroy(struct zmk_widget_wpm_status *widget) {
-    LOG_DBG("Destroying WPM status widget (dynamic deallocation)");
+    LOG_DBG("Destroying WPM status widget (LVGL9 no-container)");
 
     if (!widget) {
         return;
     }
 
-    // Delete LVGL objects first (reverse order of creation)
+    // LVGL 9 FIX: Delete each element individually (no container parent)
     if (widget->wpm_value_label) {
         lv_obj_del(widget->wpm_value_label);
         widget->wpm_value_label = NULL;
@@ -152,10 +156,9 @@ void zmk_widget_wpm_status_destroy(struct zmk_widget_wpm_status *widget) {
         lv_obj_del(widget->wpm_title_label);
         widget->wpm_title_label = NULL;
     }
-    if (widget->obj) {
-        lv_obj_del(widget->obj);
-        widget->obj = NULL;
-    }
+
+    widget->obj = NULL;
+    widget->parent = NULL;
 
     // Free the widget structure memory from LVGL heap
     lv_free(widget);

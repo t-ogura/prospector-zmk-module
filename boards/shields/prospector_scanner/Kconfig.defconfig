@@ -1,5 +1,4 @@
-# Copyright (c) 2024 The ZMK Contributors
-# SPDX-License-Identifier: MIT
+# Prospector Scanner - Using display_test Kconfig.defconfig for debugging
 
 if SHIELD_PROSPECTOR_SCANNER
 
@@ -9,79 +8,38 @@ config ZMK_KEYBOARD_NAME
 config ZMK_DISPLAY
     default y
 
-config PROSPECTOR_MODE_SCANNER
+# MIPI DBI for ST7789V
+config MIPI_DBI
     default y
 
-# Display and LVGL configuration (copied from working adapter)
-choice ZMK_DISPLAY_STATUS_SCREEN
-    default ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
-endchoice
+config SPI
+    default y
 
-config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
-    select LV_USE_LABEL
-    select LV_USE_BAR
-    select LV_USE_FLEX
-    select LV_USE_ROLLER
-    select LV_COLOR_SCREEN_TRANSP
-
-choice ZMK_DISPLAY_WORK_QUEUE
-    default ZMK_DISPLAY_WORK_QUEUE_DEDICATED
-endchoice
-
-config ZMK_DISPLAY_DEDICATED_THREAD_STACK_SIZE
-    default 4096
-
+# ST7789V pixel format
 choice ST7789V_PIXEL_FORMAT
-	default ST7789V_RGB565
+    default ST7789V_RGB565
 endchoice
 
+# LVGL basic settings
 config LV_Z_VDB_SIZE
     default 100
-
-config LV_Z_MEM_POOL_SIZE
-    default 10000
 
 config LV_DPI_DEF
     default 261
 
 config LV_Z_BITS_PER_PIXEL
-	default 16
+    default 16
 
 choice LV_COLOR_DEPTH
-	default LV_COLOR_DEPTH_16
+    default LV_COLOR_DEPTH_16
 endchoice
 
 config LV_COLOR_16_SWAP
-	default y
+    default y
 
-# LVGL 9: LV_DISP_DEF_REFR_PERIOD renamed to LV_DEF_REFR_PERIOD
-config LV_DEF_REFR_PERIOD
-    default 20
-
-choice LV_FONT_DEFAULT
-    default LV_FONT_DEFAULT_MONTSERRAT_20
+# Step 3: Use CUSTOM screen (like display_test)
+choice ZMK_DISPLAY_STATUS_SCREEN
+    default ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
 endchoice
 
-config PWM
-    default y
-
-config LED
-    default y
-
-# I2C and Sensor - Always enabled for battery support
-# Note: I2C and SENSOR are required by ZMK_BATTERY_REPORTING
-# APDS9960 is only enabled when automatic brightness is requested
-
-config I2C
-    default y
-
-config SENSOR
-    default y
-
-config APDS9960
-    default n
-
-# Ambient light sensor and brightness settings moved to main Kconfig
-# PROSPECTOR_MAX_LAYERS now defined in main Kconfig
-
-endif # SHIELD_PROSPECTOR_SCANNER
+endif

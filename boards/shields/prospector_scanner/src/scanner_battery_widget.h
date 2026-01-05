@@ -4,10 +4,23 @@
 #include <zephyr/kernel.h>
 #include <zmk/status_scanner.h>
 
+/**
+ * LVGL 9 FIX: NO CONTAINER pattern
+ * All elements created directly on parent screen to avoid freeze bug.
+ * Each battery slot has: bar + percentage label + disconnected bar + disconnected symbol
+ */
+#define SCANNER_BATTERY_SLOTS 2  // Central + Peripheral
+
 struct zmk_widget_scanner_battery {
     sys_snode_t node;
-    lv_obj_t *obj;
-    // Central/Peripheral labels removed for cleaner display
+    lv_obj_t *obj;  // Points to first bar for compatibility
+    lv_obj_t *parent;  // Store parent for positioning
+
+    // LVGL 9: Direct pointers to each element (no container)
+    lv_obj_t *bar[SCANNER_BATTERY_SLOTS];      // Battery level bars
+    lv_obj_t *num[SCANNER_BATTERY_SLOTS];      // Percentage labels
+    lv_obj_t *nc_bar[SCANNER_BATTERY_SLOTS];   // Disconnected state bars
+    lv_obj_t *nc_num[SCANNER_BATTERY_SLOTS];   // Disconnected symbols
 };
 
 // ========== Dynamic Allocation Functions ==========

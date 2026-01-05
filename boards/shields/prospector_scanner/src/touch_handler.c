@@ -6,7 +6,7 @@
 
 #include "touch_handler.h"
 #include "events/swipe_gesture_event.h"
-#include "scanner_message.h"  // Message queue for thread-safe architecture
+// Message queue removed - using ZMK event system for thread-safe architecture
 #include "display_settings_widget.h"  // For display_settings_is_interacting()
 
 #include <zephyr/kernel.h>
@@ -52,6 +52,7 @@ static struct {
 } swipe_state = {0};
 
 // Helper function to raise swipe gesture event (thread-safe)
+// Uses ZMK event system - listener runs in main thread, safe for LVGL
 static void raise_swipe_event(enum swipe_direction direction) {
     const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
 
@@ -61,27 +62,13 @@ static void raise_swipe_event(enum swipe_direction direction) {
         return;
     }
 
-    LOG_INF("📤 Raising swipe event: %s", dir_name[direction]);
+    LOG_INF("📤 Raising ZMK swipe event: %s", dir_name[direction]);
 
-    // Phase 3: Send to message queue for thread-safe processing
-    // Convert swipe_direction to scanner_swipe_direction
-    enum scanner_swipe_direction msg_dir;
-    switch (direction) {
-        case SWIPE_DIRECTION_UP:    msg_dir = SCANNER_SWIPE_UP; break;
-        case SWIPE_DIRECTION_DOWN:  msg_dir = SCANNER_SWIPE_DOWN; break;
-        case SWIPE_DIRECTION_LEFT:  msg_dir = SCANNER_SWIPE_LEFT; break;
-        case SWIPE_DIRECTION_RIGHT: msg_dir = SCANNER_SWIPE_RIGHT; break;
-        default: msg_dir = SCANNER_SWIPE_UP; break;
-    }
-
-    int msg_ret = scanner_msg_send_swipe(msg_dir);
-    if (msg_ret != 0) {
-        LOG_WRN("⚠️ Failed to queue swipe message: %d", msg_ret);
-    }
-
-    // Phase 5: Message queue only - ZMK event system no longer used for swipe
-    // The message will be processed in main_loop_timer_cb (LVGL main thread)
-    // This ensures all LVGL operations happen in the correct thread context
+    // Use ZMK event system - thread-safe, listener runs in main thread
+    // No message queue needed - ZMK event manager handles synchronization
+    raise_zmk_swipe_gesture_event(
+        (struct zmk_swipe_gesture_event){.direction = direction}
+    );
 }
 
 /**

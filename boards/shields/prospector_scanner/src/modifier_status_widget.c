@@ -61,32 +61,33 @@ static void update_modifier_display(struct zmk_widget_modifier_status *widget, s
     // Debug logging removed for performance
 }
 
+/**
+ * LVGL 9 FIX: NO CONTAINER - Create all elements directly on parent
+ * Widget positioned at CENTER with y=30 in scanner_display.c
+ */
 int zmk_widget_modifier_status_init(struct zmk_widget_modifier_status *widget, lv_obj_t *parent) {
     if (!widget || !parent) {
         return -1;
     }
-    
-    // Create container widget for modifier display (YADS style)
-    widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 180, 30); // Wide enough for multiple modifiers
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_all(widget->obj, 0, 0);
-    
-    // Create single label for displaying active modifiers (YADS style)
-    widget->label = lv_label_create(widget->obj);
-    lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(widget->label, ""); // Initially empty
-    
-    // Set font - use 40px NerdFont (only 20px and 40px sizes available)
+
+    widget->parent = parent;
+
+    // Create single label for displaying active modifiers - directly on parent
+    widget->label = lv_label_create(parent);
+    lv_obj_align(widget->label, LV_ALIGN_CENTER, 0, 30);
+    lv_label_set_text(widget->label, "");
+
+    // Set font - use 40px NerdFont
     lv_obj_set_style_text_font(widget->label, &NerdFonts_Regular_40, 0);
     lv_obj_set_style_text_color(widget->label, lv_color_white(), 0);
-    
-    // Set letter spacing to separate modifier symbols without using space character
-    // This avoids font fallback issues when space glyph is missing
+
+    // Set letter spacing to separate modifier symbols
     lv_obj_set_style_text_letter_space(widget->label, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
-    
-    LOG_INF("YADS-style modifier status widget initialized");
+
+    // Set widget->obj to label for compatibility
+    widget->obj = widget->label;
+
+    LOG_INF("✨ Modifier status widget initialized (LVGL9 no-container pattern)");
     return 0;
 }
 
@@ -125,21 +126,21 @@ struct zmk_widget_modifier_status *zmk_widget_modifier_status_create(lv_obj_t *p
 
 // Dynamic deallocation: Destroy widget and free memory
 void zmk_widget_modifier_status_destroy(struct zmk_widget_modifier_status *widget) {
-    LOG_DBG("Destroying modifier status widget (dynamic deallocation)");
+    LOG_DBG("Destroying modifier status widget (LVGL9 no-container)");
 
     if (!widget) {
         return;
     }
 
-    // Delete LVGL objects first
+    // LVGL 9 FIX: Delete each element individually (no container parent)
+    // Note: widget->obj and widget->label point to the same object now
     if (widget->label) {
         lv_obj_del(widget->label);
         widget->label = NULL;
     }
-    if (widget->obj) {
-        lv_obj_del(widget->obj);
-        widget->obj = NULL;
-    }
+
+    widget->obj = NULL;
+    widget->parent = NULL;
 
     // Free the widget structure memory from LVGL heap
     lv_free(widget);

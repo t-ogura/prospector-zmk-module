@@ -15,11 +15,13 @@ extern "C" {
 
 /**
  * @brief WPM status widget structure
- * 
- * YADS-style WPM display widget for showing typing speed
+ *
+ * LVGL 9 FIX: NO CONTAINER pattern
+ * All elements created directly on parent screen to avoid freeze bug.
  */
 struct zmk_widget_wpm_status {
-    lv_obj_t *obj;
+    lv_obj_t *obj;                // Points to first element for compatibility
+    lv_obj_t *parent;             // Store parent for positioning
     lv_obj_t *wpm_title_label;    // "WPM" label (small font)
     lv_obj_t *wpm_value_label;    // Number value (normal font)
     uint8_t last_wpm_value;

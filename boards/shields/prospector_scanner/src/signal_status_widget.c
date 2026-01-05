@@ -196,22 +196,24 @@ void zmk_widget_signal_status_update(struct zmk_widget_signal_status *widget, in
             rssi, smoothed_rssi, bars, widget->last_rate_hz);
 }
 
+/**
+ * LVGL 9 FIX: NO CONTAINER - Create all elements directly on parent
+ * Previous code used container + flex layout which caused MCU freeze.
+ * Now using absolute positioning with BOTTOM_MID alignment.
+ */
 int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_obj_t *parent) {
     if (!widget || !parent) {
         return -1;
     }
 
-    // Create container - much wider for proper text display
-    widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, lv_pct(100), 25);  // Full width and taller for text
-    lv_obj_set_style_bg_opa(widget->obj, 0, 0);  // Transparent background
-    lv_obj_set_style_border_opa(widget->obj, 0, 0);  // No border
-    lv_obj_set_style_pad_all(widget->obj, 0, 0);  // No padding
-    lv_obj_set_flex_flow(widget->obj, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(widget->obj, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);  // Right-aligned content
+    widget->parent = parent;
 
-    // Channel label (leftmost position)
-    widget->channel_label = lv_label_create(widget->obj);
+    // Position offsets from BOTTOM_MID (right-aligned layout)
+    // Widget positioned at BOTTOM_MID with y=-5 in scanner_display.c
+    const int Y_OFFSET = -5;
+
+    // Channel label (leftmost) - created directly on parent
+    widget->channel_label = lv_label_create(parent);
 #ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
     lv_label_set_text_fmt(widget->channel_label, "Ch:%d", CONFIG_PROSPECTOR_SCANNER_CHANNEL);
 #else
@@ -219,42 +221,44 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
 #endif
     lv_obj_set_style_text_font(widget->channel_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->channel_label, lv_color_make(0x80, 0x80, 0x80), 0);
-    lv_obj_set_width(widget->channel_label, 40);  // Width for "Ch:255"
+    lv_obj_align(widget->channel_label, LV_ALIGN_BOTTOM_MID, -100, Y_OFFSET);
 
-    // Signal info title/label (short abbreviation) - restore readable font
-    lv_obj_t *signal_title = lv_label_create(widget->obj);
-    lv_label_set_text(signal_title, "RX:");
-    lv_obj_set_style_text_font(signal_title, &lv_font_montserrat_12, 0);  // Restore readable font
-    lv_obj_set_style_text_color(signal_title, lv_color_make(0x80, 0x80, 0x80), 0);
-    lv_obj_set_width(signal_title, 30);  // Wider for readability
+    // Signal info title "RX:" - created directly on parent
+    widget->signal_title = lv_label_create(parent);
+    lv_label_set_text(widget->signal_title, "RX:");
+    lv_obj_set_style_text_font(widget->signal_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(widget->signal_title, lv_color_make(0x80, 0x80, 0x80), 0);
+    lv_obj_align(widget->signal_title, LV_ALIGN_BOTTOM_MID, -55, Y_OFFSET);
 
-    // RSSI bar (small, 5-level indicator) - optimal size
-    widget->rssi_bar = lv_bar_create(widget->obj);
-    lv_obj_set_size(widget->rssi_bar, 30, 8);  // Restore reasonable bar width
+    // RSSI bar (5-level indicator) - created directly on parent
+    widget->rssi_bar = lv_bar_create(parent);
+    lv_obj_set_size(widget->rssi_bar, 30, 8);
+    lv_obj_align(widget->rssi_bar, LV_ALIGN_BOTTOM_MID, -15, Y_OFFSET);
     lv_bar_set_range(widget->rssi_bar, 0, 5);
     lv_bar_set_value(widget->rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_MAIN);  // Ensure background is visible
-    lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);  // Default gray
-    lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);  // Ensure indicator is visible
+    lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(widget->rssi_bar, lv_color_make(0x60, 0x60, 0x60), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(widget->rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(widget->rssi_bar, 2, LV_PART_INDICATOR);
 
-    // RSSI value label (dBm) - restore readable font with wide area
-    widget->rssi_label = lv_label_create(widget->obj);
-    lv_label_set_text(widget->rssi_label, "-99dBm");  // Set reasonable width text first
-    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);  // Restore readable font
+    // RSSI value label (dBm) - created directly on parent
+    widget->rssi_label = lv_label_create(parent);
+    lv_obj_set_style_text_font(widget->rssi_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_obj_set_width(widget->rssi_label, 60);  // Much wider to prevent wrapping
-    lv_label_set_text(widget->rssi_label, "--dBm");  // Reset to initial text
+    lv_obj_align(widget->rssi_label, LV_ALIGN_BOTTOM_MID, 35, Y_OFFSET);
+    lv_label_set_text(widget->rssi_label, "--dBm");
 
-    // Reception rate label (Hz) - restore readable font with adequate width
-    widget->rate_label = lv_label_create(widget->obj);
-    lv_label_set_text(widget->rate_label, "9.9Hz");  // Set reasonable width text first (1Hz rate)
-    lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_12, 0);  // Restore readable font
+    // Reception rate label (Hz) - created directly on parent
+    widget->rate_label = lv_label_create(parent);
+    lv_obj_set_style_text_font(widget->rate_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_obj_set_width(widget->rate_label, 50);  // Adequate width for readability
-    lv_label_set_text(widget->rate_label, "--Hz");  // Reset to initial text
+    lv_obj_align(widget->rate_label, LV_ALIGN_BOTTOM_MID, 95, Y_OFFSET);
+    lv_label_set_text(widget->rate_label, "--Hz");
+
+    // Set widget->obj to first element for compatibility
+    widget->obj = widget->channel_label;
 
     // Initialize timing
     widget->last_update_time = 0;
@@ -283,7 +287,7 @@ int zmk_widget_signal_status_init(struct zmk_widget_signal_status *widget, lv_ob
     widget->last_signal_time = 0;
     widget->signal_active = false;
 
-    LOG_INF("Signal status widget initialized (RSSI + reception rate)");
+    LOG_INF("✨ Signal status widget initialized (LVGL9 no-container pattern)");
     return 0;
 }
 

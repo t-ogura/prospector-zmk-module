@@ -27,13 +27,18 @@ extern "C" {
  * - Configurable position and appearance
  */
 
+/**
+ * LVGL 9 FIX: NO CONTAINER pattern
+ * All elements created directly on parent screen to avoid freeze bug.
+ */
 struct zmk_widget_scanner_battery_status {
     sys_snode_t node;
-    lv_obj_t *obj;                // Container object
-    lv_obj_t *battery_icon;       // Battery icon (🔋/🪫) 
+    lv_obj_t *obj;                // Points to first element for compatibility
+    lv_obj_t *parent;             // Store parent for positioning
+    lv_obj_t *battery_icon;       // Battery icon (🔋/🪫)
     lv_obj_t *percentage_label;   // Percentage text
     lv_obj_t *charging_icon;      // Charging indicator (⚡)
-    
+
     // State cache for optimization
     uint8_t last_battery_level;   // 0-100%
     bool last_usb_powered;        // USB connection state

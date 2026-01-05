@@ -16,9 +16,15 @@ extern "C" {
 #define RSSI_SMOOTHING_SAMPLES 5  // Moving average window size for RSSI
 #define RATE_SMOOTHING_SAMPLES 10  // 10-second smoothing buffer for stable rate display
 
+/**
+ * LVGL 9 FIX: NO CONTAINER pattern
+ * All elements created directly on parent screen to avoid freeze bug.
+ */
 struct zmk_widget_signal_status {
-    lv_obj_t *obj;
+    lv_obj_t *obj;             // Points to first element for compatibility
+    lv_obj_t *parent;          // Store parent for positioning
     lv_obj_t *channel_label;   // Channel number display
+    lv_obj_t *signal_title;    // "RX:" label
     lv_obj_t *rssi_bar;        // RSSI strength bar (0-5 bars)
     lv_obj_t *rssi_label;      // RSSI dBm value
     lv_obj_t *rate_label;      // Reception rate in Hz

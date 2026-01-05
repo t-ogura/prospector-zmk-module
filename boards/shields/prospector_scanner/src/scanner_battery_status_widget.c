@@ -151,7 +151,11 @@ bool zmk_scanner_battery_hardware_available(void) {
 #endif
 }
 
-int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_status *widget, 
+/**
+ * LVGL 9 FIX: NO CONTAINER - Create all elements directly on parent
+ * Widget positioned at TOP_RIGHT with x=10, y=0 in scanner_display.c
+ */
+int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_status *widget,
                                           lv_obj_t *parent) {
     if (!widget || !parent) {
         return -EINVAL;
@@ -164,38 +168,39 @@ int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_sta
         return 0;
     }
 
-    LOG_INF("Initializing scanner battery status widget");
+    LOG_INF("Initializing scanner battery status widget (LVGL9 no-container)");
 
-    // Create container object
-    widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 80, 25); // Compact size for top-right corner
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0); // Transparent background
-    lv_obj_set_style_border_width(widget->obj, 0, 0);
-    lv_obj_set_style_pad_all(widget->obj, 2, 0);
+    widget->parent = parent;
 
-    // Create battery icon label
-    widget->battery_icon = lv_label_create(widget->obj);
-    lv_obj_set_style_text_font(widget->battery_icon, &lv_font_montserrat_12, 0);  // Smaller font
-    lv_obj_align(widget->battery_icon, LV_ALIGN_LEFT_MID, 0, 0);
+    // Position offsets from TOP_RIGHT
+    const int X_OFFSET = -10;
+    const int Y_OFFSET = 5;
+
+    // Create battery icon label - created directly on parent
+    widget->battery_icon = lv_label_create(parent);
+    lv_obj_set_style_text_font(widget->battery_icon, &lv_font_montserrat_12, 0);
+    lv_obj_align(widget->battery_icon, LV_ALIGN_TOP_RIGHT, X_OFFSET - 30, Y_OFFSET);
     lv_label_set_text(widget->battery_icon, "BAT");
 
-    // Create percentage label with smaller font
-    widget->percentage_label = lv_label_create(widget->obj);
-    lv_obj_set_style_text_font(widget->percentage_label, &lv_font_unscii_8, 0);  // Smaller unscii font
+    // Create percentage label - created directly on parent
+    widget->percentage_label = lv_label_create(parent);
+    lv_obj_set_style_text_font(widget->percentage_label, &lv_font_unscii_8, 0);
     lv_obj_set_style_text_color(widget->percentage_label, lv_color_white(), 0);
-    lv_obj_align_to(widget->percentage_label, widget->battery_icon, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
+    lv_obj_align(widget->percentage_label, LV_ALIGN_TOP_RIGHT, X_OFFSET, Y_OFFSET + 2);
     lv_label_set_text(widget->percentage_label, "--");
 
-    // Create charging icon (initially hidden)
-    widget->charging_icon = lv_label_create(widget->obj);
+    // Create charging icon (initially hidden) - created directly on parent
+    widget->charging_icon = lv_label_create(parent);
     lv_obj_set_style_text_font(widget->charging_icon, &lv_font_montserrat_12, 0);
-    // Initialize colors first, then set charging icon color
     init_battery_colors();
-    lv_obj_set_style_text_color(widget->charging_icon, 
-                               scanner_battery_colors[SCANNER_BATTERY_ICON_CHARGING], 0); // Blue
-    lv_obj_align_to(widget->charging_icon, widget->percentage_label, LV_ALIGN_OUT_RIGHT_MID, 2, 0);
+    lv_obj_set_style_text_color(widget->charging_icon,
+                               scanner_battery_colors[SCANNER_BATTERY_ICON_CHARGING], 0);
+    lv_obj_align(widget->charging_icon, LV_ALIGN_TOP_RIGHT, X_OFFSET + 15, Y_OFFSET);
     lv_label_set_text(widget->charging_icon, "CHG");
     lv_obj_add_flag(widget->charging_icon, LV_OBJ_FLAG_HIDDEN);
+
+    // Set widget->obj to first element for compatibility
+    widget->obj = widget->battery_icon;
 
     // Initialize state
     widget->last_battery_level = 0;
@@ -218,7 +223,7 @@ int zmk_widget_scanner_battery_status_init(struct zmk_widget_scanner_battery_sta
 
     zmk_widget_scanner_battery_status_update(widget, initial_level, initial_usb, initial_usb);
 
-    LOG_INF("Scanner battery status widget initialized successfully (level: %d%%, USB: %s)",
+    LOG_INF("✨ Scanner battery status widget initialized (LVGL9 no-container, level: %d%%, USB: %s)",
             initial_level, initial_usb ? "yes" : "no");
 
     return 0;

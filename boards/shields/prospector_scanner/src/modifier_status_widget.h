@@ -13,9 +13,14 @@
 extern "C" {
 #endif
 
+/**
+ * LVGL 9 FIX: NO CONTAINER pattern
+ * All elements created directly on parent screen to avoid freeze bug.
+ */
 struct zmk_widget_modifier_status {
-    lv_obj_t *obj;
-    lv_obj_t *label; // Single label for YADS-style display
+    lv_obj_t *obj;     // Points to first element for compatibility
+    lv_obj_t *parent;  // Store parent for positioning
+    lv_obj_t *label;   // Single label for YADS-style display
 };
 
 // Dynamic allocation functions

@@ -8,6 +8,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/logging/log.h>
 #include <zmk/status_scanner.h>
@@ -754,12 +755,13 @@ static void start_signal_monitoring(void) {
     k_work_schedule(&battery_debug_work, K_SECONDS(2)); // Start battery debug updates (2s delay)
     k_work_schedule(&memory_monitor_work, K_SECONDS(10)); // Uptime monitor (10s interval)
 
-    // Phase 2: Start LVGL timer for message queue processing
-    // This runs in LVGL main thread - safe for all LVGL operations
-    if (!main_loop_timer) {
-        main_loop_timer = lv_timer_create(main_loop_timer_cb, CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS, NULL);
-        LOG_INF("✅ LVGL main loop timer created (%dms interval)", CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS);
-    }
+    // Phase 2: DISABLED for LVGL 9 testing
+    // lv_timer_create may cause issues in LVGL 9
+    // if (!main_loop_timer) {
+    //     main_loop_timer = lv_timer_create(main_loop_timer_cb, CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS, NULL);
+    //     LOG_INF("✅ LVGL main loop timer created (%dms interval)", CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS);
+    // }
+    LOG_INF("⚠️ LVGL timer DISABLED for testing - message queue not processed");
 
     LOG_INF("Started periodic monitoring: signal timeout (5s), RX updates (1Hz), battery debug (5s), uptime (10s), LVGL timer (%dms)", CONFIG_PROSPECTOR_SCANNER_MAIN_LOOP_INTERVAL_MS);
 }
@@ -1165,10 +1167,8 @@ static int scanner_display_init(void) {
     
     // Initialize PWM device for brightness control (main thread only)
     pwm_dev = NULL;
-#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+#if IS_ENABLED(CONFIG_PWM) && DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
     pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
-#endif
-
     if (pwm_dev && device_is_ready(pwm_dev)) {
         // Set initial brightness
         uint8_t initial_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
@@ -1179,6 +1179,9 @@ static int scanner_display_init(void) {
     } else {
         LOG_WRN("⚠️ PWM device not ready - brightness control disabled");
     }
+#else
+    LOG_INF("PWM disabled - skipping brightness init");
+#endif
 
     // Note: Sensor-based brightness control is handled by brightness_control.c
     // It sends messages to this main thread for PWM updates
@@ -1205,160 +1208,83 @@ static int scanner_display_init(void) {
     return 0;
 }
 
-// Initialize display early in the boot process
-SYS_INIT(scanner_display_init, APPLICATION, 60);
+// DISABLED: Was causing boot failure by accessing display before ZMK init
+// ZMK's main() calls zmk_display_init() which calls zmk_display_status_screen()
+// All display initialization now happens in zmk_display_status_screen()
+// SYS_INIT(scanner_display_init, APPLICATION, 60);
 
 // Custom settings toggle behavior handles gesture now - no event listener needed
 
 // Required function for ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
-// Following the working adapter pattern with simple, stable display
+// MINIMAL TEST VERSION - Only create screen and label
 lv_obj_t *zmk_display_status_screen() {
-    LOG_INF("🎨 ===== zmk_display_status_screen() CALLED =====");
+    LOG_INF("🎨 ===== MINIMAL TEST: zmk_display_status_screen() =====");
 
-    // Initialize LVGL mutex for thread-safe operations
-    lvgl_mutex_init();
+    // === Phase 0: Hardware initialization ===
+    // Display rotation is handled by mdac=0x60 in device tree (no display_set_orientation needed)
+    LOG_INF("Phase 0: Hardware initialization...");
 
-    // Set processing flag during initial screen creation (prevents swipe during init)
-    swipe_in_progress = true;
-    LOG_DBG("🔒 Screen init started - swipe blocked");
+    // Turn on GPIO backlight first (like minimal-test)
+#if DT_NODE_EXISTS(DT_ALIAS(led0))
+    const struct gpio_dt_spec backlight_gpio = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+    if (gpio_is_ready_dt(&backlight_gpio)) {
+        gpio_pin_configure_dt(&backlight_gpio, GPIO_OUTPUT_ACTIVE);
+        gpio_pin_set_dt(&backlight_gpio, 1);
+        LOG_INF("✅ GPIO backlight turned ON");
+    } else {
+        LOG_WRN("GPIO backlight not ready");
+    }
+#endif
 
+    // Try PWM brightness control (for future smooth dimming)
+    pwm_dev = NULL;
+#if IS_ENABLED(CONFIG_PWM) && DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+    pwm_dev = DEVICE_DT_GET_ONE(pwm_leds);
+    if (pwm_dev && device_is_ready(pwm_dev)) {
+        uint8_t initial_brightness = CONFIG_PROSPECTOR_FIXED_BRIGHTNESS;
+        set_pwm_brightness(initial_brightness);
+        current_brightness = initial_brightness;
+        target_brightness = initial_brightness;
+        LOG_INF("✅ PWM brightness initialized: %d%%", initial_brightness);
+    } else {
+        LOG_WRN("⚠️ PWM device not ready - using GPIO backlight only");
+    }
+#else
+    LOG_INF("PWM disabled - using GPIO backlight only");
+#endif
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
+    // Initialize touch handler
+    int ret = touch_handler_init();
+    if (ret < 0) {
+        LOG_WRN("Touch handler init failed: %d (continuing anyway)", ret);
+    } else {
+        LOG_INF("✅ Touch handler initialized");
+    }
+#endif
+
+    LOG_INF("Phase 0: Hardware initialization complete");
+
+    // Step 1: Create screen only
     LOG_INF("Step 1: Creating main screen object...");
     lv_obj_t *screen = lv_obj_create(NULL);
-    main_screen = screen;  // Save reference for later use
+    main_screen = screen;
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, 255, LV_PART_MAIN);
-    // Disable scrolling on main screen to prevent swipe conflicts
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
-    LOG_INF("✅ Main screen created (scrolling disabled)");
+    LOG_INF("✅ Main screen created");
 
-    // Device name label - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
+    // Step 2: Create ONE label only
     LOG_INF("Step 2: Creating device name label...");
     device_name_label = lv_label_create(screen);
     lv_obj_set_style_text_color(device_name_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(device_name_label, &lv_font_unscii_16, 0);
-    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 25);
-    lv_label_set_text(device_name_label, cached_device_name);  // Use cached value
+    lv_obj_set_style_text_font(device_name_label, &lv_font_montserrat_20, 0);
+    lv_obj_align(device_name_label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(device_name_label, "MINIMAL TEST");
     LOG_INF("✅ Device name label created");
 
-#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
-    LOG_INF("Step 3: Init scanner battery status widget...");
-    zmk_widget_scanner_battery_status_init(&scanner_battery_widget, screen);
-    lv_obj_align(zmk_widget_scanner_battery_status_obj(&scanner_battery_widget), LV_ALIGN_TOP_RIGHT, 10, 0);
-    // Apply initial visibility from global settings
-#if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
-    zmk_widget_scanner_battery_status_set_visible(&scanner_battery_widget,
-                                                   display_settings_get_battery_visible_global());
-    LOG_INF("✅ Scanner battery status widget initialized (visible=%s)",
-            display_settings_get_battery_visible_global() ? "yes" : "no");
-#else
-    // Non-touch version: always visible (no settings screen to toggle)
-    zmk_widget_scanner_battery_status_set_visible(&scanner_battery_widget, true);
-    LOG_INF("✅ Scanner battery status widget initialized (always visible - non-touch)");
-#endif
-#endif
-
-    // Connection widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
-    LOG_INF("Step 4: Init connection status widget...");
-    connection_widget = zmk_widget_connection_status_create(screen);
-    if (connection_widget) {
-        lv_obj_align(zmk_widget_connection_status_obj(connection_widget), LV_ALIGN_TOP_RIGHT, -5, 45);
-        // Restore cached values if available
-        if (cached_status_valid) {
-            zmk_widget_connection_status_update(connection_widget, &cached_keyboard_status);
-        }
-    }
-    LOG_INF("✅ Connection status widget created");
-
-    // Layer widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
-    // LVGL 9 FIX: Position passed via y_center_offset parameter (no separate lv_obj_align call)
-    LOG_INF("Step 5: Init layer status widget...");
-    layer_widget = zmk_widget_layer_status_create(screen, -10);  // y_center_offset = -10
-    if (layer_widget) {
-        // Restore cached values if available
-        if (cached_status_valid) {
-            zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);
-        }
-    }
-    LOG_INF("✅ Layer status widget created");
-
-    LOG_INF("Step 6: Modifier status widget (dynamic allocation - created on modifier press)");
-    // Widget will be created dynamically when modifiers are pressed
-    // zmk_widget_modifier_status_init(&modifier_widget, screen);  // REMOVED - now dynamic
-    // lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_CENTER, 0, 30);
-    LOG_INF("✅ Modifier status widget setup complete");
-
-    // Battery widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
-    LOG_INF("Step 7: Init battery widget...");
-    battery_widget = zmk_widget_scanner_battery_create(screen);
-    if (battery_widget) {
-        lv_obj_align(zmk_widget_scanner_battery_obj(battery_widget), LV_ALIGN_BOTTOM_MID, 0, -20);
-        lv_obj_set_height(zmk_widget_scanner_battery_obj(battery_widget), 50);
-        // Restore cached values if available
-        if (cached_status_valid) {
-            zmk_widget_scanner_battery_update(battery_widget, &cached_keyboard_status);
-        }
-    }
-    LOG_INF("✅ Battery widget created");
-
-    // WPM widget - DYNAMIC ALLOCATION (created at boot and when returning to main screen)
-    LOG_INF("Step 8: Init WPM status widget...");
-    wpm_widget = zmk_widget_wpm_status_create(screen);
-    if (wpm_widget) {
-        lv_obj_align(zmk_widget_wpm_status_obj(wpm_widget), LV_ALIGN_TOP_LEFT, 10, 50);
-        // Restore cached values if available
-        if (cached_status_valid) {
-            zmk_widget_wpm_status_update(wpm_widget, &cached_keyboard_status);
-        }
-    }
-    LOG_INF("✅ WPM status widget created");
-
-#if !IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
-    // Non-touch version: Signal status widget for display-only mode
-    LOG_INF("Step 9: Init signal status widget (non-touch version)...");
-    zmk_widget_signal_status_init(&signal_widget, screen);
-    lv_obj_align(zmk_widget_signal_status_obj(&signal_widget), LV_ALIGN_BOTTOM_MID, 0, -5);
-    LOG_INF("✅ Signal status widget initialized");
-#else
-    // Touch version: Signal widget disabled (swipe navigation instead)
-    LOG_INF("Step 9: Signal status widget disabled (touch version)");
-#endif
-
-    // LOG_INF("Step 10: Init debug status widget...");
-    // zmk_widget_debug_status_init(&debug_widget, screen);
-    // bool debug_enabled = IS_ENABLED(CONFIG_PROSPECTOR_DEBUG_WIDGET);
-    // LOG_INF("Debug widget %s by CONFIG_PROSPECTOR_DEBUG_WIDGET", debug_enabled ? "ENABLED" : "DISABLED");
-    // zmk_widget_debug_status_set_visible(&debug_widget, debug_enabled);
-    // LOG_INF("✅ Debug status widget initialized");  // DISABLED
-
-#if IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT)
-    LOG_INF("Step 11: Update scanner battery widget...");
-    update_scanner_battery_widget();
-    LOG_INF("✅ Scanner battery widget updated");
-#endif
-
-    LOG_INF("Step 12: Starting periodic signal monitoring...");
-    start_signal_monitoring();
-    LOG_INF("✅ Periodic monitoring started");
-
-    LOG_INF("Step 13: System settings widget (dynamic allocation - created on demand)");
-    // Widget will be created dynamically when needed (on swipe gesture)
-    // zmk_widget_system_settings_init(&system_settings_widget, screen);  // REMOVED - now dynamic
-    LOG_INF("✅ System settings widget setup complete");
-
-    LOG_INF("Step 14: Keyboard list widget (dynamic allocation - created on demand)");
-    // Widget will be created dynamically when needed (on swipe gesture)
-    // zmk_widget_keyboard_list_init(&keyboard_list_widget, screen);  // REMOVED - now dynamic
-    LOG_INF("✅ Keyboard list widget setup complete");
-
-    LOG_INF("Step 15: Triggering scanner start...");
-    trigger_scanner_start();
-    LOG_INF("✅ Scanner start triggered");
-
-    // Clear processing flag - screen init complete, swipe now allowed
-    swipe_in_progress = false;
-    LOG_DBG("🔓 Screen init completed - swipe enabled");
-
-    LOG_INF("🎉 Scanner screen created successfully with gesture support");
+    // NO work queues, NO timers, NO other widgets
+    LOG_INF("🎉 MINIMAL screen created - no work queues, no timers");
     return screen;
 }
 
@@ -1448,9 +1374,10 @@ static void restore_main_screen_widgets(void) {
     // lv_obj_align(zmk_widget_modifier_status_obj(&modifier_widget), LV_ALIGN_BOTTOM_MID, 0, -65);
     LOG_INF("  ✅ Modifier widget ready");
 
-    // Recreate layer widget - LVGL 9 FIX: Use create function with y_center_offset
+    // Recreate layer widget
     LOG_INF("  Recreating layer widget...");
-    layer_widget = zmk_widget_layer_status_create(main_screen, 0);  // y_center_offset = 0
+    zmk_widget_layer_status_init(&layer_widget, main_screen, -10);
+    lv_obj_align(zmk_widget_layer_status_obj(&layer_widget), LV_ALIGN_CENTER, 0, 0);
     LOG_INF("  ✅ Layer widget recreated");
 
     LOG_INF("🔄 Main screen widgets restored");
@@ -1474,46 +1401,44 @@ static void restore_keyboard_list_widgets(void) {
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
 // Swipe gesture event listener
-// CRITICAL: ZMK event listeners run in WORK QUEUE context, NOT main thread!
-// Therefore, we MUST NOT call LVGL APIs here - send message to main loop instead
+// ZMK event listeners run in main thread context - safe for LVGL operations
+// No message queue needed - directly process the swipe
 static int swipe_gesture_listener(const zmk_event_t *eh) {
     const struct zmk_swipe_gesture_event *ev = as_zmk_swipe_gesture_event(eh);
     if (!ev) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
+    LOG_INF("📥 Swipe event received: direction=%d", ev->direction);
+
     // Restore brightness if dimmed due to timeout (touch wakes up display)
-    // CRITICAL: Do NOT call brightness_control functions here - Work Queue context!
-    // Send message to main loop instead for thread-safe processing
     if (timeout_dimmed) {
-        #if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
-            scanner_msg_send_timeout_wake();
+        timeout_dimmed = false;
+        #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
+            brightness_control_set_auto(true);
+            LOG_INF("🔆 Brightness restored (touch detected, auto brightness resumed)");
+        #else
+            if (brightness_before_timeout > 0) {
+                start_brightness_fade(brightness_before_timeout);
+            } else {
+                start_brightness_fade(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+            }
         #endif
     }
 
-    // Map swipe direction to scanner_swipe_direction enum
-    enum scanner_swipe_direction dir;
+    // Map swipe direction enum and process directly
+    // ZMK event runs in main thread - LVGL operations are safe here
+    int dir;
     switch (ev->direction) {
-        case SWIPE_DIRECTION_UP:
-            dir = SCANNER_SWIPE_UP;
-            break;
-        case SWIPE_DIRECTION_DOWN:
-            dir = SCANNER_SWIPE_DOWN;
-            break;
-        case SWIPE_DIRECTION_LEFT:
-            dir = SCANNER_SWIPE_LEFT;
-            break;
-        case SWIPE_DIRECTION_RIGHT:
-            dir = SCANNER_SWIPE_RIGHT;
-            break;
-        default:
-            return ZMK_EV_EVENT_BUBBLE;
+        case SWIPE_DIRECTION_UP:    dir = SWIPE_DIRECTION_UP; break;
+        case SWIPE_DIRECTION_DOWN:  dir = SWIPE_DIRECTION_DOWN; break;
+        case SWIPE_DIRECTION_LEFT:  dir = SWIPE_DIRECTION_LEFT; break;
+        case SWIPE_DIRECTION_RIGHT: dir = SWIPE_DIRECTION_RIGHT; break;
+        default: return ZMK_EV_EVENT_BUBBLE;
     }
 
-    // Phase 5: Send message to LVGL timer - NO LVGL calls here!
-    // This runs in Work Queue context, LVGL operations will be done in main_loop_timer_cb
-    LOG_DBG("🔄 Swipe event received in Work Queue, sending message: %d", dir);
-    scanner_msg_send_swipe(dir);
+    // Process swipe directly - no message queue needed
+    process_swipe_direction(dir);
 
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -1552,17 +1477,11 @@ static void process_swipe_direction(int direction) {
     last_swipe_time = now;
 
     // Set processing flag - prevents concurrent widget operations
+    // Work queues check this flag before LVGL updates
     swipe_in_progress = true;
 
-    // CRITICAL: Pause main loop timer to prevent widget access during destruction
-    // Without this, timer may try to process messages while we're deleting widgets
-    if (main_loop_timer) {
-        lv_timer_pause(main_loop_timer);
-        LOG_DBG("⏸️  Main loop timer paused for safe widget operations");
-    }
-
-    // Phase 5: ZMK event listener runs in main thread - no mutex needed
-    // LVGL operations are safe here
+    // ZMK event listener runs in main thread - no timer pause needed
+    // LVGL operations are safe here, work queues will skip updates
     LOG_DBG("🔒 Swipe processing started");
 
     // Thread-safe LVGL operations (running in work queue context)
@@ -1840,9 +1759,9 @@ return_to_main:
                 }
             }
             if (!layer_widget) {
-                // LVGL 9 FIX: Position passed via y_center_offset parameter
-                layer_widget = zmk_widget_layer_status_create(main_screen, -10);  // y_center_offset = -10
+                layer_widget = zmk_widget_layer_status_create(main_screen, -10);
                 if (layer_widget) {
+                    lv_obj_align(zmk_widget_layer_status_obj(layer_widget), LV_ALIGN_CENTER, 0, -10);
                     // Restore cached values
                     if (cached_status_valid) {
                         zmk_widget_layer_status_update(layer_widget, &cached_keyboard_status);
@@ -1867,22 +1786,14 @@ return_to_main:
             break;
     }
 
-    // Resume main loop timer
-    if (main_loop_timer) {
-        lv_timer_resume(main_loop_timer);
-        LOG_DBG("▶️  Main loop timer resumed after widget operations");
-    }
-
-    // Phase 5: Clear processing flag (no mutex to release)
+    // Clear processing flag - work queues can now update widgets
     swipe_in_progress = false;
     LOG_DBG("🔓 Swipe processing completed");
 }
 
-// Phase 5: ZMK event listener no longer used for swipe processing
-// Swipe is now processed entirely via message queue (touch_handler.c -> scanner_msg_send_swipe)
-// This ensures all LVGL operations happen in main_loop_timer_cb (LVGL main thread)
-// ZMK_LISTENER(swipe_gesture, swipe_gesture_listener);
-// ZMK_SUBSCRIPTION(swipe_gesture, zmk_swipe_gesture_event);
+// ZMK event listener for swipe gestures - runs in main thread, safe for LVGL
+ZMK_LISTENER(swipe_gesture, swipe_gesture_listener);
+ZMK_SUBSCRIPTION(swipe_gesture, zmk_swipe_gesture_event);
 #endif // CONFIG_PROSPECTOR_TOUCH_ENABLED
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY

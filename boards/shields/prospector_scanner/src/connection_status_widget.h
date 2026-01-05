@@ -13,8 +13,13 @@
 extern "C" {
 #endif
 
+/**
+ * LVGL 9 FIX: NO CONTAINER pattern
+ * All elements created directly on parent screen to avoid freeze bug.
+ */
 struct zmk_widget_connection_status {
-    lv_obj_t *obj;
+    lv_obj_t *obj;             // Points to first element for compatibility
+    lv_obj_t *parent;          // Store parent for positioning
     lv_obj_t *transport_label;
     lv_obj_t *ble_profile_label;
 };

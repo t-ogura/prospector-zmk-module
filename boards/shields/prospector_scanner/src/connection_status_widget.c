@@ -68,34 +68,42 @@ static void update_connection_status(struct zmk_widget_connection_status *widget
             kbd->data.status_flags);
 }
 
+/**
+ * LVGL 9 FIX: NO CONTAINER - Create all elements directly on parent
+ * Widget positioned at TOP_RIGHT with x=-5, y=45 in scanner_display.c
+ */
 int zmk_widget_connection_status_init(struct zmk_widget_connection_status *widget, lv_obj_t *parent) {
     if (!widget || !parent) {
         return -1;
     }
-    
-    // Create container widget sized for connection status display
-    widget->obj = lv_obj_create(parent);
-    lv_obj_set_size(widget->obj, 90, 60); // Wider to accommodate BLE profile number
-    lv_obj_set_style_bg_opa(widget->obj, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_opa(widget->obj, LV_OPA_TRANSP, 0);
-    
-    // Transport status label (USB/BLE with colors)
-    widget->transport_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->transport_label, LV_ALIGN_TOP_RIGHT, -5, 5);
+
+    widget->parent = parent;
+
+    // Position offsets from TOP_RIGHT
+    const int X_OFFSET = -5;
+    const int Y_OFFSET = 45;
+
+    // Transport status label (USB/BLE with colors) - created directly on parent
+    widget->transport_label = lv_label_create(parent);
+    lv_obj_align(widget->transport_label, LV_ALIGN_TOP_RIGHT, X_OFFSET, Y_OFFSET);
     lv_obj_set_style_text_font(widget->transport_label, &lv_font_montserrat_12, 0);
-    
-    // BLE profile number label (positioned very close to BLE text)
-    widget->ble_profile_label = lv_label_create(widget->obj);
-    lv_obj_align(widget->ble_profile_label, LV_ALIGN_BOTTOM_RIGHT, -8, -22); // Inside screen bounds
+    lv_obj_set_style_text_align(widget->transport_label, LV_TEXT_ALIGN_RIGHT, 0);
+
+    // BLE profile number label - created directly on parent
+    widget->ble_profile_label = lv_label_create(parent);
+    lv_obj_align(widget->ble_profile_label, LV_ALIGN_TOP_RIGHT, X_OFFSET - 3, Y_OFFSET + 33);
     lv_obj_set_style_text_font(widget->ble_profile_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(widget->ble_profile_label, lv_color_white(), 0);
-    
+
     // Initialize with default values
     lv_label_set_text(widget->transport_label, "#ff0000 USB#\\n#ffffff BLE#");
     lv_label_set_text(widget->ble_profile_label, "0");
     lv_label_set_recolor(widget->transport_label, true);
-    
-    LOG_INF("Connection status widget initialized");
+
+    // Set widget->obj to first element for compatibility
+    widget->obj = widget->transport_label;
+
+    LOG_INF("✨ Connection status widget initialized (LVGL9 no-container pattern)");
     return 0;
 }
 
@@ -154,17 +162,24 @@ struct zmk_widget_connection_status *zmk_widget_connection_status_create(lv_obj_
 }
 
 void zmk_widget_connection_status_destroy(struct zmk_widget_connection_status *widget) {
-    LOG_DBG("Destroying connection status widget (dynamic deallocation)");
+    LOG_DBG("Destroying connection status widget (LVGL9 no-container)");
 
     if (!widget) {
         return;
     }
 
-    // Delete LVGL objects (parent obj will delete all children including transport_label and ble_profile_label)
-    if (widget->obj) {
-        lv_obj_del(widget->obj);
-        widget->obj = NULL;
+    // LVGL 9 FIX: Delete each element individually (no container parent)
+    if (widget->ble_profile_label) {
+        lv_obj_del(widget->ble_profile_label);
+        widget->ble_profile_label = NULL;
     }
+    if (widget->transport_label) {
+        lv_obj_del(widget->transport_label);
+        widget->transport_label = NULL;
+    }
+
+    widget->obj = NULL;
+    widget->parent = NULL;
 
     // Free the widget structure memory from LVGL heap
     lv_free(widget);
