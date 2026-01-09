@@ -116,4 +116,53 @@
     };
 };
 
-/* I2C/Touch panel section removed for minimal boot test */
+/* ========== I2C Bus (Step 5a) ========== */
+
+/* I2C0 pinctrl for touch sensor and light sensor */
+&pinctrl {
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  /* D4 = P0.04 = SDA */
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  /* D5 = P0.05 = SCL */
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;
+            low-power-enable;
+        };
+    };
+};
+
+&i2c0 {
+    status = "okay";
+    compatible = "nordic,nrf-twim";
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
+    clock-frequency = <100000>;  /* Standard mode 100kHz */
+
+    /* CST816S Touch Controller (Step 5b - enabled when CONFIG_INPUT_CST816S=y) */
+    touch_sensor: cst816s@15 {
+        compatible = "hynitron,cst816s";
+        reg = <0x15>;
+        status = "okay";
+
+        /* Touch panel control pins */
+        /* TP_IRQ → D0 = P0.02 (interrupt pin) */
+        /* TP_RST → D1 = P0.28 (reset pin) */
+        irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        rst-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
+    };
+
+    /* APDS9960 Light/Gesture Sensor (Step 5c - for auto-brightness) */
+    apds9960: apds9960@39 {
+        compatible = "avago,apds9960";
+        reg = <0x39>;
+        status = "okay";
+        /* Using D8 for interrupt */
+        int-gpios = <&xiao_d 8 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+};
