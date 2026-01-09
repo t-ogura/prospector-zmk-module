@@ -61,7 +61,7 @@ static bool mutex_initialized = false;
 extern void display_update_device_name(const char *name);
 extern void display_update_layer(int layer);
 extern void display_update_wpm(int wpm);
-extern void display_update_connection(bool usb_ready, bool ble_connected, int profile);
+extern void display_update_connection(bool usb_ready, bool ble_connected, bool ble_bonded, int profile);
 extern void display_update_modifiers(uint8_t mods);
 extern void display_update_keyboard_battery(int left, int right);
 extern void display_update_signal(int8_t rssi, float rate_hz);
@@ -112,6 +112,18 @@ int scanner_get_active_keyboard_count(void) {
 
 int scanner_get_selected_keyboard(void) {
     return selected_keyboard;
+}
+
+/* Forward declaration */
+static void schedule_display_update(void);
+
+void scanner_set_selected_keyboard(int index) {
+    if (index >= 0 && index < MAX_KEYBOARDS) {
+        selected_keyboard = index;
+        LOG_INF("Selected keyboard changed to slot %d", index);
+        /* Immediately update display with new keyboard data */
+        schedule_display_update();
+    }
 }
 
 /* ========== Display Update Work (runs in system work queue context) ========== */
@@ -166,7 +178,8 @@ static void display_update_work_handler(struct k_work *work) {
 
     bool usb_ready = (data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
     bool ble_connected = (data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
-    display_update_connection(usb_ready, ble_connected, data.profile_slot);
+    bool ble_bonded = (data.status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
+    display_update_connection(usb_ready, ble_connected, ble_bonded, data.profile_slot);
 
     display_update_modifiers(data.modifier_flags);
 

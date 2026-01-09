@@ -19,6 +19,20 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include "brightness_control.h"
 #include "scanner_message.h"
 
+// Auto brightness configuration defaults
+#ifndef CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
+#define CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS 5   // 5% minimum brightness in dark
+#endif
+#ifndef CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS
+#define CONFIG_PROSPECTOR_ALS_MAX_BRIGHTNESS 100 // 100% maximum brightness
+#endif
+#ifndef CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD
+#define CONFIG_PROSPECTOR_ALS_SENSOR_THRESHOLD 500 // Light value for max brightness
+#endif
+#ifndef CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS
+#define CONFIG_PROSPECTOR_ALS_UPDATE_INTERVAL_MS 1000 // 1 second update interval
+#endif
+
 // Only compile sensor code if enabled
 #if IS_ENABLED(CONFIG_PROSPECTOR_USE_AMBIENT_LIGHT_SENSOR)
 
@@ -282,6 +296,7 @@ SYS_INIT(brightness_control_init, APPLICATION, 90);
 // All brightness control happens in scanner_display.c via messages
 
 void brightness_control_set_auto(bool enabled) {
+    ARG_UNUSED(enabled);
     LOG_WRN("🔆 Auto brightness not available (no sensor)");
 }
 
@@ -289,9 +304,26 @@ bool brightness_control_is_auto(void) {
     return false;
 }
 
+const struct device *brightness_control_get_i2c_dev(void) {
+    return NULL;
+}
+
+bool brightness_control_sensor_available(void) {
+    return false;
+}
+
+int brightness_control_read_sensor(uint16_t *light_val) {
+    ARG_UNUSED(light_val);
+    return -ENODEV;
+}
+
+uint8_t brightness_control_map_light_to_brightness(uint32_t light_value) {
+    ARG_UNUSED(light_value);
+    return 50;  // Return mid brightness when no sensor
+}
+
 static int brightness_control_init(void) {
-    LOG_INF("🔆 Brightness Control: Message Queue Mode (Fixed)");
-    LOG_INF("ℹ️ All brightness control via scanner_display.c");
+    LOG_INF("🔆 Brightness Control: Fixed Mode (no sensor)");
     return 0;
 }
 

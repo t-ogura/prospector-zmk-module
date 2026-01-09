@@ -20,11 +20,12 @@
         input-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 
-    /* GPIO backlight control - Pin 6 = P1.11 */
-    leds {
-        compatible = "gpio-leds";
+    /* PWM backlight control for brightness adjustment - Pin 6 = P1.11 */
+    /* PWM period: 500us = 2kHz to prevent visible flickering at low brightness */
+    pwmleds {
+        compatible = "pwm-leds";
         backlight: backlight {
-            gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+            pwms = <&pwm0 0 PWM_USEC(500) PWM_POLARITY_NORMAL>;
             label = "Backlight";
         };
     };
@@ -45,6 +46,30 @@
 /* Disable default SPI2 */
 &spi2 {
     status = "disabled";
+};
+
+/* PWM pinctrl for backlight on P1.11 */
+&pinctrl {
+    pwm0_default: pwm0_default {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;  /* P1.11 = Pin 6 = Backlight */
+        };
+    };
+
+    pwm0_sleep: pwm0_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;
+            low-power-enable;
+        };
+    };
+};
+
+/* Enable PWM0 for backlight */
+&pwm0 {
+    status = "okay";
+    pinctrl-0 = <&pwm0_default>;
+    pinctrl-1 = <&pwm0_sleep>;
+    pinctrl-names = "default", "sleep";
 };
 
 /* Custom pinctrl for SPI3 */
@@ -158,11 +183,12 @@
     };
 
     /* APDS9960 Light/Gesture Sensor (Step 5c - for auto-brightness) */
+    /* NOTE: INT not physically connected, using unused internal GPIO P0.09 */
+    /* P0.09 is NFC1 pin, not exposed on XIAO but available as GPIO */
     apds9960: apds9960@39 {
         compatible = "avago,apds9960";
         reg = <0x39>;
         status = "okay";
-        /* Using D8 for interrupt */
-        int-gpios = <&xiao_d 8 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        int-gpios = <&gpio0 9 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 };

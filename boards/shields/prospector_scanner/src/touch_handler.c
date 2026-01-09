@@ -55,18 +55,34 @@ static struct {
     bool in_progress;
 } swipe_state = {0};
 
+// Cooldown to prevent rapid-fire swipe events (prevents freeze)
+#define SWIPE_COOLDOWN_MS 400
+static int64_t last_swipe_time = 0;
+
+// Flag to prevent duplicate events (hardware gesture + software detection)
+static bool swipe_already_raised = false;
+
 // Helper function to raise swipe gesture event (thread-safe)
 // Uses ZMK event system - listener runs in main thread, safe for LVGL
 static void raise_swipe_event(enum swipe_direction direction) {
     const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
 
-    // Block swipe during UI interaction (slider drag, etc.)
-    if (display_settings_is_interacting()) {
-        LOG_DBG("🎚️ Swipe blocked - UI interaction in progress");
+    // Cooldown check - prevent rapid consecutive swipes that cause freeze
+    int64_t now = k_uptime_get();
+    if ((now - last_swipe_time) < SWIPE_COOLDOWN_MS) {
+        LOG_DBG("Swipe blocked - cooldown active (%lld ms remaining)",
+                SWIPE_COOLDOWN_MS - (now - last_swipe_time));
         return;
     }
 
-    LOG_INF("📤 Raising ZMK swipe event: %s", dir_name[direction]);
+    // Block swipe during UI interaction (slider drag, etc.)
+    if (display_settings_is_interacting()) {
+        LOG_DBG("Swipe blocked - UI interaction in progress");
+        return;
+    }
+
+    last_swipe_time = now;
+    LOG_INF("Raising ZMK swipe event: %s", dir_name[direction]);
 
     // Use ZMK event system - thread-safe, listener runs in main thread
     // No message queue needed - ZMK event manager handles synchronization
@@ -90,32 +106,36 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
     switch (evt->code) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
-            if (evt->value == 1) {  // Key press
-                LOG_INF("⬇️ CST816S HARDWARE GESTURE: Swipe DOWN detected");
+            if (evt->value == 1) {
+                LOG_INF("HW GESTURE: Swipe DOWN");
+                swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_DOWN);
             }
             break;
 
         case INPUT_KEY_UP:
             if (evt->value == 1) {
-                LOG_INF("⬆️ CST816S HARDWARE GESTURE: Swipe UP detected");
+                LOG_INF("HW GESTURE: Swipe UP");
+                swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_UP);
             }
             break;
 
         case INPUT_KEY_LEFT:
             if (evt->value == 1) {
-                // Display is rotated 180°, so LEFT hardware gesture = RIGHT logical swipe
-                LOG_INF("⬅️ CST816S HARDWARE GESTURE: Swipe LEFT detected → RIGHT logical");
-                raise_swipe_event(SWIPE_DIRECTION_RIGHT);
+                // Direct mapping - no swap needed with corrected coordinate transform
+                LOG_INF("HW GESTURE: Swipe LEFT");
+                swipe_already_raised = true;
+                raise_swipe_event(SWIPE_DIRECTION_LEFT);
             }
             break;
 
         case INPUT_KEY_RIGHT:
             if (evt->value == 1) {
-                // Display is rotated 180°, so RIGHT hardware gesture = LEFT logical swipe
-                LOG_INF("➡️ CST816S HARDWARE GESTURE: Swipe RIGHT detected → LEFT logical");
-                raise_swipe_event(SWIPE_DIRECTION_LEFT);
+                // Direct mapping - no swap needed with corrected coordinate transform
+                LOG_INF("HW GESTURE: Swipe RIGHT");
+                swipe_already_raised = true;
+                raise_swipe_event(SWIPE_DIRECTION_RIGHT);
             }
             break;
 
@@ -157,68 +177,46 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
                     touch_active, prev_touch_active, touch_started);
 
             if (touch_started) {
-                // Touch DOWN - record start position ONLY at touch start
+                // Touch DOWN - record start position and clear duplicate flag
                 swipe_state.start_x = current_x;
                 swipe_state.start_y = current_y;
                 swipe_state.start_time = k_uptime_get();
                 swipe_state.in_progress = true;
+                swipe_already_raised = false;  // Clear for new touch sequence
 
-                LOG_INF("🖐️ Touch DOWN at (%d, %d)", current_x, current_y);
+                LOG_INF("Touch DOWN at (%d, %d)", current_x, current_y);
 
                 // Reset coordinate update flags for next touch
                 x_updated = false;
                 y_updated = false;
             } else if (touch_active) {
                 // Touch is being held (dragging) - just log current position (reduced logging)
-                LOG_DBG("👆 Dragging at (%d, %d)", current_x, current_y);
+                LOG_DBG("Dragging at (%d, %d)", current_x, current_y);
             } else {
-                // Touch UP - check for swipe gesture
-                // NOTE: Display orientation vs touch panel coordinate system mismatch
-                // Physical vertical swipe → coordinate X axis changes (90° rotation)
-                // Physical horizontal swipe → coordinate Y axis changes
-                int16_t raw_dx = current_x - swipe_state.start_x;
-                int16_t raw_dy = current_y - swipe_state.start_y;
+                // Touch UP - Software swipe detection (fallback if no hardware gesture)
+                if (!swipe_already_raised && swipe_state.in_progress) {
+                    int16_t raw_dx = current_x - swipe_state.start_x;
+                    int16_t raw_dy = current_y - swipe_state.start_y;
 
-                // COORDINATE TRANSFORM: Swap X/Y axes for 90° rotation
-                // Physical vertical movement → coordinate X movement (inverted)
-                // Physical horizontal movement → coordinate Y movement
-                int16_t dx = -raw_dy;  // Physical horizontal = coordinate Y (inverted)
-                int16_t dy = -raw_dx;  // Physical vertical = coordinate X (inverted)
+                    // COORDINATE TRANSFORM for rotated display
+                    // Touch Y → Display X (direct), Touch X → Display Y (inverted)
+                    int16_t dx = raw_dy;   // X: direct mapping
+                    int16_t dy = -raw_dx;  // Y: inverted
 
-                int16_t abs_dx = (dx < 0) ? -dx : dx;
-                int16_t abs_dy = (dy < 0) ? -dy : dy;
+                    int16_t abs_dx = (dx < 0) ? -dx : dx;
+                    int16_t abs_dy = (dy < 0) ? -dy : dy;
 
-                LOG_DBG("👆 Swipe: (%d,%d) → (%d,%d), raw dx=%d dy=%d → physical dx=%d dy=%d, in_progress=%d",
-                        swipe_state.start_x, swipe_state.start_y, current_x, current_y,
-                        raw_dx, raw_dy, dx, dy, swipe_state.in_progress);
-
-                if (swipe_state.in_progress) {
-                    // Check if movement is primarily vertical and exceeds threshold
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
-                        if (dy > 0) {
-                            // DOWN swipe detected - raise event
-                            LOG_INF("⬇️ DOWN SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
-                            raise_swipe_event(SWIPE_DIRECTION_DOWN);
-                        } else {
-                            // UP swipe detected - raise event
-                            LOG_INF("⬆️ UP SWIPE detected (physical dy=%d, threshold=%d)", dy, SWIPE_THRESHOLD);
-                            raise_swipe_event(SWIPE_DIRECTION_UP);
-                        }
+                        LOG_INF("SW SWIPE: %s (dy=%d)", dy > 0 ? "DOWN" : "UP", dy);
+                        raise_swipe_event(dy > 0 ? SWIPE_DIRECTION_DOWN : SWIPE_DIRECTION_UP);
                     } else if (abs_dx > abs_dy && abs_dx > SWIPE_THRESHOLD) {
-                        if (dx > 0) {
-                            LOG_INF("➡️ RIGHT SWIPE detected (physical dx=%d, threshold=%d)", dx, SWIPE_THRESHOLD);
-                            raise_swipe_event(SWIPE_DIRECTION_RIGHT);
-                        } else {
-                            LOG_INF("⬅️ LEFT SWIPE detected (physical dx=%d, threshold=%d)", dx, SWIPE_THRESHOLD);
-                            raise_swipe_event(SWIPE_DIRECTION_LEFT);
-                        }
-                    } else {
-                        LOG_DBG("Swipe too small: abs_dx=%d, abs_dy=%d (threshold=%d)",
-                                abs_dx, abs_dy, SWIPE_THRESHOLD);
+                        LOG_INF("SW SWIPE: %s (dx=%d)", dx > 0 ? "RIGHT" : "LEFT", dx);
+                        raise_swipe_event(dx > 0 ? SWIPE_DIRECTION_RIGHT : SWIPE_DIRECTION_LEFT);
                     }
-
-                    swipe_state.in_progress = false;
                 }
+
+                swipe_state.in_progress = false;
+                swipe_already_raised = false;
 
                 // Reset coordinate update flags
                 x_updated = false;
@@ -244,18 +242,37 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
 INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), touch_input_callback, NULL);
 
 // LVGL input device read callback (LVGL 9 API)
+// COORDINATE TRANSFORM:
+// - Touch panel physical: 240 x 280 (portrait)
+// - Display logical: 280 x 240 (landscape, rotated 90° via ST7789V mdac)
+// - Touch Y (0-279) → Display X (0-279) - direct mapping, NO inversion
+// - Touch X (0-239) → Display Y (239-0) - inverted
 static void lvgl_input_read(lv_indev_t *indev, lv_indev_data_t *data) {
     ARG_UNUSED(indev);
-    data->point.x = current_x;
-    data->point.y = current_y;
+
+    // Transform coordinates: swap X/Y axes
+    // Touch panel Y axis maps to display X axis (direct, no inversion)
+    // Touch panel X axis maps to display Y axis (inverted)
+    int32_t logical_x = current_y;           // Direct mapping
+    int32_t logical_y = 239 - current_x;     // Inverted
+
+    // Clamp to valid range
+    if (logical_x < 0) logical_x = 0;
+    if (logical_x > 279) logical_x = 279;
+    if (logical_y < 0) logical_y = 0;
+    if (logical_y > 239) logical_y = 239;
+
+    data->point.x = logical_x;
+    data->point.y = logical_y;
     data->state = touch_active ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 
     // Debug: Log when LVGL reads touch state (reduced frequency)
     static uint32_t last_log_time = 0;
     uint32_t now = k_uptime_get_32();
     if (now - last_log_time > 500 || touch_active) {
-        LOG_DBG("LVGL read: (%d, %d) state=%s",
+        LOG_DBG("LVGL read: raw(%d,%d) -> logical(%d,%d) state=%s",
                 current_x, current_y,
+                (int)data->point.x, (int)data->point.y,
                 touch_active ? "PRESSED" : "RELEASED");
         last_log_time = now;
     }

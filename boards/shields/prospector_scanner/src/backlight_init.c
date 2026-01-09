@@ -1,6 +1,6 @@
 /*
  * Simple backlight initialization - turns on backlight at boot
- * Based on zmk-minimal-test/backlight_init.c
+ * Uses PWM LED driver for brightness control
  *
  * This runs at SYS_INIT priority 50, BEFORE display initialization,
  * ensuring the backlight is on even if display init fails.
@@ -8,16 +8,25 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/led.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(backlight_init, LOG_LEVEL_INF);
 
-/* Backlight GPIO: P1.11 (via led0 alias) */
-#define BACKLIGHT_NODE DT_ALIAS(led0)
+/* Backlight PWM LED node */
+#if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
+#define BACKLIGHT_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(pwm_leds)
+static const struct device *backlight_dev = DEVICE_DT_GET(BACKLIGHT_NODE);
+#define HAS_PWM_BACKLIGHT 1
+#else
+#define HAS_PWM_BACKLIGHT 0
+#endif
 
 static uint32_t heartbeat_count = 0;
+
+/* Default brightness (0-100) */
+#define DEFAULT_BRIGHTNESS 65
 
 /* Heartbeat timer callback - for debugging */
 static void heartbeat_timer_cb(struct k_timer *timer) {
@@ -39,33 +48,26 @@ static void heartbeat_timer_cb(struct k_timer *timer) {
 
 K_TIMER_DEFINE(heartbeat_timer, heartbeat_timer_cb, NULL);
 
-#if DT_NODE_EXISTS(BACKLIGHT_NODE)
-static const struct gpio_dt_spec backlight = GPIO_DT_SPEC_GET(BACKLIGHT_NODE, gpios);
+#if HAS_PWM_BACKLIGHT
 
 static int backlight_init(void) {
     int ret;
 
-    LOG_INF("=== BACKLIGHT INIT (priority 50) ===");
+    LOG_INF("=== BACKLIGHT INIT (PWM, priority 50) ===");
 
-    if (!gpio_is_ready_dt(&backlight)) {
-        LOG_ERR("Backlight GPIO not ready");
+    if (!device_is_ready(backlight_dev)) {
+        LOG_ERR("PWM backlight device not ready");
         return -ENODEV;
     }
 
-    ret = gpio_pin_configure_dt(&backlight, GPIO_OUTPUT_ACTIVE);
+    /* Set initial brightness to default value */
+    ret = led_set_brightness(backlight_dev, 0, DEFAULT_BRIGHTNESS);
     if (ret < 0) {
-        LOG_ERR("Failed to configure backlight GPIO: %d", ret);
+        LOG_ERR("Failed to set backlight brightness: %d", ret);
         return ret;
     }
 
-    /* Turn on backlight */
-    ret = gpio_pin_set_dt(&backlight, 1);
-    if (ret < 0) {
-        LOG_ERR("Failed to turn on backlight: %d", ret);
-        return ret;
-    }
-
-    LOG_INF("Backlight turned ON");
+    LOG_INF("Backlight turned ON at %d%% brightness", DEFAULT_BRIGHTNESS);
 
     /* Start heartbeat timer - every 3 seconds */
     k_timer_start(&heartbeat_timer, K_SECONDS(3), K_SECONDS(3));
@@ -75,6 +77,7 @@ static int backlight_init(void) {
 }
 
 SYS_INIT(backlight_init, APPLICATION, 50);
+
 #else
-#warning "Backlight LED node (led0 alias) not found"
+#warning "PWM backlight LED node not found"
 #endif
