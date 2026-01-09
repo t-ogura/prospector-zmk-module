@@ -7,7 +7,11 @@
 #include "touch_handler.h"
 #include "events/swipe_gesture_event.h"
 // Message queue removed - using ZMK event system for thread-safe architecture
-#include "display_settings_widget.h"  // For display_settings_is_interacting()
+
+/* Weak function - overridden by display_settings_widget.c when included */
+__attribute__((weak)) bool display_settings_is_interacting(void) {
+    return false;  /* Default: never blocking */
+}
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -79,7 +83,8 @@ static void raise_swipe_event(enum swipe_direction direction) {
 // External callback registration function that can be called from scanner_display.c
 extern void touch_handler_late_register_callback(touch_event_callback_t callback);
 
-static void touch_input_callback(struct input_event *evt) {
+static void touch_input_callback(struct input_event *evt, void *user_data) {
+    ARG_UNUSED(user_data);
     LOG_INF("📥 INPUT EVENT: type=%d code=%d value=%d", evt->type, evt->code, evt->value);
 
     switch (evt->code) {
@@ -235,20 +240,21 @@ static void touch_input_callback(struct input_event *evt) {
     }
 }
 
-// Input callback registration macro
-INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), touch_input_callback);
+// Input callback registration macro (Zephyr 4.x requires 3 args: dev, callback, user_data)
+INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), touch_input_callback, NULL);
 
-// LVGL input device read callback
-static void lvgl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
+// LVGL input device read callback (LVGL 9 API)
+static void lvgl_input_read(lv_indev_t *indev, lv_indev_data_t *data) {
+    ARG_UNUSED(indev);
     data->point.x = current_x;
     data->point.y = current_y;
     data->state = touch_active ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 
-    // Debug: Log when LVGL reads touch state
+    // Debug: Log when LVGL reads touch state (reduced frequency)
     static uint32_t last_log_time = 0;
     uint32_t now = k_uptime_get_32();
-    if (now - last_log_time > 500 || touch_active) {  // Log every 500ms or when touched
-        LOG_INF("🔵 LVGL read: (%d, %d) state=%s",
+    if (now - last_log_time > 500 || touch_active) {
+        LOG_DBG("LVGL read: (%d, %d) state=%s",
                 current_x, current_y,
                 touch_active ? "PRESSED" : "RELEASED");
         last_log_time = now;
@@ -277,19 +283,17 @@ int touch_handler_register_lvgl_indev(void) {
         return 0;
     }
 
-    // Register LVGL input device for touch events
-    static lv_indev_drv_t indev_drv;
-    lv_indev_drv_init(&indev_drv);
-    indev_drv.type = LV_INDEV_TYPE_POINTER;
-    indev_drv.read_cb = lvgl_input_read;
-    lvgl_indev = lv_indev_drv_register(&indev_drv);
-
+    // Register LVGL input device for touch events (LVGL 9 API)
+    lvgl_indev = lv_indev_create();
     if (!lvgl_indev) {
-        LOG_ERR("Failed to register LVGL input device");
+        LOG_ERR("Failed to create LVGL input device");
         return -ENOMEM;
     }
 
-    LOG_INF("✅ LVGL input device registered for touch events");
+    lv_indev_set_type(lvgl_indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(lvgl_indev, lvgl_input_read);
+
+    LOG_INF("LVGL input device registered for touch events");
 
     return 0;
 }

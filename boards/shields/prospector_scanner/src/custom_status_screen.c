@@ -15,7 +15,7 @@
 #include <zmk/display.h>
 #include <zmk/display/status_screen.h>
 #include <zmk/event_manager.h>
-#include "swipe_event.h"
+#include "events/swipe_gesture_event.h"
 #include "fonts.h"  /* NerdFont declarations */
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
