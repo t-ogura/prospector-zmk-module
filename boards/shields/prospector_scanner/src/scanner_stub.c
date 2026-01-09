@@ -11,6 +11,14 @@
 #include <zmk/status_advertisement.h>
 #include <lvgl.h>
 
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+#include <zmk/battery.h>
+#endif
+
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#include <zmk/usb.h>
+#endif
+
 LOG_MODULE_REGISTER(scanner_handler, LOG_LEVEL_INF);
 
 /* External scanner start function (from status_scanner.c) */
@@ -57,6 +65,7 @@ extern void display_update_connection(bool usb_ready, bool ble_connected, int pr
 extern void display_update_modifiers(uint8_t mods);
 extern void display_update_keyboard_battery(int left, int right);
 extern void display_update_signal(int8_t rssi, float rate_hz);
+extern void display_update_scanner_battery(int level);
 
 /* ========== Public API for Display ========== */
 
@@ -115,6 +124,10 @@ static int8_t last_rssi = -100;
 /* External transition flag from custom_status_screen.c */
 extern volatile bool transition_in_progress;
 
+/* Scanner battery update interval */
+static uint32_t scanner_battery_last_update = 0;
+#define SCANNER_BATTERY_UPDATE_INTERVAL_MS 5000  /* Update every 5 seconds */
+
 static void display_update_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
 
@@ -124,6 +137,14 @@ static void display_update_work_handler(struct k_work *work) {
     if (transition_in_progress) {
         LOG_DBG("Skipping update - transition in progress");
         return;
+    }
+
+    /* Update scanner's own battery periodically */
+    uint32_t now = k_uptime_get_32();
+    if (scanner_battery_last_update == 0 ||
+        (now - scanner_battery_last_update) >= SCANNER_BATTERY_UPDATE_INTERVAL_MS) {
+        scanner_msg_send_battery_update();
+        scanner_battery_last_update = now;
     }
 
     struct zmk_status_adv_data data;
@@ -161,7 +182,6 @@ static void display_update_work_handler(struct k_work *work) {
 
     /* Calculate reception rate */
     last_rssi = rssi;
-    uint32_t now = k_uptime_get_32();
     rate_update_count++;
 
     if (now - rate_last_update >= 1000) {
@@ -271,6 +291,18 @@ int scanner_msg_send_tap(int16_t x, int16_t y) {
 }
 
 int scanner_msg_send_battery_update(void) {
+    /* Read local scanner battery from ZMK battery API */
+    int scanner_battery_level = 0;
+
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    scanner_battery_level = zmk_battery_state_of_charge();
+#endif
+
+    /* Only update if we got a valid reading */
+    if (scanner_battery_level > 0) {
+        display_update_scanner_battery(scanner_battery_level);
+    }
+
     msgs_sent++;
     return 0;
 }

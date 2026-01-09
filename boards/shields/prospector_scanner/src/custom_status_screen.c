@@ -16,6 +16,7 @@
 #include <zmk/display/status_screen.h>
 #include <zmk/event_manager.h>
 #include "swipe_event.h"
+#include "fonts.h"  /* NerdFont declarations */
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
 
@@ -54,17 +55,25 @@ LV_FONT_DECLARE(lv_font_montserrat_28);
 LV_FONT_DECLARE(lv_font_unscii_8);
 LV_FONT_DECLARE(lv_font_unscii_16);
 
-/* ========== Simulated data ========== */
-static int active_layer = 2;
-static int wpm_value = 42;
-static int battery_left = 75;
-static int battery_right = 100;
-static int scanner_battery = 85;
-static int rssi = -55;
-static float rate_hz = 1.5f;
+/* NerdFont modifier symbols - From YADS project (MIT License) */
+static const char *mod_symbols[4] = {
+    "\xf3\xb0\x98\xb4",  /* 󰘴 Control (U+F0634) */
+    "\xf3\xb0\x98\xb6",  /* 󰘶 Shift (U+F0636) */
+    "\xf3\xb0\x98\xb5",  /* 󰘵 Alt (U+F0635) */
+    "\xf3\xb0\x98\xb3"   /* 󰘳 GUI/Win/Cmd (U+F0633) */
+};
+
+/* ========== Cached data (updated by scanner) ========== */
+static int active_layer = 0;
+static int wpm_value = 0;
+static int battery_left = 0;
+static int battery_right = 0;
+static int scanner_battery = 0;
+static int rssi = 0;
+static float rate_hz = 0.0f;
 static int ble_profile = 0;
 static bool usb_ready = false;
-static bool ble_connected = true;
+static bool ble_connected = false;
 
 /* ========== Widget references (NO CONTAINERS) ========== */
 
@@ -90,11 +99,17 @@ static lv_obj_t *layer_labels[10] = {NULL};
 /* Modifier - placeholder for now (no NerdFont in ZMK test) */
 static lv_obj_t *modifier_label = NULL;
 
-/* Keyboard battery */
+/* Keyboard battery - connected state */
 static lv_obj_t *left_bat_bar = NULL;
 static lv_obj_t *left_bat_label = NULL;
 static lv_obj_t *right_bat_bar = NULL;
 static lv_obj_t *right_bat_label = NULL;
+
+/* Keyboard battery - disconnected state (× symbol) */
+static lv_obj_t *left_bat_nc_bar = NULL;
+static lv_obj_t *left_bat_nc_label = NULL;
+static lv_obj_t *right_bat_nc_bar = NULL;
+static lv_obj_t *right_bat_nc_label = NULL;
 
 /* Signal status */
 static lv_obj_t *channel_label = NULL;
@@ -196,39 +211,36 @@ lv_obj_t *zmk_display_status_screen(void) {
     LOG_INF("[INIT] device name created");
 
     /* ===== 2. Scanner Battery (TOP_RIGHT area) ===== */
+    /* Shows scanner device's own battery level */
     LOG_INF("[INIT] Creating scanner battery...");
     scanner_bat_icon = lv_label_create(screen);
     lv_obj_set_style_text_font(scanner_bat_icon, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(scanner_bat_icon, 212, 6);
-    char padded_icon[16];
-    snprintf(padded_icon, sizeof(padded_icon), "  %s", get_battery_icon(scanner_battery));
-    lv_label_set_text(scanner_bat_icon, padded_icon);
-    lv_obj_set_style_text_color(scanner_bat_icon, get_scanner_battery_color(scanner_battery), 0);
+    lv_obj_set_pos(scanner_bat_icon, 216, 4);  /* 4px right */
+    lv_label_set_text(scanner_bat_icon, LV_SYMBOL_BATTERY_3);  /* Initial: 3/4 battery */
+    lv_obj_set_style_text_color(scanner_bat_icon, lv_color_hex(0x7FFF00), 0);  /* Lime green */
 
     scanner_bat_pct = lv_label_create(screen);
     lv_obj_set_style_text_font(scanner_bat_pct, &lv_font_unscii_8, 0);
-    lv_obj_set_pos(scanner_bat_pct, 234, 11);
-    char bat_buf[8];
-    snprintf(bat_buf, sizeof(bat_buf), "%d", scanner_battery);
-    lv_label_set_text(scanner_bat_pct, bat_buf);
-    lv_obj_set_style_text_color(scanner_bat_pct, get_scanner_battery_color(scanner_battery), 0);
+    lv_obj_set_pos(scanner_bat_pct, 238, 7);  /* 2px up */
+    lv_label_set_text(scanner_bat_pct, "?");  /* Unknown until battery read */
+    lv_obj_set_style_text_color(scanner_bat_pct, lv_color_hex(0x7FFF00), 0);
     LOG_INF("[INIT] scanner battery created");
 
-    /* ===== 3. WPM Widget (TOP_LEFT, x=20, y=50) ===== */
+    /* ===== 3. WPM Widget (TOP_LEFT, centered under title) ===== */
     LOG_INF("[INIT] Creating WPM...");
     wpm_title_label = lv_label_create(screen);
     lv_obj_set_style_text_font(wpm_title_label, &lv_font_unscii_8, 0);
     lv_obj_set_style_text_color(wpm_title_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
     lv_label_set_text(wpm_title_label, "WPM");
-    lv_obj_set_pos(wpm_title_label, 20, 50);
+    lv_obj_set_pos(wpm_title_label, 20, 53);  /* 3px down */
 
     wpm_value_label = lv_label_create(screen);
     lv_obj_set_style_text_font(wpm_value_label, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(wpm_value_label, lv_color_white(), 0);
-    char wpm_buf[8];
-    snprintf(wpm_buf, sizeof(wpm_buf), "%d", wpm_value);
-    lv_label_set_text(wpm_value_label, wpm_buf);
-    lv_obj_set_pos(wpm_value_label, 20, 62);
+    lv_obj_set_width(wpm_value_label, 48);  /* Fixed width for centering */
+    lv_obj_set_style_text_align(wpm_value_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(wpm_value_label, "0");
+    lv_obj_set_pos(wpm_value_label, 8, 66);  /* 3px down */
     LOG_INF("[INIT] WPM created");
 
     /* ===== 4. Connection Status (TOP_RIGHT) ===== */
@@ -238,37 +250,27 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_obj_set_style_text_color(transport_label, lv_color_white(), 0);
     lv_obj_set_style_text_align(transport_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_recolor(transport_label, true);
-    lv_obj_align(transport_label, LV_ALIGN_TOP_RIGHT, -10, 50);
+    lv_obj_align(transport_label, LV_ALIGN_TOP_RIGHT, -10, 53);
 
-    const char *usb_color = usb_ready ? "ffffff" : "ff0000";
-    const char *ble_color = ble_connected ? "00ff00" : "ffffff";
-    char transport_text[64];
-    if (usb_ready) {
-        snprintf(transport_text, sizeof(transport_text),
-                "> #%s USB#\n#%s BLE#", usb_color, ble_color);
-    } else {
-        snprintf(transport_text, sizeof(transport_text),
-                "#%s USB#\n> #%s BLE#", usb_color, ble_color);
-    }
-    lv_label_set_text(transport_label, transport_text);
+    /* Initial state: BLE with profile on new line */
+    lv_label_set_text(transport_label, "#ffffff BLE#\n#ffffff 0#");
 
+    /* Profile label kept but hidden (integrated into transport_label) */
     ble_profile_label = lv_label_create(screen);
     lv_obj_set_style_text_font(ble_profile_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ble_profile_label, lv_color_white(), 0);
-    char profile_text[8];
-    snprintf(profile_text, sizeof(profile_text), "%d", ble_profile);
-    lv_label_set_text(ble_profile_label, profile_text);
+    lv_label_set_text(ble_profile_label, "");  /* Hidden - integrated */
     lv_obj_align(ble_profile_label, LV_ALIGN_TOP_RIGHT, -8, 78);
     LOG_INF("[INIT] connection status created");
 
-    /* ===== 5. Layer Widget (CENTER area, y=95-130) ===== */
+    /* ===== 5. Layer Widget (CENTER area, y=85-120) ===== */
     LOG_INF("[INIT] Creating layer widget...");
     layer_title_label = lv_label_create(screen);
     lv_obj_set_style_text_font(layer_title_label, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(layer_title_label, lv_color_make(160, 160, 160), 0);
     lv_obj_set_style_text_opa(layer_title_label, LV_OPA_70, 0);
     lv_label_set_text(layer_title_label, "Layer");
-    lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 95);
+    lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 82);  /* 3px up */
 
     int num_layers = 7;
     int spacing = 25;
@@ -290,63 +292,121 @@ lv_obj_t *zmk_display_status_screen(void) {
             lv_obj_set_style_text_opa(layer_labels[i], LV_OPA_30, 0);
         }
 
-        lv_obj_set_pos(layer_labels[i], start_x + (i * spacing), 115);
+        lv_obj_set_pos(layer_labels[i], start_x + (i * spacing), 105);
     }
     LOG_INF("[INIT] layer widget created");
 
-    /* ===== 6. Modifier Widget (CENTER, y=150) ===== */
-    LOG_INF("[INIT] Creating modifier placeholder...");
+    /* ===== 6. Modifier Widget (CENTER, y=145) - NerdFont icons ===== */
+    LOG_INF("[INIT] Creating modifier widget with NerdFont...");
     modifier_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(modifier_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(modifier_label, &NerdFonts_Regular_40, 0);
     lv_obj_set_style_text_color(modifier_label, lv_color_white(), 0);
-    lv_label_set_text(modifier_label, "[Ctrl][Shift]");  /* Placeholder - no NerdFont */
-    lv_obj_align(modifier_label, LV_ALIGN_TOP_MID, 0, 150);
-    LOG_INF("[INIT] modifier placeholder created");
+    lv_obj_set_style_text_letter_space(modifier_label, 10, 0);  /* Space between icons */
+    lv_label_set_text(modifier_label, "");  /* Empty initially */
+    lv_obj_align(modifier_label, LV_ALIGN_TOP_MID, 0, 145);
+    LOG_INF("[INIT] modifier widget created");
 
-    /* ===== 7. Keyboard Battery (BOTTOM area, y=170-220) ===== */
+    /* ===== 7. Keyboard Battery (using BOTTOM_MID alignment like original) ===== */
     LOG_INF("[INIT] Creating keyboard battery...");
 
-    /* Left battery */
+    /* Position constants (same as scanner_battery_widget.c) */
+    #define KB_BAR_WIDTH       110
+    #define KB_BAR_HEIGHT      4
+    #define KB_BAR_Y_OFFSET    -33    /* Distance from bottom (5px lower) */
+    #define KB_LABEL_Y_OFFSET  -42    /* Label above bar (3px down) */
+    #define KB_LEFT_X_OFFSET   -70    /* Left battery x offset from center */
+    #define KB_RIGHT_X_OFFSET  70     /* Right battery x offset from center */
+
+    /* === Left battery === */
+    /* Connected state bar - initially hidden (opa=0) */
+    left_bat_bar = lv_bar_create(screen);
+    lv_obj_set_size(left_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(left_bat_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
+    lv_bar_set_range(left_bat_bar, 0, 100);
+    lv_bar_set_value(left_bat_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_color(left_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_dir(left_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_INDICATOR);
+    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_MAIN);  /* Initially hidden */
+    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_INDICATOR);
+
+    /* Connected state label - initially hidden */
     left_bat_label = lv_label_create(screen);
     lv_obj_set_style_text_font(left_bat_label, &lv_font_montserrat_12, 0);
-    char left_buf[8];
-    snprintf(left_buf, sizeof(left_buf), "%d", battery_left);
-    lv_label_set_text(left_bat_label, left_buf);
-    lv_obj_set_style_text_color(left_bat_label, get_keyboard_battery_color(battery_left), 0);
-    lv_obj_set_pos(left_bat_label, 60, 185);
+    lv_obj_set_style_text_color(left_bat_label, lv_color_white(), 0);
+    lv_obj_align(left_bat_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(left_bat_label, "0");
+    lv_obj_set_style_opa(left_bat_label, 0, 0);  /* Initially hidden */
 
-    left_bat_bar = lv_bar_create(screen);
-    lv_obj_set_size(left_bat_bar, 118, 4);
-    lv_obj_set_pos(left_bat_bar, 16, 202);
-    lv_bar_set_range(left_bat_bar, 0, 100);
-    lv_bar_set_value(left_bat_bar, battery_left, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(left_bat_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(left_bat_bar, get_keyboard_battery_color(battery_left), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(left_bat_bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_INDICATOR);
+    /* Disconnected state bar - initially visible */
+    left_bat_nc_bar = lv_obj_create(screen);
+    lv_obj_set_size(left_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(left_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
+    lv_obj_set_style_bg_color(left_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(left_bat_nc_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(left_bat_nc_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_width(left_bat_nc_bar, 0, 0);
+    lv_obj_set_style_pad_all(left_bat_nc_bar, 0, 0);
+    lv_obj_set_style_opa(left_bat_nc_bar, 255, 0);  /* Initially visible */
 
-    /* Right battery */
+    /* Disconnected state label (× symbol) - initially visible */
+    left_bat_nc_label = lv_label_create(screen);
+    lv_obj_set_style_text_font(left_bat_nc_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(left_bat_nc_label, lv_color_hex(0xe63030), 0);
+    lv_obj_align(left_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(left_bat_nc_label, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_opa(left_bat_nc_label, 255, 0);  /* Initially visible */
+
+    /* === Right battery === */
+    /* Connected state bar - initially hidden (opa=0) */
+    right_bat_bar = lv_bar_create(screen);
+    lv_obj_set_size(right_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(right_bat_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
+    lv_bar_set_range(right_bat_bar, 0, 100);
+    lv_bar_set_value(right_bat_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_color(right_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_dir(right_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_INDICATOR);
+    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_MAIN);  /* Initially hidden */
+    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_INDICATOR);
+
+    /* Connected state label - initially hidden */
     right_bat_label = lv_label_create(screen);
     lv_obj_set_style_text_font(right_bat_label, &lv_font_montserrat_12, 0);
-    char right_buf[8];
-    snprintf(right_buf, sizeof(right_buf), "%d", battery_right);
-    lv_label_set_text(right_bat_label, right_buf);
-    lv_obj_set_style_text_color(right_bat_label, get_keyboard_battery_color(battery_right), 0);
-    lv_obj_set_pos(right_bat_label, 190, 185);
+    lv_obj_set_style_text_color(right_bat_label, lv_color_white(), 0);
+    lv_obj_align(right_bat_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(right_bat_label, "0");
+    lv_obj_set_style_opa(right_bat_label, 0, 0);  /* Initially hidden */
 
-    right_bat_bar = lv_bar_create(screen);
-    lv_obj_set_size(right_bat_bar, 118, 4);
-    lv_obj_set_pos(right_bat_bar, 146, 202);
-    lv_bar_set_range(right_bat_bar, 0, 100);
-    lv_bar_set_value(right_bat_bar, battery_right, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(right_bat_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(right_bat_bar, get_keyboard_battery_color(battery_right), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(right_bat_bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_INDICATOR);
+    /* Disconnected state bar - initially visible */
+    right_bat_nc_bar = lv_obj_create(screen);
+    lv_obj_set_size(right_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(right_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
+    lv_obj_set_style_bg_color(right_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(right_bat_nc_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(right_bat_nc_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_width(right_bat_nc_bar, 0, 0);
+    lv_obj_set_style_pad_all(right_bat_nc_bar, 0, 0);
+    lv_obj_set_style_opa(right_bat_nc_bar, 255, 0);  /* Initially visible */
+
+    /* Disconnected state label (× symbol) - initially visible */
+    right_bat_nc_label = lv_label_create(screen);
+    lv_obj_set_style_text_font(right_bat_nc_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(right_bat_nc_label, lv_color_hex(0xe63030), 0);
+    lv_obj_align(right_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(right_bat_nc_label, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_opa(right_bat_nc_label, 255, 0);  /* Initially visible */
+
     LOG_INF("[INIT] keyboard battery created");
 
     /* ===== 8. Signal Status (BOTTOM, y=220) ===== */
@@ -356,23 +416,22 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_obj_set_style_text_font(channel_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(channel_label, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_label_set_text(channel_label, "Ch:0");
-    lv_obj_set_pos(channel_label, 70, 222);
+    lv_obj_set_pos(channel_label, 62, 219);  /* 5px down, 5px left */
 
     rx_title_label = lv_label_create(screen);
     lv_obj_set_style_text_font(rx_title_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(rx_title_label, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_label_set_text(rx_title_label, "RX:");
-    lv_obj_set_pos(rx_title_label, 110, 222);
+    lv_obj_set_pos(rx_title_label, 102, 219);  /* 5px down, 5px left */
 
-    uint8_t bars = rssi_to_bars(rssi);
     rssi_bar = lv_bar_create(screen);
     lv_obj_set_size(rssi_bar, 30, 8);
-    lv_obj_set_pos(rssi_bar, 138, 224);
+    lv_obj_set_pos(rssi_bar, 130, 221);  /* 5px down, 5px left */
     lv_bar_set_range(rssi_bar, 0, 5);
-    lv_bar_set_value(rssi_bar, bars, LV_ANIM_OFF);
+    lv_bar_set_value(rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(rssi_bar, lv_color_make(0x20, 0x20, 0x20), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(rssi_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(rssi_bar, get_rssi_color(bars), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(rssi_bar, get_rssi_color(0), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(rssi_bar, 2, LV_PART_INDICATOR);
@@ -380,19 +439,14 @@ lv_obj_t *zmk_display_status_screen(void) {
     rssi_label = lv_label_create(screen);
     lv_obj_set_style_text_font(rssi_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    char rssi_buf[16];
-    snprintf(rssi_buf, sizeof(rssi_buf), "%ddBm", rssi);
-    lv_label_set_text(rssi_label, rssi_buf);
-    lv_obj_set_pos(rssi_label, 175, 222);
+    lv_label_set_text(rssi_label, "0dBm");
+    lv_obj_set_pos(rssi_label, 167, 219);  /* 5px down, 5px left */
 
     rate_label = lv_label_create(screen);
     lv_obj_set_style_text_font(rate_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    char rate_buf[16];
-    int rate_int = (int)(rate_hz * 10);
-    snprintf(rate_buf, sizeof(rate_buf), "%d.%dHz", rate_int / 10, rate_int % 10);
-    lv_label_set_text(rate_label, rate_buf);
-    lv_obj_set_pos(rate_label, 230, 222);
+    lv_label_set_text(rate_label, "0.0Hz");
+    lv_obj_set_pos(rate_label, 222, 219);  /* 5px down, 5px left */
     LOG_INF("[INIT] signal status created");
 
     LOG_INF("=============================================");
@@ -412,6 +466,22 @@ lv_obj_t *zmk_display_status_screen(void) {
 void display_update_device_name(const char *name) {
     if (device_name_label && name) {
         lv_label_set_text(device_name_label, name);
+    }
+}
+
+void display_update_scanner_battery(int level) {
+    scanner_battery = level;
+
+    if (scanner_bat_icon) {
+        lv_label_set_text(scanner_bat_icon, get_battery_icon(level));
+        lv_obj_set_style_text_color(scanner_bat_icon, get_scanner_battery_color(level), 0);
+    }
+
+    if (scanner_bat_pct) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", level);
+        lv_label_set_text(scanner_bat_pct, buf);
+        lv_obj_set_style_text_color(scanner_bat_pct, get_scanner_battery_color(level), 0);
     }
 }
 
@@ -447,23 +517,23 @@ void display_update_connection(bool usb_rdy, bool ble_conn, int profile) {
     ble_profile = profile;
 
     if (transport_label) {
-        const char *usb_color = usb_ready ? "ffffff" : "ff0000";
-        const char *ble_color = ble_connected ? "00ff00" : "ffffff";
-        char transport_text[64];
+        /* Exclusive display: USB or BLE (not both) */
         if (usb_ready) {
-            snprintf(transport_text, sizeof(transport_text),
-                    "> #%s USB#\n#%s BLE#", usb_color, ble_color);
+            /* USB connected - show USB only */
+            lv_label_set_text(transport_label, "#ffffff USB#");
         } else {
+            /* USB not connected - show BLE with profile number on new line */
+            const char *ble_color = ble_connected ? "00ff00" : "ffffff";
+            char transport_text[32];
             snprintf(transport_text, sizeof(transport_text),
-                    "#%s USB#\n> #%s BLE#", usb_color, ble_color);
+                    "#%s BLE#\n#ffffff %d#", ble_color, profile);
+            lv_label_set_text(transport_label, transport_text);
         }
-        lv_label_set_text(transport_label, transport_text);
     }
 
+    /* Hide profile label - now integrated into transport_label */
     if (ble_profile_label) {
-        char profile_text[8];
-        snprintf(profile_text, sizeof(profile_text), "%d", profile);
-        lv_label_set_text(ble_profile_label, profile_text);
+        lv_label_set_text(ble_profile_label, "");
     }
 }
 
@@ -472,23 +542,21 @@ void display_update_modifiers(uint8_t mods) {
         char mod_text[64] = "";
         int pos = 0;
 
+        /* Build NerdFont icon string - YADS style */
         if (mods & (ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "[Ctrl]");
+            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[0]);
         }
         if (mods & (ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "[Shift]");
+            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[1]);
         }
         if (mods & (ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "[Alt]");
+            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[2]);
         }
         if (mods & (ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "[GUI]");
+            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[3]);
         }
 
-        if (pos == 0) {
-            strcpy(mod_text, " ");  /* Empty placeholder */
-        }
-
+        /* Empty string when no modifiers active */
         lv_label_set_text(modifier_label, mod_text);
     }
 }
@@ -497,26 +565,62 @@ void display_update_keyboard_battery(int left, int right) {
     battery_left = left;
     battery_right = right;
 
-    if (left_bat_label) {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%d", left);
-        lv_label_set_text(left_bat_label, buf);
-        lv_obj_set_style_text_color(left_bat_label, get_keyboard_battery_color(left), 0);
-    }
-    if (left_bat_bar) {
-        lv_bar_set_value(left_bat_bar, left, LV_ANIM_OFF);
-        lv_obj_set_style_bg_color(left_bat_bar, get_keyboard_battery_color(left), LV_PART_INDICATOR);
+    /* Left battery - toggle between connected/disconnected state */
+    if (left > 0) {
+        /* Connected: show bar and percentage, hide × */
+        if (left_bat_nc_bar) lv_obj_set_style_opa(left_bat_nc_bar, 0, 0);
+        if (left_bat_nc_label) lv_obj_set_style_opa(left_bat_nc_label, 0, 0);
+        if (left_bat_bar) {
+            lv_obj_set_style_opa(left_bat_bar, 255, LV_PART_MAIN);
+            lv_obj_set_style_opa(left_bat_bar, 255, LV_PART_INDICATOR);
+            lv_bar_set_value(left_bat_bar, left, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(left_bat_bar, get_keyboard_battery_color(left), LV_PART_INDICATOR);
+        }
+        if (left_bat_label) {
+            lv_obj_set_style_opa(left_bat_label, 255, 0);
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d", left);
+            lv_label_set_text(left_bat_label, buf);
+            lv_obj_set_style_text_color(left_bat_label, get_keyboard_battery_color(left), 0);
+        }
+    } else {
+        /* Disconnected: show ×, hide bar and percentage */
+        if (left_bat_bar) {
+            lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_MAIN);
+            lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_INDICATOR);
+        }
+        if (left_bat_label) lv_obj_set_style_opa(left_bat_label, 0, 0);
+        if (left_bat_nc_bar) lv_obj_set_style_opa(left_bat_nc_bar, 255, 0);
+        if (left_bat_nc_label) lv_obj_set_style_opa(left_bat_nc_label, 255, 0);
     }
 
-    if (right_bat_label) {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%d", right);
-        lv_label_set_text(right_bat_label, buf);
-        lv_obj_set_style_text_color(right_bat_label, get_keyboard_battery_color(right), 0);
-    }
-    if (right_bat_bar) {
-        lv_bar_set_value(right_bat_bar, right, LV_ANIM_OFF);
-        lv_obj_set_style_bg_color(right_bat_bar, get_keyboard_battery_color(right), LV_PART_INDICATOR);
+    /* Right battery - toggle between connected/disconnected state */
+    if (right > 0) {
+        /* Connected: show bar and percentage, hide × */
+        if (right_bat_nc_bar) lv_obj_set_style_opa(right_bat_nc_bar, 0, 0);
+        if (right_bat_nc_label) lv_obj_set_style_opa(right_bat_nc_label, 0, 0);
+        if (right_bat_bar) {
+            lv_obj_set_style_opa(right_bat_bar, 255, LV_PART_MAIN);
+            lv_obj_set_style_opa(right_bat_bar, 255, LV_PART_INDICATOR);
+            lv_bar_set_value(right_bat_bar, right, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(right_bat_bar, get_keyboard_battery_color(right), LV_PART_INDICATOR);
+        }
+        if (right_bat_label) {
+            lv_obj_set_style_opa(right_bat_label, 255, 0);
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d", right);
+            lv_label_set_text(right_bat_label, buf);
+            lv_obj_set_style_text_color(right_bat_label, get_keyboard_battery_color(right), 0);
+        }
+    } else {
+        /* Disconnected: show ×, hide bar and percentage */
+        if (right_bat_bar) {
+            lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_MAIN);
+            lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_INDICATOR);
+        }
+        if (right_bat_label) lv_obj_set_style_opa(right_bat_label, 0, 0);
+        if (right_bat_nc_bar) lv_obj_set_style_opa(right_bat_nc_bar, 255, 0);
+        if (right_bat_nc_label) lv_obj_set_style_opa(right_bat_nc_label, 255, 0);
     }
 }
 
@@ -555,6 +659,12 @@ static void destroy_main_screen_widgets(void) {
     if (rssi_bar) { lv_obj_del(rssi_bar); rssi_bar = NULL; }
     if (rx_title_label) { lv_obj_del(rx_title_label); rx_title_label = NULL; }
     if (channel_label) { lv_obj_del(channel_label); channel_label = NULL; }
+    /* Keyboard battery - nc elements */
+    if (right_bat_nc_label) { lv_obj_del(right_bat_nc_label); right_bat_nc_label = NULL; }
+    if (right_bat_nc_bar) { lv_obj_del(right_bat_nc_bar); right_bat_nc_bar = NULL; }
+    if (left_bat_nc_label) { lv_obj_del(left_bat_nc_label); left_bat_nc_label = NULL; }
+    if (left_bat_nc_bar) { lv_obj_del(left_bat_nc_bar); left_bat_nc_bar = NULL; }
+    /* Keyboard battery - connected elements */
     if (right_bat_bar) { lv_obj_del(right_bat_bar); right_bat_bar = NULL; }
     if (right_bat_label) { lv_obj_del(right_bat_label); right_bat_label = NULL; }
     if (left_bat_bar) { lv_obj_del(left_bat_bar); left_bat_bar = NULL; }
@@ -588,46 +698,49 @@ static void create_main_screen_widgets(void) {
 
     scanner_bat_icon = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(scanner_bat_icon, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(scanner_bat_icon, 212, 6);
-    lv_label_set_text(scanner_bat_icon, LV_SYMBOL_BATTERY_FULL);
-    lv_obj_set_style_text_color(scanner_bat_icon, lv_color_hex(0x00FF00), 0);
+    lv_obj_set_pos(scanner_bat_icon, 216, 4);  /* 4px right */
+    lv_label_set_text(scanner_bat_icon, LV_SYMBOL_BATTERY_3);  /* Initial: 3/4 battery */
+    lv_obj_set_style_text_color(scanner_bat_icon, lv_color_hex(0x7FFF00), 0);
 
     scanner_bat_pct = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(scanner_bat_pct, &lv_font_unscii_8, 0);
-    lv_obj_set_pos(scanner_bat_pct, 234, 11);
-    lv_label_set_text(scanner_bat_pct, "85");
-    lv_obj_set_style_text_color(scanner_bat_pct, lv_color_hex(0x00FF00), 0);
+    lv_obj_set_pos(scanner_bat_pct, 238, 7);  /* 2px up */
+    lv_label_set_text(scanner_bat_pct, "?");  /* Unknown until battery read */
+    lv_obj_set_style_text_color(scanner_bat_pct, lv_color_hex(0x7FFF00), 0);
 
     wpm_title_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(wpm_title_label, &lv_font_unscii_8, 0);
     lv_obj_set_style_text_color(wpm_title_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
     lv_label_set_text(wpm_title_label, "WPM");
-    lv_obj_set_pos(wpm_title_label, 20, 50);
+    lv_obj_set_pos(wpm_title_label, 20, 53);  /* 3px down */
 
     wpm_value_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(wpm_value_label, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(wpm_value_label, lv_color_white(), 0);
+    lv_obj_set_width(wpm_value_label, 48);  /* Fixed width for centering */
+    lv_obj_set_style_text_align(wpm_value_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(wpm_value_label, "0");
-    lv_obj_set_pos(wpm_value_label, 20, 62);
+    lv_obj_set_pos(wpm_value_label, 8, 66);  /* 3px down */
 
     transport_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(transport_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(transport_label, lv_color_white(), 0);
+    lv_obj_set_style_text_align(transport_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_recolor(transport_label, true);
-    lv_obj_align(transport_label, LV_ALIGN_TOP_RIGHT, -10, 50);
-    lv_label_set_text(transport_label, "#ff0000 USB#\n> #00ff00 BLE#");
+    lv_obj_align(transport_label, LV_ALIGN_TOP_RIGHT, -10, 53);
+    lv_label_set_text(transport_label, "#ffffff BLE#\n#ffffff 0#");  /* Exclusive display */
 
     ble_profile_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(ble_profile_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ble_profile_label, lv_color_white(), 0);
-    lv_label_set_text(ble_profile_label, "0");
+    lv_label_set_text(ble_profile_label, "");  /* Hidden - integrated */
     lv_obj_align(ble_profile_label, LV_ALIGN_TOP_RIGHT, -8, 78);
 
     layer_title_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(layer_title_label, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(layer_title_label, lv_color_make(160, 160, 160), 0);
     lv_label_set_text(layer_title_label, "Layer");
-    lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 95);
+    lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 82);  /* 3px up */
 
     int num_layers = 7, spacing = 25;
     int start_x = 140 - ((num_layers - 1) * spacing / 2);
@@ -640,56 +753,121 @@ static void create_main_screen_widgets(void) {
             (i == active_layer) ? get_layer_color(i) : lv_color_make(40, 40, 40), 0);
         lv_obj_set_style_text_opa(layer_labels[i],
             (i == active_layer) ? LV_OPA_COVER : LV_OPA_30, 0);
-        lv_obj_set_pos(layer_labels[i], start_x + (i * spacing), 115);
+        lv_obj_set_pos(layer_labels[i], start_x + (i * spacing), 105);
     }
 
     modifier_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(modifier_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(modifier_label, &NerdFonts_Regular_40, 0);
     lv_obj_set_style_text_color(modifier_label, lv_color_white(), 0);
-    lv_label_set_text(modifier_label, " ");
-    lv_obj_align(modifier_label, LV_ALIGN_TOP_MID, 0, 150);
+    lv_obj_set_style_text_letter_space(modifier_label, 10, 0);  /* Space between icons */
+    lv_label_set_text(modifier_label, "");
+    lv_obj_align(modifier_label, LV_ALIGN_TOP_MID, 0, 145);
 
-    left_bat_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(left_bat_label, &lv_font_montserrat_12, 0);
-    lv_label_set_text(left_bat_label, "--");
-    lv_obj_set_style_text_color(left_bat_label, lv_color_hex(0x808080), 0);
-    lv_obj_set_pos(left_bat_label, 60, 185);
-
+    /* === Left battery (using BOTTOM_MID alignment) === */
+    /* Connected state bar - initially hidden */
     left_bat_bar = lv_bar_create(screen_obj);
-    lv_obj_set_size(left_bat_bar, 118, 4);
-    lv_obj_set_pos(left_bat_bar, 16, 202);
+    lv_obj_set_size(left_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(left_bat_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
     lv_bar_set_range(left_bat_bar, 0, 100);
     lv_bar_set_value(left_bat_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_color(left_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_dir(left_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_INDICATOR);
+    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_INDICATOR);
 
-    right_bat_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(right_bat_label, &lv_font_montserrat_12, 0);
-    lv_label_set_text(right_bat_label, "--");
-    lv_obj_set_style_text_color(right_bat_label, lv_color_hex(0x808080), 0);
-    lv_obj_set_pos(right_bat_label, 190, 185);
+    /* Connected state label - initially hidden */
+    left_bat_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(left_bat_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(left_bat_label, lv_color_white(), 0);
+    lv_obj_align(left_bat_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(left_bat_label, "0");
+    lv_obj_set_style_opa(left_bat_label, 0, 0);
 
+    /* Disconnected state bar - initially visible */
+    left_bat_nc_bar = lv_obj_create(screen_obj);
+    lv_obj_set_size(left_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(left_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
+    lv_obj_set_style_bg_color(left_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(left_bat_nc_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(left_bat_nc_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_width(left_bat_nc_bar, 0, 0);
+    lv_obj_set_style_pad_all(left_bat_nc_bar, 0, 0);
+    lv_obj_set_style_opa(left_bat_nc_bar, 255, 0);
+
+    /* Disconnected state label (× symbol) - initially visible */
+    left_bat_nc_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(left_bat_nc_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(left_bat_nc_label, lv_color_hex(0xe63030), 0);
+    lv_obj_align(left_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(left_bat_nc_label, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_opa(left_bat_nc_label, 255, 0);
+
+    /* === Right battery (using BOTTOM_MID alignment) === */
+    /* Connected state bar - initially hidden */
     right_bat_bar = lv_bar_create(screen_obj);
-    lv_obj_set_size(right_bat_bar, 118, 4);
-    lv_obj_set_pos(right_bat_bar, 146, 202);
+    lv_obj_set_size(right_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(right_bat_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
     lv_bar_set_range(right_bat_bar, 0, 100);
     lv_bar_set_value(right_bat_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_color(right_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_dir(right_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_INDICATOR);
+    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_INDICATOR);
+
+    /* Connected state label - initially hidden */
+    right_bat_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(right_bat_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(right_bat_label, lv_color_white(), 0);
+    lv_obj_align(right_bat_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(right_bat_label, "0");
+    lv_obj_set_style_opa(right_bat_label, 0, 0);
+
+    /* Disconnected state bar - initially visible */
+    right_bat_nc_bar = lv_obj_create(screen_obj);
+    lv_obj_set_size(right_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
+    lv_obj_align(right_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
+    lv_obj_set_style_bg_color(right_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(right_bat_nc_bar, 255, LV_PART_MAIN);
+    lv_obj_set_style_radius(right_bat_nc_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_width(right_bat_nc_bar, 0, 0);
+    lv_obj_set_style_pad_all(right_bat_nc_bar, 0, 0);
+    lv_obj_set_style_opa(right_bat_nc_bar, 255, 0);
+
+    /* Disconnected state label (× symbol) - initially visible */
+    right_bat_nc_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(right_bat_nc_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(right_bat_nc_label, lv_color_hex(0xe63030), 0);
+    lv_obj_align(right_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
+    lv_label_set_text(right_bat_nc_label, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_opa(right_bat_nc_label, 255, 0);
 
     channel_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(channel_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(channel_label, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_label_set_text(channel_label, "Ch:0");
-    lv_obj_set_pos(channel_label, 70, 222);
+    lv_obj_set_pos(channel_label, 62, 219);  /* 5px down, 5px left */
 
     rx_title_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(rx_title_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(rx_title_label, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_label_set_text(rx_title_label, "RX:");
-    lv_obj_set_pos(rx_title_label, 110, 222);
+    lv_obj_set_pos(rx_title_label, 102, 219);  /* 5px down, 5px left */
 
     rssi_bar = lv_bar_create(screen_obj);
     lv_obj_set_size(rssi_bar, 30, 8);
-    lv_obj_set_pos(rssi_bar, 138, 224);
+    lv_obj_set_pos(rssi_bar, 130, 221);  /* 5px down, 5px left */
     lv_bar_set_range(rssi_bar, 0, 5);
     lv_bar_set_value(rssi_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(rssi_bar, lv_color_hex(0x202020), LV_PART_MAIN);
@@ -698,13 +876,13 @@ static void create_main_screen_widgets(void) {
     lv_obj_set_style_text_font(rssi_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(rssi_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
     lv_label_set_text(rssi_label, "--dBm");
-    lv_obj_set_pos(rssi_label, 175, 222);
+    lv_obj_set_pos(rssi_label, 167, 219);  /* 5px down, 5px left */
 
     rate_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(rate_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
     lv_label_set_text(rate_label, "0.0Hz");
-    lv_obj_set_pos(rate_label, 230, 222);
+    lv_obj_set_pos(rate_label, 222, 219);  /* 5px down, 5px left */
 
     LOG_INF("Main screen widgets created");
 }

@@ -13,6 +13,9 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
 
     # Scanner stub for message handling (required by custom_status_screen.c)
     target_sources_ifdef(CONFIG_PROSPECTOR_MODE_SCANNER app PRIVATE src/scanner_stub.c)
+
+    # NerdFont for modifier icons
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/fonts/NerdFonts_Regular_40.c)
 endif()
 
 # ORIGINAL FULL BUILD - TO BE RESTORED INCREMENTALLY
