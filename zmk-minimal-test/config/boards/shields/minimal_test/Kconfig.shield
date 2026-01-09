@@ -1,0 +1,2 @@
+config SHIELD_MINIMAL_TEST
+    def_bool $(shields_list_contains,minimal_test)

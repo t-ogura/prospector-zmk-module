@@ -1,0 +1,16 @@
+/*
+ * Dummy keymap for prospector_adapter
+ */
+
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/keys.h>
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+        
+        default_layer {
+            bindings = <&none>;
+        };
+    };
+};

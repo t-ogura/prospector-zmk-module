@@ -1,0 +1,16 @@
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: local
+      url-base: file:///home/ogu/workspace/prospector
+  projects:
+    - name: zmk
+      remote: zmkfirmware
+      revision: main
+      import: app/west.yml
+    - name: prospector-zmk-module
+      remote: local
+      path: modules/prospector-zmk-module
+  self:
+    path: config

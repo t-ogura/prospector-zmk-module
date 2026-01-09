@@ -1,0 +1,2 @@
+config SHIELD_ST7789_TEST
+    def_bool $(shields_list_contains,st7789_test)

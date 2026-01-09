@@ -1,0 +1,17 @@
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: prospector-original
+      url-base: https://github.com/carrefinho
+  projects:
+    - name: zmk
+      remote: zmkfirmware
+      revision: v0.1.0
+      import: app/west.yml
+    - name: prospector-zmk-module
+      remote: prospector-original
+      revision: aa0eb94eb65ed3e67a37c4bb39f0784659d69f2f
+      path: modules/prospector-zmk-module
+  self:
+    path: config

@@ -1,0 +1,7 @@
+/ {
+    aliases {
+        led-red = &led0;      // Red LED on XIAO BLE
+        led-green = &led2;    // Green LED on XIAO BLE  
+        led-blue = &led1;     // Blue LED on XIAO BLE
+    };
+};

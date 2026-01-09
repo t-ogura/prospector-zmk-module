@@ -1,0 +1,2 @@
+config SHIELD_PROSPECTOR_V2
+    def_bool $(shields_list_contains,prospector_v2)

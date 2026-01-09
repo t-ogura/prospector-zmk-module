@@ -1,0 +1,5 @@
+# Build configuration for ST7789 display test
+---
+include:
+  - board: seeeduino_xiao_ble
+    shield: st7789_test

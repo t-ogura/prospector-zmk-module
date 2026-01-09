@@ -1,0 +1,9 @@
+if SHIELD_ST7789_TEST
+
+config ZMK_KEYBOARD_NAME
+    default "ST7789 Display Test"
+
+config ZMK_DISPLAY
+    default y
+
+endif

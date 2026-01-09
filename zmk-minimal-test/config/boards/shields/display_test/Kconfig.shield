@@ -1,0 +1,2 @@
+config SHIELD_DISPLAY_TEST
+    def_bool $(shields_list_contains,display_test)

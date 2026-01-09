@@ -20,6 +20,50 @@
 
 ---
 
+## 🔧 Zephyr 4.x Migration Status (2025-12)
+
+### Current Branch
+- **Module**: `fix/zephyr4-boot-restoration` (prospector-zmk-module)
+- **Config**: `feature/v2.0.1` (zmk-config-prospector)
+
+### Completed Steps
+| Step | Description | Status |
+|------|-------------|--------|
+| 1 | バックライト点灯 (SYS_INIT based) | ✅ Complete |
+| 2 | BUILT_IN画面表示 | ✅ Complete |
+| 3 | CUSTOM画面 (full widget test) | ✅ Complete |
+| 4 | スキャナーモード (BLE advertisement) | ✅ Complete |
+| 5 | I2C/タッチ/センサー | ✅ Complete |
+
+### Build Command (Zephyr 4.x)
+```bash
+# IMPORTANT: Board name changed in Zephyr 4.x
+# OLD: seeeduino_xiao_ble
+# NEW: xiao_ble/nrf52840
+
+cd /home/ogu/workspace/prospector/zmk-config-prospector
+.venv/bin/west build -b xiao_ble/nrf52840 -s zmk/app -- \
+  -DSHIELD=prospector_scanner \
+  -DZMK_CONFIG="/home/ogu/workspace/prospector/zmk-config-prospector/config"
+```
+
+### Root Causes Identified
+1. **Kconfig.shield excessive defaults** - ZMK_BATTERY, BT_OBSERVER等のdefault yが起動クラッシュの原因
+2. **Board name change** - `seeeduino_xiao_ble` → `xiao_ble/nrf52840`
+3. **I2C/Device Tree mismatch** - I2C設定とオーバーレイの不整合
+
+### Key Files Changed
+- `Kconfig.shield` - Minimized to match display_test
+- `backlight_init.c` - NEW: Early GPIO initialization
+- `custom_status_screen.c` - NEW: Full widget test screen
+- `swipe_event.c/h` - NEW: Gesture event handling
+
+### Reference
+- **Working Reference**: `zmk-minimal-test/display_test` shield
+- **Debug Notes**: `/home/ogu/workspace/prospector/zmk-config-prospector/BOOT_FIX_ATTEMPTS.md` (git管理外)
+
+---
+
 ## 🔴 ABSOLUTE RULE: Dynamic Memory Allocation for UI Components (NEVER BREAK THIS!)
 
 **CRITICAL PRINCIPLE**: All screen widgets MUST use dynamic memory allocation. NEVER initialize UI components at boot time.
@@ -131,6 +175,53 @@ grep "Merged configuration" build.log
 - NEVER use shell variables like `$(pwd)` in build commands
 - Verify config file is loaded by checking build log
 - This has been debugged multiple times - ALWAYS check the build command first!
+
+---
+
+### 🔴 Git Tag Creation - Use Lightweight Tags (2025-12-06)
+
+**Symptom**: GitHub Actions fails with "undefined symbol" Kconfig errors even though the symbol exists in the module.
+
+**Root Cause**: `west` cannot properly resolve **annotated tags**. When you create a tag with `-a` or `-m`, Git creates a tag object separate from the commit:
+- Annotated tag object hash: `8004a80`
+- Commit it points to: `07076ec`
+
+West resolves the tag to the tag object hash, not the commit hash, causing module Kconfig to not be found.
+
+**✅ CORRECT: Use Lightweight Tags**
+```bash
+# Lightweight tag - directly points to commit
+git tag v2.0.0 07076ec
+git push origin v2.0.0
+
+# Verify it's lightweight (should show "commit")
+git cat-file -t v2.0.0  # → commit
+```
+
+**❌ WRONG: Annotated Tags**
+```bash
+# DON'T use -a or -m flags
+git tag -a v2.0.0 -m "Release message"  # ← Creates tag object, west can't resolve
+
+# This shows "tag" instead of "commit"
+git cat-file -t v2.0.0  # → tag (BAD!)
+```
+
+**How to Fix Existing Annotated Tag**:
+```bash
+# 1. Delete the annotated tag locally and remotely
+git tag -d v2.0.0
+git push origin :refs/tags/v2.0.0
+
+# 2. Create lightweight tag at the same commit
+git tag v2.0.0 <commit-hash>
+git push origin v2.0.0
+```
+
+**Prevention**:
+- NEVER use `git tag -a` or `git tag -m` for version tags
+- ALWAYS verify with `git cat-file -t <tag>` → should show `commit`
+- Both zmk-config-prospector and prospector-zmk-module tags should be lightweight
 
 ---
 
@@ -550,7 +641,7 @@ zmk-config-prospector/          # Build configuration
 ```bash
 # ✅ CORRECT - Always build from zmk-config-prospector directory
 cd /home/ogu/workspace/prospector/zmk-config-prospector
-.venv/bin/west build -b seeeduino_xiao_ble -s zmk/app -- \
+.venv/bin/west build -b xiao_ble/nrf52840 -s zmk/app -- \
   -DSHIELD=prospector_scanner \
   -DZMK_CONFIG="/home/ogu/workspace/prospector/zmk-config-prospector/config"
 
@@ -582,7 +673,7 @@ git reset --hard <commit-hash>  # 例: f180040
 # Step 3: Config側からビルド実行（必ずこのディレクトリから！）
 cd /home/ogu/workspace/prospector/zmk-config-prospector
 rm -rf build  # クリーンビルド推奨
-.venv/bin/west build -b seeeduino_xiao_ble -s zmk/app -- \
+.venv/bin/west build -b xiao_ble/nrf52840 -s zmk/app -- \
   -DSHIELD=prospector_scanner \
   -DZMK_CONFIG="/home/ogu/workspace/prospector/zmk-config-prospector/config"
 
@@ -612,13 +703,13 @@ west update
 ```bash
 # Scanner mode (standard) - ALWAYS use absolute path!
 cd /home/ogu/workspace/prospector/zmk-config-prospector
-.venv/bin/west build -b seeeduino_xiao_ble -s zmk/app -- \
+.venv/bin/west build -b xiao_ble/nrf52840 -s zmk/app -- \
   -DSHIELD=prospector_scanner \
   -DZMK_CONFIG="/home/ogu/workspace/prospector/zmk-config-prospector/config"
 
 # Scanner mode with USB logging
 cd /home/ogu/workspace/prospector/zmk-config-prospector
-.venv/bin/west build -b seeeduino_xiao_ble -s zmk/app -- \
+.venv/bin/west build -b xiao_ble/nrf52840 -s zmk/app -- \
   -DSHIELD=prospector_scanner \
   -DZMK_CONFIG="/home/ogu/workspace/prospector/zmk-config-prospector/config" \
   -DSNIPPET="zmk-usb-logging"
@@ -965,12 +1056,12 @@ cd /home/ogu/workspace/prospector/zmk-config-prospector
 cd /home/ogu/workspace/prospector/prospector-zmk-module
 
 # Local build (standard)
-west build -b seeeduino_xiao_ble -s zmk/app -- \
+west build -b xiao_ble/nrf52840 -s zmk/app -- \
   -DSHIELD=prospector_scanner \
   -DZMK_CONFIG="$(pwd)/config"
 
 # Local build (with logging)
-west build -b seeeduino_xiao_ble -s zmk/app -- \
+west build -b xiao_ble/nrf52840 -s zmk/app -- \
   -DSHIELD=prospector_scanner \
   -DZMK_CONFIG="$(pwd)/config" \
   -DSNIPPET="zmk-usb-logging"
@@ -999,6 +1090,30 @@ west update
 
 ---
 
-**Last Updated**: 2025-11-16
+## 🚀 Future Feature Ideas (Left Swipe Screen)
+
+### 時計・タイマー系
+1. **BLE経由の時刻取得** - キーボードがスマホから時刻を取得し、Advertisementに含める
+   - キーボード側: Current Time Service (CTS) クライアントとして時刻取得
+   - Advertisement: 時刻データを status_adv_data に追加
+   - Scanner側: 受信した時刻を表示
+2. **セッションタイマー** - 起動からの経過時間 (`k_uptime_get()`)
+3. **ストップウォッチ** - タップでスタート/ストップ/リセット
+4. **ポモドーロタイマー** - 25分作業 + 5分休憩サイクル
+
+### ビジュアル・エンターテイメント系
+1. **Pong Wars** ✅ 実装中 - 2色のボールが画面を塗り合う視覚シミュレーション
+2. **Matrix風の雨** - 緑の文字が流れ落ちるエフェクト
+3. **Game of Life** - コンウェイのセルオートマトン
+4. **バウンシングロゴ** - DVDスクリーンセーバー風
+5. **パーティクル** - 花火や波紋エフェクト
+
+### 実用系
+1. **キーボード統計** - 今日の打鍵数、WPM履歴グラフ
+2. **バッテリー履歴** - バッテリー残量の推移グラフ
+
+---
+
+**Last Updated**: 2025-01-10
 **Current Branch**: fix/battery-hardware-detection
-**Status**: Battery widget visibility fix in progress
+**Status**: Channel selector implementation, Pong Wars in progress

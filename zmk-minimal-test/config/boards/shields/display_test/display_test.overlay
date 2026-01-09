@@ -1,0 +1,169 @@
+/*
+ * Display Test - ST7789V + Touch (CST816S)
+ * Pin mapping from Prospector Scanner
+ */
+
+#include <dt-bindings/zmk/matrix_transform.h>
+
+/ {
+    chosen {
+        zmk,kscan = &kscan0;
+        zmk,display = &st7789v;
+        zephyr,display = &st7789v;
+        zephyr,console = &cdc_acm_uart;
+    };
+
+    /* Dummy kscan - moved to D2 to free D0 for touch IRQ */
+    kscan0: kscan {
+        compatible = "zmk,kscan-gpio-direct";
+        wakeup-source;
+        input-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+
+    /* GPIO backlight control - Pin 6 = P1.11 */
+    leds {
+        compatible = "gpio-leds";
+        backlight: backlight {
+            gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+            label = "Backlight";
+        };
+    };
+
+    /* Alias for backlight */
+    aliases {
+        led0 = &backlight;
+    };
+};
+
+/* USB CDC ACM for logging */
+&zephyr_udc0 {
+    cdc_acm_uart: cdc_acm_uart {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+};
+
+/* Disable default SPI2 */
+&spi2 {
+    status = "disabled";
+};
+
+/* Custom pinctrl for SPI3 */
+&pinctrl {
+    spi3_default: spi3_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 13)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 15)>,
+                <NRF_PSEL(SPIM_MISO, 1, 10)>;
+        };
+    };
+
+    spi3_sleep: spi3_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 13)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 15)>,
+                <NRF_PSEL(SPIM_MISO, 1, 10)>;
+            low-power-enable;
+        };
+    };
+};
+
+/* SPI3 for display */
+&spi3 {
+    status = "okay";
+    pinctrl-0 = <&spi3_default>;
+    pinctrl-1 = <&spi3_sleep>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&xiao_d 9 GPIO_ACTIVE_LOW>;
+};
+
+/* MIPI DBI wrapper for ST7789V */
+/ {
+    mipi_dbi {
+        compatible = "zephyr,mipi-dbi-spi";
+        spi-dev = <&spi3>;
+        dc-gpios = <&xiao_d 7 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&xiao_d 3 GPIO_ACTIVE_LOW>;
+        write-only;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        st7789v: st7789v@0 {
+            compatible = "sitronix,st7789v";
+            reg = <0>;
+            mipi-max-frequency = <20000000>;
+            mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
+            width = <280>;
+            height = <240>;
+            x-offset = <20>;
+            y-offset = <0>;
+            /* Zephyr 4.1: inversion is ON by default, use inversion-off to disable */
+            vcom = <0x19>;
+            gctrl = <0x35>;
+            vrhs = <0x12>;
+            vdvs = <0x20>;
+            mdac = <0x60>;  /* 90 degree rotation */
+            gamma = <0x01>;
+            colmod = <0x05>;
+            lcm = <0x2c>;
+            porch-param = [0c 0c 00 33 33];
+            cmd2en-param = [5a 69 02 01];
+            pwctrl1-param = [a4 a1];
+            pvgam-param = [D0 04 0D 11 13 2B 3F 54 4C 18 0D 0B 1F 23];
+            nvgam-param = [D0 04 0C 11 13 2C 3F 44 51 2F 1F 1F 20 23];
+            ram-param = [00 F0];
+            rgb-param = [CD 08 14];
+        };
+    };
+};
+
+/* ========== Touch Panel (CST816S) ========== */
+
+/* I2C0 for touch sensor */
+&pinctrl {
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  /* D4 = P0.04 = SDA */
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  /* D5 = P0.05 = SCL */
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;
+            low-power-enable;
+        };
+    };
+};
+
+&i2c0 {
+    status = "okay";
+    compatible = "nordic,nrf-twim";
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
+    clock-frequency = <100000>;  /* Standard mode 100kHz */
+
+    /* CST816S Touch Controller */
+    touch_sensor: cst816s@15 {
+        compatible = "hynitron,cst816s";
+        reg = <0x15>;
+        status = "okay";
+
+        /* Touch panel control pins */
+        /* TP_IRQ → D0 = P0.02 (interrupt pin) */
+        /* TP_RST → D1 = P0.28 (reset pin) */
+        irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        rst-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
+    };
+
+    /* APDS9960 Light/Gesture Sensor (for auto-brightness) */
+    /* Note: Hardware not connected - testing driver initialization */
+    apds9960: apds9960@39 {
+        compatible = "avago,apds9960";
+        reg = <0x39>;
+        status = "okay";
+        /* Using D8 for interrupt (not actually connected) */
+        int-gpios = <&xiao_d 8 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+};
