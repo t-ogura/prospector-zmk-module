@@ -2761,6 +2761,7 @@ static void pw_reset_game(void) {
 
 /* ========== Swipe Processing (runs in LVGL timer = Main Thread) ========== */
 
+#if IS_ENABLED(CONFIG_PROSPECTOR_TOUCH_ENABLED)
 /**
  * Helper: Register LVGL input device (call once when first settings screen shown)
  */
@@ -2776,6 +2777,10 @@ static void ensure_lvgl_indev_registered(void) {
         }
     }
 }
+#else
+/* No-op when touch is disabled */
+static inline void ensure_lvgl_indev_registered(void) {}
+#endif
 
 /**
  * Process pending swipe in main thread context (LVGL timer callback)
