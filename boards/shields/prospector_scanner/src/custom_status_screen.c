@@ -222,7 +222,8 @@ static lv_obj_t *ds_nav_hint = NULL;
 /* Display Settings State (persists across screen transitions) */
 static bool ds_auto_brightness_enabled = false;
 static uint8_t ds_manual_brightness = 65;
-static bool ds_battery_visible = false;  /* Default: hidden (user can enable in settings) */
+/* Battery visible if CONFIG_PROSPECTOR_BATTERY_SUPPORT=y in config */
+static bool ds_battery_visible = IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT);
 static uint8_t ds_max_layers = 7;
 
 /* UI interaction flag - prevents swipe during slider drag */
