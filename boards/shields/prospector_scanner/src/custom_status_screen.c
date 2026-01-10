@@ -402,7 +402,13 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_obj_set_pos(scanner_bat_pct, 238, 7);  /* 2px up */
     lv_label_set_text(scanner_bat_pct, "?");  /* Unknown until battery read */
     lv_obj_set_style_text_color(scanner_bat_pct, lv_color_hex(0x7FFF00), 0);
-    LOG_INF("[INIT] scanner battery created");
+
+    /* Hide battery widget if disabled */
+    if (!ds_battery_visible) {
+        lv_obj_set_style_opa(scanner_bat_icon, 0, 0);
+        lv_obj_set_style_opa(scanner_bat_pct, 0, 0);
+    }
+    LOG_INF("[INIT] scanner battery created (visible=%d)", ds_battery_visible);
 
     /* ===== 3. WPM Widget (TOP_LEFT, centered under title) ===== */
     LOG_INF("[INIT] Creating WPM...");
@@ -946,6 +952,12 @@ static void create_main_screen_widgets(void) {
     lv_obj_set_pos(scanner_bat_pct, 238, 7);  /* 2px up */
     lv_label_set_text(scanner_bat_pct, "?");  /* Unknown until battery read */
     lv_obj_set_style_text_color(scanner_bat_pct, lv_color_hex(0x7FFF00), 0);
+
+    /* Hide battery widget if disabled */
+    if (!ds_battery_visible) {
+        lv_obj_set_style_opa(scanner_bat_icon, 0, 0);
+        lv_obj_set_style_opa(scanner_bat_pct, 0, 0);
+    }
 
     wpm_title_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(wpm_title_label, &lv_font_unscii_8, 0);
