@@ -53,6 +53,8 @@ struct scanner_message {
             struct zmk_status_adv_data adv_data;
             int8_t rssi;
             char device_name[SCANNER_MSG_NAME_MAX];
+            uint8_t ble_addr[6];     // BLE MAC address for unique identification
+            uint8_t ble_addr_type;   // BLE address type
         } keyboard;
 
         // SCANNER_MSG_SWIPE_GESTURE
@@ -98,11 +100,15 @@ extern struct k_msgq scanner_msgq;
  * @param adv_data Pointer to advertisement data
  * @param rssi Signal strength
  * @param device_name Device name (can be NULL)
+ * @param ble_addr BLE MAC address (6 bytes, can be NULL)
+ * @param ble_addr_type BLE address type
  * @return 0 on success, -ENOMSG if queue full
  */
 int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
                                    int8_t rssi,
-                                   const char *device_name);
+                                   const char *device_name,
+                                   const uint8_t *ble_addr,
+                                   uint8_t ble_addr_type);
 
 /**
  * Send swipe gesture message from touch handler

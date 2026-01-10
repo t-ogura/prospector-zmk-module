@@ -48,6 +48,8 @@ struct keyboard_state {
     int8_t rssi;
     char name[MAX_NAME_LEN];
     uint32_t last_seen;  // k_uptime_get_32()
+    uint8_t ble_addr[6];     // BLE MAC address for unique identification
+    uint8_t ble_addr_type;   // BLE address type
 };
 
 static struct keyboard_state keyboards[MAX_KEYBOARDS];
@@ -133,8 +135,9 @@ static uint32_t rate_last_update = 0;
 static int rate_update_count = 0;
 static int8_t last_rssi = -100;
 
-/* External transition flag from custom_status_screen.c */
+/* External flags from custom_status_screen.c */
 extern volatile bool transition_in_progress;
+extern volatile bool pong_wars_active;
 
 /* Scanner battery update interval */
 static uint32_t scanner_battery_last_update = 0;
@@ -144,6 +147,11 @@ static void display_update_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
 
     display_update_pending = false;
+
+    /* Skip ALL updates when Pong Wars is active (different LVGL screen) */
+    if (pong_wars_active) {
+        return;
+    }
 
     /* Skip update if screen transition in progress */
     if (transition_in_progress) {
@@ -206,6 +214,11 @@ static void display_update_work_handler(struct k_work *work) {
 }
 
 static void schedule_display_update(void) {
+    /* Skip scheduling entirely when Pong Wars is active */
+    if (pong_wars_active) {
+        return;
+    }
+
     if (!display_update_pending) {
         display_update_pending = true;
         /* Schedule with small delay to batch rapid updates */
@@ -216,7 +229,8 @@ static void schedule_display_update(void) {
 /* ========== Scanner Message Functions ========== */
 
 int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
-                                   int8_t rssi, const char *device_name) {
+                                   int8_t rssi, const char *device_name,
+                                   const uint8_t *ble_addr, uint8_t ble_addr_type) {
     if (!mutex_initialized) {
         k_mutex_init(&data_mutex);
         mutex_initialized = true;
@@ -234,16 +248,31 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
                            (adv_data->keyboard_id[2] << 8) |
                            adv_data->keyboard_id[3];
 
-    /* First, look for existing keyboard with same ID */
-    for (int i = 0; i < MAX_KEYBOARDS; i++) {
-        if (keyboards[i].active) {
-            uint32_t stored_id = (keyboards[i].data.keyboard_id[0] << 24) |
-                                 (keyboards[i].data.keyboard_id[1] << 16) |
-                                 (keyboards[i].data.keyboard_id[2] << 8) |
-                                 keyboards[i].data.keyboard_id[3];
-            if (stored_id == keyboard_id) {
-                index = i;
-                break;
+    /* PRIORITY: Look for existing keyboard by BLE address (unique per device)
+     * This fixes the same-name keyboard conflict issue */
+    if (ble_addr != NULL) {
+        for (int i = 0; i < MAX_KEYBOARDS; i++) {
+            if (keyboards[i].active) {
+                if (memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
+                    index = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    /* Fallback: look for existing keyboard with same ID (for backward compatibility) */
+    if (index < 0) {
+        for (int i = 0; i < MAX_KEYBOARDS; i++) {
+            if (keyboards[i].active) {
+                uint32_t stored_id = (keyboards[i].data.keyboard_id[0] << 24) |
+                                     (keyboards[i].data.keyboard_id[1] << 16) |
+                                     (keyboards[i].data.keyboard_id[2] << 8) |
+                                     keyboards[i].data.keyboard_id[3];
+                if (stored_id == keyboard_id) {
+                    index = i;
+                    break;
+                }
             }
         }
     }
@@ -253,8 +282,15 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
         for (int i = 0; i < MAX_KEYBOARDS; i++) {
             if (!keyboards[i].active) {
                 index = i;
-                LOG_INF("New keyboard in slot %d: %s (ID=%08X)",
-                       index, device_name ? device_name : "(null)", keyboard_id);
+                if (ble_addr) {
+                    LOG_INF("New keyboard in slot %d: %s (BLE=%02X:%02X:%02X:%02X:%02X:%02X)",
+                           index, device_name ? device_name : "(null)",
+                           ble_addr[5], ble_addr[4], ble_addr[3],
+                           ble_addr[2], ble_addr[1], ble_addr[0]);
+                } else {
+                    LOG_INF("New keyboard in slot %d: %s (ID=%08X)",
+                           index, device_name ? device_name : "(null)", keyboard_id);
+                }
                 break;
             }
         }
@@ -272,6 +308,12 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
     keyboards[index].rssi = rssi;
     keyboards[index].last_seen = k_uptime_get_32();
+
+    /* Store BLE address for unique identification */
+    if (ble_addr) {
+        memcpy(keyboards[index].ble_addr, ble_addr, 6);
+        keyboards[index].ble_addr_type = ble_addr_type;
+    }
 
     if (device_name && device_name[0] != '\0') {
         strncpy(keyboards[index].name, device_name, MAX_NAME_LEN - 1);
@@ -304,6 +346,11 @@ int scanner_msg_send_tap(int16_t x, int16_t y) {
 }
 
 int scanner_msg_send_battery_update(void) {
+    /* Skip during Pong Wars to avoid LVGL thread conflicts */
+    if (pong_wars_active) {
+        return 0;
+    }
+
     /* Read local scanner battery from ZMK battery API */
     int scanner_battery_level = 0;
 

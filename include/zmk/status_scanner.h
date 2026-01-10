@@ -28,6 +28,8 @@ struct zmk_keyboard_status {
     struct zmk_status_adv_data data;       // Latest status data
     int8_t rssi;                          // Signal strength
     char ble_name[32];                     // BLE device name from advertisement
+    uint8_t ble_addr[6];                   // BLE MAC address for unique identification
+    uint8_t ble_addr_type;                 // BLE address type (public/random)
 };
 
 /**

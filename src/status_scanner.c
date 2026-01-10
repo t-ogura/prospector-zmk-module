@@ -112,6 +112,22 @@ static int find_keyboard_by_id_and_role(uint32_t keyboard_id, uint8_t device_rol
     return -1;
 }
 
+// Find keyboard by BLE address - more reliable than name-based ID for same-name keyboards
+static int find_keyboard_by_ble_addr(const bt_addr_le_t *addr) {
+    for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active) {
+            // Compare BLE address (6 bytes)
+            if (memcmp(keyboards[i].ble_addr, addr->a.val, 6) == 0) {
+                LOG_DBG("Found existing slot %d by BLE addr %02X:%02X:%02X:%02X:%02X:%02X",
+                       i, addr->a.val[5], addr->a.val[4], addr->a.val[3],
+                       addr->a.val[2], addr->a.val[1], addr->a.val[0]);
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
 static int find_empty_slot(void) {
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (!keyboards[i].active) {
@@ -142,30 +158,46 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
 
-    LOG_DBG("Received %s (%s), ID=%08X, Battery=%d%%, Layer=%d",
-           role_str, device_name, keyboard_id, adv_data->battery_level, adv_data->active_layer);
-    
-    // Find existing keyboard by ID AND role for split keyboards
-    int index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
+    LOG_DBG("Received %s (%s), ID=%08X, BLE=%02X:%02X:%02X:%02X:%02X:%02X, Battery=%d%%, Layer=%d",
+           role_str, device_name, keyboard_id,
+           addr->a.val[5], addr->a.val[4], addr->a.val[3],
+           addr->a.val[2], addr->a.val[1], addr->a.val[0],
+           adv_data->battery_level, adv_data->active_layer);
+
+    // PRIORITY: Find existing keyboard by BLE address first (unique per device)
+    // This fixes the same-name keyboard conflict issue
+    int index = find_keyboard_by_ble_addr(addr);
     bool is_new = false;
-    
+
+    if (index < 0) {
+        // Fallback: Try to find by ID and role (for backward compatibility)
+        index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
+    }
+
     if (index < 0) {
         // Find empty slot for new keyboard
         index = find_empty_slot();
         if (index < 0) {
             LOG_WRN("No empty slots for new keyboard");
+            scanner_unlock();
             return;
         }
         is_new = true;
-        LOG_DBG("Creating NEW slot %d for %s (%s) ID=%08X",
-               index, role_str, device_name, keyboard_id);
+        LOG_INF("Creating NEW slot %d for %s (%s) BLE=%02X:%02X:%02X:%02X:%02X:%02X",
+               index, role_str, device_name,
+               addr->a.val[5], addr->a.val[4], addr->a.val[3],
+               addr->a.val[2], addr->a.val[1], addr->a.val[0]);
     }
-    
+
     // Update keyboard status
     keyboards[index].active = true;
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
+
+    // Store BLE address for unique identification
+    memcpy(keyboards[index].ble_addr, addr->a.val, 6);
+    keyboards[index].ble_addr_type = addr->type;
     // Update name: always set if empty, otherwise only update if real name (not "Unknown")
     if (keyboards[index].ble_name[0] == '\0') {
         // First time - set whatever we have (even "Unknown")
@@ -412,10 +444,18 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 
                     LOG_DBG("Prospector data found - Length: %d", len);
 
-                    // Channel filtering logic
+                    // Channel filtering logic - use runtime channel
+                    // scanner_get_runtime_channel() is provided by system_settings_widget.c
+                    // Fallback to Kconfig if settings widget not linked
+                    extern uint8_t scanner_get_runtime_channel(void) __attribute__((weak));
                     uint8_t scanner_channel = 0;
+                    if (scanner_get_runtime_channel) {
+                        scanner_channel = scanner_get_runtime_channel();
+                    }
 #ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
-                    scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
+                    else {
+                        scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
+                    }
 #endif
                     uint8_t keyboard_channel = data->channel;
 
@@ -460,7 +500,8 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         // Phase 2: Send message to queue for thread-safe processing
         // Get device name for the message
         const char *device_name = get_device_name(addr);
-        int msg_ret = scanner_msg_send_keyboard_data(prospector_data, rssi, device_name);
+        int msg_ret = scanner_msg_send_keyboard_data(prospector_data, rssi, device_name,
+                                                     addr->a.val, addr->type);
         if (msg_ret != 0) {
             LOG_DBG("Message queue full, falling back to direct processing");
         }

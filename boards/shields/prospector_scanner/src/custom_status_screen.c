@@ -43,6 +43,7 @@ enum screen_state {
     SCREEN_DISPLAY_SETTINGS,
     SCREEN_SYSTEM_SETTINGS,
     SCREEN_KEYBOARD_SELECT,
+    SCREEN_PONG_WARS,
 };
 
 static enum screen_state current_screen = SCREEN_MAIN;
@@ -50,6 +51,9 @@ static lv_obj_t *screen_obj = NULL;
 
 /* Transition protection flag - checked by work queues */
 volatile bool transition_in_progress = false;
+
+/* Pong Wars active flag - stops all background display updates */
+volatile bool pong_wars_active = false;
 
 /* Pending swipe direction - set by ISR listener, processed by LVGL timer */
 static volatile enum swipe_direction pending_swipe = SWIPE_DIRECTION_NONE;
@@ -68,6 +72,8 @@ static void destroy_system_settings_widgets(void);
 static void create_system_settings_widgets(void);
 static void destroy_keyboard_select_widgets(void);
 static void create_keyboard_select_widgets(void);
+static void destroy_pong_wars_widgets(void);
+static void create_pong_wars_widgets(void);
 static void swipe_process_timer_cb(lv_timer_t *timer);
 
 /* Custom slider state for inverted drag handling */
@@ -244,10 +250,55 @@ struct ks_keyboard_entry {
     lv_obj_t *name_label;    /* Keyboard name */
     lv_obj_t *rssi_bar;      /* Signal strength bar */
     lv_obj_t *rssi_label;    /* RSSI dBm value */
+    lv_obj_t *channel_badge; /* Channel number badge */
     int keyboard_index;      /* Index in scanner's keyboard array */
 };
 static struct ks_keyboard_entry ks_entries[KS_MAX_KEYBOARDS] = {0};
 static uint8_t ks_entry_count = 0;
+
+/* Channel selector UI in keyboard select header */
+static lv_obj_t *ks_channel_container = NULL;  /* Tappable channel display */
+static lv_obj_t *ks_channel_value = NULL;
+
+/* Channel popup UI */
+static lv_obj_t *ks_channel_popup = NULL;
+static lv_obj_t *ks_channel_popup_btns[11] = {NULL};  /* 0-9 + All(10) */
+
+/* Runtime channel (defined in system_settings_widget.c, fallback here) */
+/* Default to CHANNEL_ALL (10) = show all keyboards */
+static uint8_t ks_runtime_channel = 10;  /* CHANNEL_ALL */
+static bool ks_channel_initialized = false;
+
+/* Channel color palette (pastel colors for good visibility) */
+static lv_color_t get_channel_color(uint8_t channel) {
+    switch (channel) {
+        case 1: return lv_color_hex(0xFF6B6B);  /* Red */
+        case 2: return lv_color_hex(0xFFA94D);  /* Orange */
+        case 3: return lv_color_hex(0xFFE066);  /* Yellow */
+        case 4: return lv_color_hex(0x69DB7C);  /* Green */
+        case 5: return lv_color_hex(0x4DABF7);  /* Blue */
+        case 6: return lv_color_hex(0xB197FC);  /* Purple */
+        case 7: return lv_color_hex(0xF783AC);  /* Pink */
+        case 8: return lv_color_hex(0x66D9E8);  /* Cyan */
+        case 9: return lv_color_hex(0xDEE2E6);  /* Gray */
+        default: return lv_color_hex(0x808080); /* Default gray for Ch0/All */
+    }
+}
+
+/* Channel functions - try to use system_settings_widget.c version if available */
+__attribute__((weak)) uint8_t scanner_get_runtime_channel(void) {
+    if (!ks_channel_initialized) {
+        ks_runtime_channel = 10;  /* Default: All (CHANNEL_ALL=10) */
+        ks_channel_initialized = true;
+    }
+    return ks_runtime_channel;
+}
+
+__attribute__((weak)) void scanner_set_runtime_channel(uint8_t channel) {
+    ks_runtime_channel = channel;
+    ks_channel_initialized = true;
+    LOG_INF("Channel set to %d", channel);
+}
 
 /* ========== Color functions ========== */
 
@@ -1176,6 +1227,17 @@ static void ds_custom_slider_drag_cb(lv_event_t *e) {
         /* Set slider value - this overrides LVGL's default handling */
         lv_slider_set_value(slider, new_value, LV_ANIM_OFF);
 
+        /* Real-time label and value update while dragging */
+        if (slider == ds_brightness_slider && ds_brightness_value) {
+            /* Update brightness label */
+            lv_label_set_text_fmt(ds_brightness_value, "%d%%", (int)new_value);
+            /* Apply brightness in real-time for immediate visual feedback */
+            set_pwm_brightness((uint8_t)new_value);
+        } else if (slider == ds_layer_slider && ds_layer_value) {
+            /* Update layer count label */
+            lv_label_set_text_fmt(ds_layer_value, "%d", (int)new_value);
+        }
+
     } else if (code == LV_EVENT_RELEASED) {
         if (slider_drag_state.active_slider == slider) {
             /* CRITICAL: Restore our calculated value because LVGL's default handler
@@ -1724,9 +1786,12 @@ static void ks_entry_click_cb(lv_event_t *e) {
     }
 }
 
+/* Forward declaration for badge tap callback */
+static void ks_badge_tap_cb(lv_event_t *e);
+
 /* Create a single keyboard entry at absolute position */
 static void ks_create_entry(int entry_idx, int y_pos, int keyboard_index,
-                            const char *name, int8_t rssi) {
+                            const char *name, int8_t rssi, uint8_t channel) {
     if (entry_idx >= KS_MAX_KEYBOARDS) return;
 
     struct ks_keyboard_entry *entry = &ks_entries[entry_idx];
@@ -1753,6 +1818,33 @@ static void ks_create_entry(int entry_idx, int y_pos, int keyboard_index,
         lv_obj_set_style_border_width(entry->container, 2, 0);
     }
 
+    /* Channel badge (only shown when scanner channel is "All") */
+    entry->channel_badge = lv_obj_create(entry->container);
+    lv_obj_set_size(entry->channel_badge, 20, 18);
+    lv_obj_align(entry->channel_badge, LV_ALIGN_LEFT_MID, 6, 0);
+    lv_obj_set_style_bg_color(entry->channel_badge, get_channel_color(channel), 0);
+    lv_obj_set_style_bg_opa(entry->channel_badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(entry->channel_badge, 4, 0);
+    lv_obj_set_style_border_width(entry->channel_badge, 0, 0);
+    lv_obj_set_style_pad_all(entry->channel_badge, 0, 0);
+
+    lv_obj_t *ch_label = lv_label_create(entry->channel_badge);
+    char ch_buf[4];
+    snprintf(ch_buf, sizeof(ch_buf), "%d", channel);
+    lv_label_set_text(ch_label, ch_buf);
+    lv_obj_set_style_text_color(ch_label, lv_color_hex(0x000000), 0);  /* Dark text */
+    lv_obj_set_style_text_font(ch_label, &lv_font_montserrat_12, 0);
+    lv_obj_center(ch_label);
+
+    /* Make badge clickable to filter by this channel */
+    lv_obj_add_flag(entry->channel_badge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(entry->channel_badge, ks_badge_tap_cb,
+                       LV_EVENT_CLICKED, (void *)(intptr_t)channel);
+
+    /* Always show channel badge (including ch0 = broadcast) */
+    /* Offset to make room for badge */
+    int left_offset = 30;
+
     /* RSSI bar - absolute position within container */
     entry->rssi_bar = lv_bar_create(entry->container);
     lv_obj_set_size(entry->rssi_bar, 30, 8);
@@ -1765,7 +1857,7 @@ static void ks_create_entry(int entry_idx, int y_pos, int keyboard_index,
     lv_obj_set_style_bg_opa(entry->rssi_bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(entry->rssi_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(entry->rssi_bar, 2, LV_PART_INDICATOR);
-    lv_obj_align(entry->rssi_bar, LV_ALIGN_LEFT_MID, 8, 0);
+    lv_obj_align(entry->rssi_bar, LV_ALIGN_LEFT_MID, left_offset, 0);
 
     /* RSSI label */
     entry->rssi_label = lv_label_create(entry->container);
@@ -1774,16 +1866,16 @@ static void ks_create_entry(int entry_idx, int y_pos, int keyboard_index,
     lv_label_set_text(entry->rssi_label, rssi_buf);
     lv_obj_set_style_text_color(entry->rssi_label, lv_color_hex(0xA0A0A0), 0);
     lv_obj_set_style_text_font(entry->rssi_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(entry->rssi_label, LV_ALIGN_LEFT_MID, 42, 0);
+    lv_obj_align(entry->rssi_label, LV_ALIGN_LEFT_MID, left_offset + 34, 0);
 
     /* Keyboard name */
     entry->name_label = lv_label_create(entry->container);
     lv_label_set_text(entry->name_label, name);
     lv_obj_set_style_text_color(entry->name_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(entry->name_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(entry->name_label, LV_ALIGN_LEFT_MID, 100, 0);
+    lv_obj_align(entry->name_label, LV_ALIGN_LEFT_MID, left_offset + 92, 0);
 
-    LOG_DBG("Created keyboard entry %d: %s (rssi=%d)", entry_idx, name, rssi);
+    LOG_DBG("Created keyboard entry %d: %s (rssi=%d, ch=%d)", entry_idx, name, rssi, channel);
 }
 
 /* Destroy a single keyboard entry */
@@ -1795,20 +1887,254 @@ static void ks_destroy_entry(struct ks_keyboard_entry *entry) {
     entry->rssi_bar = NULL;
     entry->rssi_label = NULL;
     entry->name_label = NULL;
+    entry->channel_badge = NULL;
     entry->keyboard_index = -1;
+}
+
+/* ========== Channel Selector Helpers ========== */
+
+/*
+ * Channel values:
+ *   0-9  = Specific channel filter (only show keyboards on that channel)
+ *   10   = "All" - show all keyboards regardless of channel
+ *
+ * This design handles backwards compatibility:
+ *   - Old keyboards broadcast on ch0 by default
+ *   - When scanner is set to ch1-9, old keyboards (ch0) are filtered out
+ *   - When scanner is set to "All" (10), everything is shown
+ */
+#define CHANNEL_ALL 10
+#define CHANNEL_MAX 10  /* 0-9 = specific channels, 10 = All */
+
+/* Forward declaration */
+static void ks_update_entries(void);
+
+static void ks_update_channel_display(void) {
+    if (!ks_channel_value || !ks_channel_container) return;
+
+    uint8_t ch = scanner_get_runtime_channel();
+    if (ch == CHANNEL_ALL) {
+        lv_label_set_text(ks_channel_value, "All");
+        lv_obj_set_style_bg_color(ks_channel_container, lv_color_hex(0x4A90E2), LV_STATE_DEFAULT);  /* Blue for All */
+        lv_obj_set_style_text_color(ks_channel_value, lv_color_hex(0x000000), 0);    /* Dark text */
+    } else {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", ch);
+        lv_label_set_text(ks_channel_value, buf);
+        lv_obj_set_style_bg_color(ks_channel_container, get_channel_color(ch), LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(ks_channel_value, lv_color_hex(0x000000), 0);    /* Dark text */
+    }
+}
+
+/* Change channel and update UI */
+static void ks_channel_change(uint8_t new_channel) {
+    if (new_channel > CHANNEL_MAX) new_channel = 0;
+    scanner_set_runtime_channel(new_channel);
+    ks_update_channel_display();
+    ks_update_entries();  /* Refresh list immediately */
+    LOG_INF("Channel changed to %d", new_channel);
+}
+
+/* Increment/decrement channel (for swipe gestures) */
+static void ks_channel_increment(void) {
+    uint8_t ch = scanner_get_runtime_channel();
+    ch = (ch < CHANNEL_MAX) ? ch + 1 : 0;
+    ks_channel_change(ch);
+}
+
+static void ks_channel_decrement(void) {
+    uint8_t ch = scanner_get_runtime_channel();
+    ch = (ch > 0) ? ch - 1 : CHANNEL_MAX;
+    ks_channel_change(ch);
+}
+
+/* Close channel popup */
+static void ks_close_channel_popup(void) {
+    if (ks_channel_popup) {
+        lv_obj_del(ks_channel_popup);
+        ks_channel_popup = NULL;
+        for (int i = 0; i <= CHANNEL_MAX; i++) {
+            ks_channel_popup_btns[i] = NULL;
+        }
+    }
+}
+
+/* Channel popup button callback */
+static void ks_channel_popup_btn_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+
+    intptr_t channel = (intptr_t)lv_event_get_user_data(e);
+    ks_close_channel_popup();
+    ks_channel_change((uint8_t)channel);
+}
+
+/* Show channel popup */
+static void ks_show_channel_popup(void) {
+    if (ks_channel_popup) {
+        ks_close_channel_popup();
+        return;  /* Toggle off if already showing */
+    }
+
+    /* Create popup background (semi-transparent overlay) */
+    ks_channel_popup = lv_obj_create(screen_obj);
+    lv_obj_set_size(ks_channel_popup, 210, 200);  /* 4 rows of badges + title, centered */
+    lv_obj_align(ks_channel_popup, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(ks_channel_popup, lv_color_hex(0x1A1A1A), 0);
+    lv_obj_set_style_bg_opa(ks_channel_popup, LV_OPA_90, 0);
+    lv_obj_set_style_radius(ks_channel_popup, 12, 0);
+    lv_obj_set_style_border_color(ks_channel_popup, lv_color_hex(0x404040), 0);
+    lv_obj_set_style_border_width(ks_channel_popup, 2, 0);
+    lv_obj_set_style_pad_all(ks_channel_popup, 10, 0);
+    lv_obj_clear_flag(ks_channel_popup, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Title */
+    lv_obj_t *title = lv_label_create(ks_channel_popup);
+    lv_label_set_text(title, "Channel Select");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
+
+    uint8_t current_ch = scanner_get_runtime_channel();
+
+    /*
+     * Badge-style layout:
+     *   Row 0: [  All  ] [0]
+     *   Row 1: [1] [2] [3]
+     *   Row 2: [4] [5] [6]
+     *   Row 3: [7] [8] [9]
+     */
+    #define BADGE_W 48
+    #define BADGE_H 28
+    #define BADGE_GAP_X 6
+    #define BADGE_GAP_Y 6
+    #define BADGE_START_Y 35
+
+    /* Calculate centering for 3-column layout (popup 210px wide, padding 10 each side = 190 inner) */
+    int total_width = 3 * BADGE_W + 2 * BADGE_GAP_X;  /* 156px */
+    int start_x = (210 - 20 - total_width) / 2;  /* (190 - 156) / 2 = 17 */
+
+    /* Row 0: "All" (2 col width) + "0" (1 col) */
+    int all_width = 2 * BADGE_W + BADGE_GAP_X;
+
+    ks_channel_popup_btns[CHANNEL_ALL] = lv_btn_create(ks_channel_popup);
+    lv_obj_set_size(ks_channel_popup_btns[CHANNEL_ALL], all_width, BADGE_H);
+    lv_obj_align(ks_channel_popup_btns[CHANNEL_ALL], LV_ALIGN_TOP_LEFT, start_x, BADGE_START_Y);
+    lv_obj_set_style_bg_color(ks_channel_popup_btns[CHANNEL_ALL], lv_color_hex(0x4A90E2), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ks_channel_popup_btns[CHANNEL_ALL], LV_OPA_COVER, LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ks_channel_popup_btns[CHANNEL_ALL], 6, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(ks_channel_popup_btns[CHANNEL_ALL], 0, LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(ks_channel_popup_btns[CHANNEL_ALL], 0, LV_STATE_DEFAULT);
+    if (current_ch == CHANNEL_ALL) {
+        lv_obj_set_style_border_color(ks_channel_popup_btns[CHANNEL_ALL], lv_color_white(), LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(ks_channel_popup_btns[CHANNEL_ALL], 2, LV_STATE_DEFAULT);
+    }
+    lv_obj_t *all_lbl = lv_label_create(ks_channel_popup_btns[CHANNEL_ALL]);
+    lv_label_set_text(all_lbl, "All");
+    lv_obj_set_style_text_color(all_lbl, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_text_font(all_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_center(all_lbl);
+    lv_obj_add_event_cb(ks_channel_popup_btns[CHANNEL_ALL], ks_channel_popup_btn_cb,
+                       LV_EVENT_CLICKED, (void *)(intptr_t)CHANNEL_ALL);
+
+    /* "0" badge on same row as "All" */
+    ks_channel_popup_btns[0] = lv_btn_create(ks_channel_popup);
+    lv_obj_set_size(ks_channel_popup_btns[0], BADGE_W, BADGE_H);
+    lv_obj_align(ks_channel_popup_btns[0], LV_ALIGN_TOP_LEFT,
+                 start_x + all_width + BADGE_GAP_X, BADGE_START_Y);
+    lv_obj_set_style_bg_color(ks_channel_popup_btns[0], get_channel_color(0), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ks_channel_popup_btns[0], LV_OPA_COVER, LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ks_channel_popup_btns[0], 6, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(ks_channel_popup_btns[0], 0, LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(ks_channel_popup_btns[0], 0, LV_STATE_DEFAULT);
+    if (current_ch == 0) {
+        lv_obj_set_style_border_color(ks_channel_popup_btns[0], lv_color_white(), LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(ks_channel_popup_btns[0], 2, LV_STATE_DEFAULT);
+    }
+    lv_obj_t *lbl0 = lv_label_create(ks_channel_popup_btns[0]);
+    lv_label_set_text(lbl0, "0");
+    lv_obj_set_style_text_color(lbl0, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_text_font(lbl0, &lv_font_montserrat_12, 0);
+    lv_obj_center(lbl0);
+    lv_obj_add_event_cb(ks_channel_popup_btns[0], ks_channel_popup_btn_cb,
+                       LV_EVENT_CLICKED, (void *)(intptr_t)0);
+
+    /* Channels 1-9 in 3-column grid (rows 1-3) */
+    for (int i = 1; i <= 9; i++) {
+        int idx = i - 1;  /* 0-based index for grid positioning */
+        int row = idx / 3;
+        int col = idx % 3;
+        int y_offset = BADGE_START_Y + BADGE_H + BADGE_GAP_Y + row * (BADGE_H + BADGE_GAP_Y);
+        int x_offset = start_x + col * (BADGE_W + BADGE_GAP_X);
+
+        ks_channel_popup_btns[i] = lv_btn_create(ks_channel_popup);
+        lv_obj_set_size(ks_channel_popup_btns[i], BADGE_W, BADGE_H);
+        lv_obj_align(ks_channel_popup_btns[i], LV_ALIGN_TOP_LEFT, x_offset, y_offset);
+
+        lv_obj_set_style_bg_color(ks_channel_popup_btns[i], get_channel_color(i), LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(ks_channel_popup_btns[i], LV_OPA_COVER, LV_STATE_DEFAULT);
+        lv_obj_set_style_radius(ks_channel_popup_btns[i], 6, LV_STATE_DEFAULT);
+        lv_obj_set_style_pad_all(ks_channel_popup_btns[i], 0, LV_STATE_DEFAULT);
+        lv_obj_set_style_shadow_width(ks_channel_popup_btns[i], 0, LV_STATE_DEFAULT);
+
+        if (i == current_ch) {
+            lv_obj_set_style_border_color(ks_channel_popup_btns[i], lv_color_white(), LV_STATE_DEFAULT);
+            lv_obj_set_style_border_width(ks_channel_popup_btns[i], 2, LV_STATE_DEFAULT);
+        }
+
+        lv_obj_t *lbl = lv_label_create(ks_channel_popup_btns[i]);
+        char buf[4];
+        snprintf(buf, sizeof(buf), "%d", i);
+        lv_label_set_text(lbl, buf);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+        lv_obj_center(lbl);
+
+        lv_obj_add_event_cb(ks_channel_popup_btns[i], ks_channel_popup_btn_cb,
+                           LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    }
+
+    #undef BADGE_W
+    #undef BADGE_H
+    #undef BADGE_GAP_X
+    #undef BADGE_GAP_Y
+    #undef BADGE_START_Y
+}
+
+/* Callback when channel display is tapped */
+static void ks_channel_display_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    ks_show_channel_popup();
+}
+
+/* Callback when a keyboard's channel badge is tapped */
+static void ks_badge_tap_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+
+    intptr_t channel = (intptr_t)lv_event_get_user_data(e);
+    ks_channel_change((uint8_t)channel);
 }
 
 /* Update keyboard entries with current scanner data */
 static void ks_update_entries(void) {
-    /* Count active keyboards */
+    /* Count active keyboards (with channel filtering) */
     int active_keyboards[KS_MAX_KEYBOARDS];
     int active_count = 0;
 
+    uint8_t scanner_ch = scanner_get_runtime_channel();
+
     for (int i = 0; i < CONFIG_PROSPECTOR_MAX_KEYBOARDS && active_count < KS_MAX_KEYBOARDS; i++) {
         struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
-        if (kbd && kbd->active) {
-            active_keyboards[active_count++] = i;
+        if (!kbd || !kbd->active) continue;
+
+        /* Channel filtering:
+         *   scanner_ch = CHANNEL_ALL (10): Show all keyboards
+         *   scanner_ch = 0-9: Only show keyboards with matching channel
+         */
+        if (scanner_ch != CHANNEL_ALL && kbd->data.channel != scanner_ch) {
+            continue;  /* Skip keyboards that don't match filter */
         }
+
+        active_keyboards[active_count++] = i;
     }
 
     /* Auto-select first keyboard if none selected */
@@ -1843,7 +2169,7 @@ static void ks_update_entries(void) {
         ks_entry_count = 0;
 
         /* Create new entries */
-        int y_pos = 55;  /* Start below title */
+        int y_pos = 55;  /* Start below title/channel selector */
         int spacing = 40;
 
         for (int i = 0; i < active_count; i++) {
@@ -1852,7 +2178,8 @@ static void ks_update_entries(void) {
             if (!kbd) continue;
 
             const char *name = kbd->ble_name[0] ? kbd->ble_name : "Unknown";
-            ks_create_entry(i, y_pos + (i * spacing), kbd_idx, name, kbd->rssi);
+            uint8_t channel = kbd->data.channel;  /* Get keyboard's channel */
+            ks_create_entry(i, y_pos + (i * spacing), kbd_idx, name, kbd->rssi, channel);
         }
         ks_entry_count = active_count;
     } else {
@@ -1923,6 +2250,13 @@ static void destroy_keyboard_select_widgets(void) {
     }
     ks_entry_count = 0;
 
+    /* Close popup if open */
+    ks_close_channel_popup();
+
+    /* Destroy channel selector widgets */
+    if (ks_channel_container) { lv_obj_del(ks_channel_container); ks_channel_container = NULL; }
+    ks_channel_value = NULL;  /* Deleted with container */
+
     /* Destroy other widgets */
     if (ks_nav_hint) { lv_obj_del(ks_nav_hint); ks_nav_hint = NULL; }
     if (ks_title_label) { lv_obj_del(ks_title_label); ks_title_label = NULL; }
@@ -1937,12 +2271,42 @@ static void create_keyboard_select_widgets(void) {
     ks_selected_keyboard = scanner_get_selected_keyboard();
     LOG_INF("Current selected keyboard: %d", ks_selected_keyboard);
 
-    /* Title */
+    /* Title (left side) */
     ks_title_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(ks_title_label, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(ks_title_label, lv_color_white(), 0);
-    lv_label_set_text(ks_title_label, "Select Keyboard");
-    lv_obj_align(ks_title_label, LV_ALIGN_TOP_MID, 0, 15);
+    lv_label_set_text(ks_title_label, "Keyboards");
+    lv_obj_align(ks_title_label, LV_ALIGN_TOP_LEFT, 15, 15);
+
+    /* ========== Channel Badge (right side of header) ========== */
+    /* "Ch:" label + colored badge - tappable */
+
+    /* "Ch:" prefix label - clickable */
+    lv_obj_t *ch_prefix = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(ch_prefix, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(ch_prefix, lv_color_hex(0x808080), 0);
+    lv_label_set_text(ch_prefix, "Ch:");
+    lv_obj_align(ch_prefix, LV_ALIGN_TOP_RIGHT, -55, 19);
+    lv_obj_add_flag(ch_prefix, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(ch_prefix, ks_channel_display_cb, LV_EVENT_CLICKED, NULL);
+
+    /* Channel badge - use simple btn for reliable click */
+    ks_channel_container = lv_btn_create(screen_obj);
+    lv_obj_set_size(ks_channel_container, 36, 24);
+    lv_obj_align(ks_channel_container, LV_ALIGN_TOP_RIGHT, -15, 16);
+    lv_obj_set_style_radius(ks_channel_container, 6, 0);
+    lv_obj_set_style_pad_all(ks_channel_container, 0, 0);
+    lv_obj_set_style_shadow_width(ks_channel_container, 0, 0);
+    lv_obj_set_style_bg_opa(ks_channel_container, LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(ks_channel_container, ks_channel_display_cb, LV_EVENT_CLICKED, NULL);
+
+    /* Channel value label (centered in badge) - also clickable, triggers same callback */
+    ks_channel_value = lv_label_create(ks_channel_container);
+    lv_obj_set_style_text_font(ks_channel_value, &lv_font_montserrat_12, 0);
+    lv_obj_center(ks_channel_value);
+    lv_obj_add_flag(ks_channel_value, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(ks_channel_value, ks_channel_display_cb, LV_EVENT_CLICKED, NULL);
+    ks_update_channel_display();
 
     /* Navigation hint */
     ks_nav_hint = lv_label_create(screen_obj);
@@ -1958,6 +2322,441 @@ static void create_keyboard_select_widgets(void) {
     ks_update_timer = lv_timer_create(ks_update_timer_cb, 1000, NULL);
 
     LOG_INF("Keyboard select widgets created (%d keyboards)", ks_entry_count);
+}
+
+/* ========== Pong Wars Screen ========== */
+
+/*
+ * Pong Wars - Pre-allocated cell version (stable)
+ * - ALL cell objects created at init (no dynamic alloc during game)
+ * - Cell conversion just changes color (no create/delete)
+ * - Much more stable on resource-constrained devices
+ */
+
+#define PW_CELL_SIZE 20       /* Cell size in pixels */
+#define PW_GRID_W 12          /* 240 / 20 = 12 cells */
+#define PW_GRID_H 9           /* 180 / 20 = 9 cells */
+#define PW_NUM_CELLS (PW_GRID_W * PW_GRID_H)  /* 108 cells total */
+#define PW_NUM_BALLS 2
+#define PW_BALL_RADIUS 6
+#define PW_ARENA_W 240        /* 80% of 280 */
+#define PW_ARENA_H 180        /* 75% of 240 */
+#define PW_OFFSET_X 20        /* (280 - 240) / 2 */
+#define PW_OFFSET_Y 30        /* Top margin for score */
+
+/* Pastel color palettes - {team1_bg, team2_bg, team1_ball, team2_ball} */
+static const uint32_t pw_color_palettes[][4] = {
+    {0xFFB5E8, 0xB5DEFF, 0xFF4D6D, 0x2D8CFF},  /* Pink vs Blue */
+    {0xFFDEB5, 0xB5FFD9, 0xFF8C42, 0x2ECC71},  /* Orange vs Green */
+    {0xE8B5FF, 0xFFFDB5, 0x9B59B6, 0xF1C40F},  /* Purple vs Yellow */
+    {0xB5FFE8, 0xFFB5C5, 0x1ABC9C, 0xE74C3C},  /* Cyan vs Red */
+    {0xD5B5FF, 0xB5F0FF, 0x8E44AD, 0x3498DB},  /* Violet vs Sky */
+    {0xFFE5B5, 0xC5FFB5, 0xE67E22, 0x27AE60},  /* Peach vs Lime */
+};
+#define PW_NUM_PALETTES (sizeof(pw_color_palettes) / sizeof(pw_color_palettes[0]))
+
+/* Current colors (set randomly at start) */
+static uint32_t pw_color_team1 = 0xFFB5E8;
+static uint32_t pw_color_team2 = 0xB5DEFF;
+static uint32_t pw_color_ball1 = 0xFF4D6D;
+static uint32_t pw_color_ball2 = 0x2D8CFF;
+
+/* State */
+static lv_timer_t *pw_timer = NULL;
+static uint8_t pw_grid[PW_NUM_CELLS];  /* Cell ownership: 0=team1, 1=team2 */
+static lv_obj_t *pw_cell_objs[PW_NUM_CELLS];  /* Pre-allocated cell objects */
+static lv_obj_t *pw_arena_container = NULL;  /* Container for arena */
+static lv_obj_t *pw_ball_objs[PW_NUM_BALLS];
+static lv_obj_t *pw_score_label1 = NULL;  /* Team1 score */
+static lv_obj_t *pw_score_label2 = NULL;  /* Team2 score */
+static bool pw_initialized = false;
+static uint32_t pw_rand_seed = 12345;
+static int16_t pw_base_speed = 25;  /* Random base speed */
+
+/* Ball state - pixel coordinates with fixed-point velocity */
+struct pw_ball {
+    int16_t x, y;      /* Pixel position */
+    int16_t dx, dy;    /* Velocity (pixels * 10 for precision) */
+    uint8_t team;
+};
+static struct pw_ball pw_balls[PW_NUM_BALLS];
+static int pw_score1 = 0, pw_score2 = 0;
+
+/* Forward declarations */
+static void pw_tap_handler(lv_event_t *e);
+static void pw_reset_game(void);
+
+/* Simple random number generator */
+static uint32_t pw_rand(void) {
+    pw_rand_seed = pw_rand_seed * 1103515245 + 12345;
+    return (pw_rand_seed >> 16) & 0x7FFF;
+}
+
+/* Initialize grid data and update cell colors */
+static void pw_init_grid(void) {
+    pw_score1 = 0;
+    pw_score2 = 0;
+    for (int y = 0; y < PW_GRID_H; y++) {
+        for (int x = 0; x < PW_GRID_W; x++) {
+            int idx = y * PW_GRID_W + x;
+            pw_grid[idx] = (x < PW_GRID_W / 2) ? 0 : 1;
+            if (pw_grid[idx] == 0) pw_score1++; else pw_score2++;
+
+            /* Update pre-allocated cell color */
+            if (pw_cell_objs[idx]) {
+                uint32_t color = (pw_grid[idx] == 0) ? pw_color_team1 : pw_color_team2;
+                lv_obj_set_style_bg_color(pw_cell_objs[idx], lv_color_hex(color), 0);
+            }
+        }
+    }
+}
+
+static void pw_select_random_palette(void) {
+    int idx = pw_rand() % PW_NUM_PALETTES;
+    pw_color_team1 = pw_color_palettes[idx][0];
+    pw_color_team2 = pw_color_palettes[idx][1];
+    pw_color_ball1 = pw_color_palettes[idx][2];
+    pw_color_ball2 = pw_color_palettes[idx][3];
+    LOG_INF("Pong Wars palette: %d", idx);
+}
+
+static void pw_init_balls(void) {
+    /* Use uptime as random seed */
+    pw_rand_seed = k_uptime_get_32();
+
+    /* Random color palette */
+    pw_select_random_palette();
+
+    /* Random base speed (40-60) - faster gameplay */
+    pw_base_speed = 40 + (pw_rand() % 21);
+    LOG_INF("Pong Wars speed: %d", pw_base_speed);
+
+    for (int i = 0; i < PW_NUM_BALLS; i++) {
+        pw_balls[i].team = i;  /* Ball 0 = team 0, Ball 1 = team 1 */
+
+        /* Start position: team 0 on left, team 1 on right */
+        if (i == 0) {
+            pw_balls[i].x = PW_ARENA_W / 4;
+            pw_balls[i].y = PW_ARENA_H / 2;
+        } else {
+            pw_balls[i].x = PW_ARENA_W * 3 / 4;
+            pw_balls[i].y = PW_ARENA_H / 2;
+        }
+
+        /* Random velocity with random base speed */
+        int angle_idx = pw_rand() % 8;
+        /* Vary velocity slightly around base_speed */
+        int vx = pw_base_speed + (pw_rand() % 10) - 5;
+        int vy = pw_base_speed + (pw_rand() % 10) - 5;
+
+        /* Direction based on angle index */
+        int sx = (angle_idx < 4) ? 1 : -1;
+        int sy = ((angle_idx % 4) < 2) ? 1 : -1;
+
+        pw_balls[i].dx = vx * sx;
+        pw_balls[i].dy = vy * sy;
+
+        /* Team 0 goes right, Team 1 goes left initially */
+        if (i == 0 && pw_balls[i].dx < 0) pw_balls[i].dx = -pw_balls[i].dx;
+        if (i == 1 && pw_balls[i].dx > 0) pw_balls[i].dx = -pw_balls[i].dx;
+    }
+}
+
+/* Update cell color (no object creation/deletion!) */
+static void pw_update_cell_color(int gx, int gy, uint8_t team) {
+    int idx = gy * PW_GRID_W + gx;
+    if (idx < 0 || idx >= PW_NUM_CELLS) return;
+    if (!pw_cell_objs[idx]) return;
+
+    uint32_t color = (team == 0) ? pw_color_team1 : pw_color_team2;
+    lv_obj_set_style_bg_color(pw_cell_objs[idx], lv_color_hex(color), 0);
+}
+
+static void pw_update_ball_display(int i) {
+    if (!pw_ball_objs[i]) return;
+    lv_obj_set_pos(pw_ball_objs[i], pw_balls[i].x - PW_BALL_RADIUS, pw_balls[i].y - PW_BALL_RADIUS);
+}
+
+static void pw_update_score(void) {
+    char buf[8];
+    if (pw_score_label1) {
+        snprintf(buf, sizeof(buf), "%d", pw_score1);
+        lv_label_set_text(pw_score_label1, buf);
+    }
+    if (pw_score_label2) {
+        snprintf(buf, sizeof(buf), "%d", pw_score2);
+        lv_label_set_text(pw_score_label2, buf);
+    }
+}
+
+static void pw_step(void) {
+    if (!pw_initialized) return;
+
+    for (int i = 0; i < PW_NUM_BALLS; i++) {
+        struct pw_ball *b = &pw_balls[i];
+
+        /* Move ball (velocity is *10, so divide by 10) */
+        int new_x = b->x + b->dx / 10;
+        int new_y = b->y + b->dy / 10;
+
+        /* Bounce off walls */
+        if (new_x < PW_BALL_RADIUS) {
+            new_x = PW_BALL_RADIUS;
+            b->dx = -b->dx;
+        } else if (new_x > PW_ARENA_W - PW_BALL_RADIUS) {
+            new_x = PW_ARENA_W - PW_BALL_RADIUS;
+            b->dx = -b->dx;
+        }
+        if (new_y < PW_BALL_RADIUS) {
+            new_y = PW_BALL_RADIUS;
+            b->dy = -b->dy;
+        } else if (new_y > PW_ARENA_H - PW_BALL_RADIUS) {
+            new_y = PW_ARENA_H - PW_BALL_RADIUS;
+            b->dy = -b->dy;
+        }
+
+        /* Check which grid cell we're in */
+        int gx = new_x / PW_CELL_SIZE;
+        int gy = new_y / PW_CELL_SIZE;
+        if (gx >= 0 && gx < PW_GRID_W && gy >= 0 && gy < PW_GRID_H) {
+            int idx = gy * PW_GRID_W + gx;
+            if (pw_grid[idx] != b->team) {
+                /* Convert cell! (just update color, no object creation) */
+                pw_grid[idx] = b->team;
+                pw_update_cell_color(gx, gy, b->team);
+                if (b->team == 0) { pw_score1++; pw_score2--; }
+                else { pw_score2++; pw_score1--; }
+
+                /* Bounce - vary the angle slightly */
+                int r = pw_rand() % 3;
+                if (r == 0) b->dx = -b->dx;
+                else if (r == 1) b->dy = -b->dy;
+                else { b->dx = -b->dx; b->dy = -b->dy; }
+            }
+        }
+
+        b->x = new_x;
+        b->y = new_y;
+        pw_update_ball_display(i);
+    }
+}
+
+static void pw_timer_cb(lv_timer_t *timer) {
+    ARG_UNUSED(timer);
+    if (!pw_initialized) return;
+
+    /* Frame counter */
+    static uint16_t frame_count = 0;
+    frame_count++;
+
+    /* Run physics (no object creation, just color updates) */
+    pw_step();
+
+    /* Update score every ~10 frames */
+    if (frame_count % 10 == 0) {
+        pw_update_score();
+    }
+}
+
+static void destroy_pong_wars_widgets(void) {
+    /* CRITICAL: Resume background display updates */
+    pong_wars_active = false;
+
+    pw_initialized = false;
+    if (pw_timer) { lv_timer_del(pw_timer); pw_timer = NULL; }
+    /* Cell objects will be cleaned by lv_obj_clean(screen_obj) in swipe handler */
+    memset(pw_cell_objs, 0, sizeof(pw_cell_objs));
+    memset(pw_ball_objs, 0, sizeof(pw_ball_objs));
+    pw_arena_container = NULL;
+    pw_score_label1 = NULL;
+    pw_score_label2 = NULL;
+    LOG_INF("Pong Wars destroyed");
+}
+
+static void pw_tap_handler(lv_event_t *e) {
+    ARG_UNUSED(e);
+    LOG_INF("Pong Wars: tap detected, resetting...");
+    pw_reset_game();
+}
+
+static void create_pong_wars_widgets(void) {
+    LOG_INF("Creating Pong Wars (smooth version)...");
+
+    pw_initialized = false;
+    pw_init_grid();
+    pw_init_balls();  /* This sets random colors and speed */
+
+    /* Dark background for whole screen */
+    lv_obj_set_style_bg_color(screen_obj, lv_color_hex(0x1a1a2e), 0);
+
+    /* Title "Pong Wars" centered at top (white text) */
+    lv_obj_t *title = lv_label_create(screen_obj);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(title, lv_color_white(), 0);
+        lv_label_set_text(title, "Pong Wars");
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
+    }
+
+    /* Score labels - aligned with arena edges */
+    /* Arena: x=PW_OFFSET_X(20) to x=PW_OFFSET_X+PW_ARENA_W(260) */
+    pw_score_label1 = lv_label_create(screen_obj);
+    if (pw_score_label1) {
+        lv_obj_set_style_text_font(pw_score_label1, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(pw_score_label1, lv_color_hex(pw_color_ball1), 0);
+        lv_obj_set_style_bg_color(pw_score_label1, lv_color_hex(pw_color_team1), 0);
+        lv_obj_set_style_bg_opa(pw_score_label1, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_hor(pw_score_label1, 8, 0);
+        lv_obj_set_style_pad_ver(pw_score_label1, 2, 0);
+        lv_obj_set_style_radius(pw_score_label1, 6, 0);
+        lv_obj_set_pos(pw_score_label1, PW_OFFSET_X, 6);  /* Left edge of arena */
+    }
+
+    pw_score_label2 = lv_label_create(screen_obj);
+    if (pw_score_label2) {
+        lv_obj_set_style_text_font(pw_score_label2, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(pw_score_label2, lv_color_hex(pw_color_ball2), 0);
+        lv_obj_set_style_bg_color(pw_score_label2, lv_color_hex(pw_color_team2), 0);
+        lv_obj_set_style_bg_opa(pw_score_label2, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_hor(pw_score_label2, 8, 0);
+        lv_obj_set_style_pad_ver(pw_score_label2, 2, 0);
+        lv_obj_set_style_radius(pw_score_label2, 6, 0);
+        /* Right-align to arena right edge (arena ends at x=260, label ~30px wide) */
+        lv_obj_set_pos(pw_score_label2, PW_OFFSET_X + PW_ARENA_W - 35, 6);
+    }
+
+    /* Arena container with rounded border */
+    pw_arena_container = lv_obj_create(screen_obj);
+    if (pw_arena_container) {
+        lv_obj_remove_style_all(pw_arena_container);
+        lv_obj_set_size(pw_arena_container, PW_ARENA_W, PW_ARENA_H);
+        lv_obj_set_pos(pw_arena_container, PW_OFFSET_X, PW_OFFSET_Y);
+        lv_obj_set_style_radius(pw_arena_container, 8, 0);
+        lv_obj_set_style_clip_corner(pw_arena_container, true, 0);
+        lv_obj_set_style_border_color(pw_arena_container, lv_color_hex(0x404060), 0);
+        lv_obj_set_style_border_width(pw_arena_container, 2, 0);
+        lv_obj_clear_flag(pw_arena_container, LV_OBJ_FLAG_SCROLLABLE);
+        /* Add tap handler for reset */
+        lv_obj_add_flag(pw_arena_container, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(pw_arena_container, pw_tap_handler, LV_EVENT_CLICKED, NULL);
+    }
+
+    /* Pre-allocate ALL cell objects (no dynamic alloc during game!) */
+    for (int y = 0; y < PW_GRID_H; y++) {
+        for (int x = 0; x < PW_GRID_W; x++) {
+            int idx = y * PW_GRID_W + x;
+            lv_obj_t *cell = lv_obj_create(pw_arena_container);
+            if (!cell) continue;
+
+            lv_obj_remove_style_all(cell);
+            lv_obj_set_size(cell, PW_CELL_SIZE, PW_CELL_SIZE);
+            lv_obj_set_pos(cell, x * PW_CELL_SIZE, y * PW_CELL_SIZE);
+
+            /* Initial color based on grid position */
+            uint32_t color = (x < PW_GRID_W / 2) ? pw_color_team1 : pw_color_team2;
+            lv_obj_set_style_bg_color(cell, lv_color_hex(color), 0);
+            lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
+            lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+            pw_cell_objs[idx] = cell;
+        }
+    }
+    LOG_INF("Pre-allocated %d cell objects", PW_NUM_CELLS);
+
+    /* Create balls inside arena (using dynamic colors) */
+    lv_color_t ball_colors[2] = {lv_color_hex(pw_color_ball1), lv_color_hex(pw_color_ball2)};
+    for (int i = 0; i < PW_NUM_BALLS; i++) {
+        lv_obj_t *ball = lv_obj_create(pw_arena_container);
+        if (!ball) continue;
+        lv_obj_remove_style_all(ball);
+        lv_obj_set_size(ball, PW_BALL_RADIUS * 2, PW_BALL_RADIUS * 2);
+        lv_obj_set_style_bg_color(ball, ball_colors[pw_balls[i].team], 0);
+        lv_obj_set_style_bg_opa(ball, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(ball, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_color(ball, lv_color_white(), 0);
+        lv_obj_set_style_border_width(ball, 2, 0);
+        lv_obj_set_style_shadow_color(ball, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_shadow_width(ball, 4, 0);
+        lv_obj_set_style_shadow_opa(ball, LV_OPA_50, 0);
+        lv_obj_clear_flag(ball, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        pw_ball_objs[i] = ball;
+        pw_update_ball_display(i);
+    }
+
+    pw_update_score();
+
+    /* Nav hint at bottom */
+    lv_obj_t *hint = lv_label_create(screen_obj);
+    if (hint) {
+        lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(hint, lv_color_hex(0x606080), 0);
+        lv_label_set_text(hint, LV_SYMBOL_RIGHT " swipe to return");
+        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -4);
+    }
+
+    pw_initialized = true;
+
+    /* CRITICAL: Stop background display updates to prevent thread conflicts */
+    pong_wars_active = true;
+
+    /* High framerate for smooth animation (30 FPS) */
+    pw_timer = lv_timer_create(pw_timer_cb, 33, NULL);  /* 30 FPS */
+    LOG_INF("Pong Wars started! (smooth mode, background updates paused)");
+}
+
+/* Reset game with new random colors and speed (pre-allocated cells version) */
+static void pw_reset_game(void) {
+    if (!pw_initialized) return;
+    if (!pw_arena_container) return;
+
+    /* Stop timer during reset */
+    pw_initialized = false;
+    if (pw_timer) {
+        lv_timer_del(pw_timer);
+        pw_timer = NULL;
+    }
+
+    /* Reinitialize grid and balls with new random colors/speed */
+    pw_init_grid();
+    pw_init_balls();
+
+    /* Update ALL pre-allocated cell colors to match new grid state */
+    for (int y = 0; y < PW_GRID_H; y++) {
+        for (int x = 0; x < PW_GRID_W; x++) {
+            int idx = y * PW_GRID_W + x;
+            if (pw_cell_objs[idx]) {
+                uint32_t color = (pw_grid[idx] == 0) ? pw_color_team1 : pw_color_team2;
+                lv_obj_set_style_bg_color(pw_cell_objs[idx], lv_color_hex(color), 0);
+            }
+        }
+    }
+
+    /* Update ball colors and positions (balls already exist) */
+    lv_color_t ball_colors[2] = {lv_color_hex(pw_color_ball1), lv_color_hex(pw_color_ball2)};
+    for (int i = 0; i < PW_NUM_BALLS; i++) {
+        if (pw_ball_objs[i]) {
+            lv_obj_set_style_bg_color(pw_ball_objs[i], ball_colors[pw_balls[i].team], 0);
+            /* Move balls to foreground */
+            lv_obj_move_foreground(pw_ball_objs[i]);
+            pw_update_ball_display(i);
+        }
+    }
+
+    /* Update score labels with new colors */
+    if (pw_score_label1) {
+        lv_obj_set_style_text_color(pw_score_label1, lv_color_hex(pw_color_ball1), 0);
+        lv_obj_set_style_bg_color(pw_score_label1, lv_color_hex(pw_color_team1), 0);
+    }
+    if (pw_score_label2) {
+        lv_obj_set_style_text_color(pw_score_label2, lv_color_hex(pw_color_ball2), 0);
+        lv_obj_set_style_bg_color(pw_score_label2, lv_color_hex(pw_color_team2), 0);
+    }
+
+    pw_update_score();
+
+    /* Restart timer */
+    pw_initialized = true;
+    pw_timer = lv_timer_create(pw_timer_cb, 33, NULL);  /* 30 FPS */
+    LOG_INF("Pong Wars reset! (new colors/speed)");
 }
 
 /* ========== Swipe Processing (runs in LVGL timer = Main Thread) ========== */
@@ -2076,8 +2875,18 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         break;
 
     case SWIPE_DIRECTION_LEFT:
-        /* Quick Actions → Main (user swipes left) */
-        if (current_screen == SCREEN_SYSTEM_SETTINGS) {
+        /* Main → Pong Wars OR Quick Actions → Main */
+        if (current_screen == SCREEN_MAIN) {
+            LOG_INF(">>> Transitioning: MAIN -> PONG_WARS");
+            destroy_main_screen_widgets();
+            lv_obj_clean(screen_obj);
+            lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
+            lv_obj_invalidate(screen_obj);
+            create_pong_wars_widgets();
+            ensure_lvgl_indev_registered();  /* Register for tap-to-reset */
+            current_screen = SCREEN_PONG_WARS;
+            LOG_INF(">>> Transition complete");
+        } else if (current_screen == SCREEN_SYSTEM_SETTINGS) {
             LOG_INF(">>> Transitioning: QUICK_ACTIONS -> MAIN");
             destroy_system_settings_widgets();
             lv_obj_clean(screen_obj);
@@ -2086,12 +2895,26 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
             LOG_INF(">>> Transition complete");
+        } else if (current_screen == SCREEN_KEYBOARD_SELECT) {
+            /* Channel decrement on left swipe */
+            ks_close_channel_popup();  /* Close popup if open */
+            ks_channel_decrement();
+            LOG_INF(">>> Keyboard Select: Channel decremented");
         }
         break;
 
     case SWIPE_DIRECTION_RIGHT:
-        /* Main → Quick Actions (user swipes right) */
-        if (current_screen == SCREEN_MAIN) {
+        /* Pong Wars → Main OR Main → Quick Actions */
+        if (current_screen == SCREEN_PONG_WARS) {
+            LOG_INF(">>> Transitioning: PONG_WARS -> MAIN");
+            destroy_pong_wars_widgets();
+            lv_obj_clean(screen_obj);
+            lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
+            lv_obj_invalidate(screen_obj);
+            create_main_screen_widgets();
+            current_screen = SCREEN_MAIN;
+            LOG_INF(">>> Transition complete");
+        } else if (current_screen == SCREEN_MAIN) {
             LOG_INF(">>> Transitioning: MAIN -> QUICK_ACTIONS");
             destroy_main_screen_widgets();
             lv_obj_clean(screen_obj);
@@ -2101,6 +2924,11 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             ensure_lvgl_indev_registered();  /* Register for button touch */
             current_screen = SCREEN_SYSTEM_SETTINGS;
             LOG_INF(">>> Transition complete");
+        } else if (current_screen == SCREEN_KEYBOARD_SELECT) {
+            /* Channel increment on right swipe */
+            ks_close_channel_popup();  /* Close popup if open */
+            ks_channel_increment();
+            LOG_INF(">>> Keyboard Select: Channel incremented");
         }
         break;
 

@@ -21,6 +21,9 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
     # Brightness control with APDS9960 sensor for auto brightness
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/brightness_control.c)
 
+    # System settings widget (Bootloader, Reset, Channel selector)
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/system_settings_widget.c)
+
     # NerdFont for modifier icons
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/fonts/NerdFonts_Regular_40.c)
 endif()
