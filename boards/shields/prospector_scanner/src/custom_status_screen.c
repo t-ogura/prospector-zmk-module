@@ -122,8 +122,9 @@ static const char *mod_symbols[4] = {
 /* ========== Cached data (updated by scanner, preserved across screen transitions) ========== */
 static int active_layer = 0;
 static int wpm_value = 0;
-static int battery_left = 0;
-static int battery_right = 0;
+#define MAX_KB_BATTERIES 4
+static int battery_values[MAX_KB_BATTERIES] = {0, 0, 0, 0};  /* Up to 4 keyboard batteries */
+static int active_battery_count = 0;  /* How many batteries are active (>0) */
 static int scanner_battery = 0;
 static int rssi = -100;  /* Default: very weak signal */
 static float rate_hz = 0.0f;
@@ -182,21 +183,29 @@ static lv_obj_t *ble_profile_label = NULL;
 /* Layer */
 static lv_obj_t *layer_title_label = NULL;
 static lv_obj_t *layer_labels[10] = {NULL};
+static lv_obj_t *layer_over_max_label = NULL;  /* Large number for over-max display */
+static bool layer_mode_over_max = false;       /* true when active_layer >= max_layers */
+static int last_active_layer = -1;             /* Track previous layer for animations */
 
 /* Modifier - placeholder for now (no NerdFont in ZMK test) */
 static lv_obj_t *modifier_label = NULL;
 
-/* Keyboard battery - connected state */
-static lv_obj_t *left_bat_bar = NULL;
-static lv_obj_t *left_bat_label = NULL;
-static lv_obj_t *right_bat_bar = NULL;
-static lv_obj_t *right_bat_label = NULL;
+/* Keyboard battery - array for up to 4 batteries */
+static lv_obj_t *kb_bat_bar[MAX_KB_BATTERIES] = {NULL};      /* Battery bars (connected) */
+static lv_obj_t *kb_bat_pct[MAX_KB_BATTERIES] = {NULL};      /* Percentage labels */
+static lv_obj_t *kb_bat_name[MAX_KB_BATTERIES] = {NULL};     /* Name labels (L, R, Aux, A1, A2) */
+static lv_obj_t *kb_bat_nc_bar[MAX_KB_BATTERIES] = {NULL};   /* Disconnected state bars */
+static lv_obj_t *kb_bat_nc_label[MAX_KB_BATTERIES] = {NULL}; /* Disconnected state × symbols */
 
-/* Keyboard battery - disconnected state (× symbol) */
-static lv_obj_t *left_bat_nc_bar = NULL;
-static lv_obj_t *left_bat_nc_label = NULL;
-static lv_obj_t *right_bat_nc_bar = NULL;
-static lv_obj_t *right_bat_nc_label = NULL;
+/* Battery name labels based on count:
+ * 1: (no label)
+ * 2: "L", "R"
+ * 3: "L", "R", "Aux"
+ * 4: "L", "R", "A1", "A2"
+ */
+static const char *battery_names_2[] = {"L", "R", NULL, NULL};
+static const char *battery_names_3[] = {"L", "R", "Aux", NULL};
+static const char *battery_names_4[] = {"L", "R", "A1", "A2"};
 
 /* Signal status */
 static lv_obj_t *channel_label = NULL;
@@ -226,6 +235,12 @@ static uint8_t ds_manual_brightness = 65;
 static bool ds_battery_visible = IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT);
 static uint8_t ds_max_layers = 7;
 
+/* Forward declarations for layer display helpers */
+static void create_layer_list_widgets(lv_obj_t *parent, int y_offset);
+static void destroy_layer_list_widgets(void);
+static void create_over_max_widget(lv_obj_t *parent, int layer, int y_offset);
+static void destroy_over_max_widget(void);
+
 /* UI interaction flag - prevents swipe during slider drag */
 static bool ui_interaction_active = false;
 
@@ -234,6 +249,7 @@ static bool lvgl_indev_registered = false;
 
 /* ========== System Settings Screen Widgets (NO CONTAINER) ========== */
 static lv_obj_t *ss_title_label = NULL;
+static lv_obj_t *ss_version_label = NULL;
 static lv_obj_t *ss_bootloader_btn = NULL;
 static lv_obj_t *ss_reset_btn = NULL;
 static lv_obj_t *ss_nav_hint = NULL;
@@ -456,30 +472,13 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_label_set_text(layer_title_label, "Layer");
     lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 82);  /* 3px up */
 
-    int num_layers = 7;
-    int spacing = 25;
-    int label_width = 20;  /* Fixed width for center alignment */
-    int total_width = (num_layers - 1) * spacing;
-    int start_x = 140 - (total_width / 2) - (label_width / 2);  /* Offset by half label width */
-
-    for (int i = 0; i < num_layers; i++) {
-        layer_labels[i] = lv_label_create(screen);
-        lv_obj_set_style_text_font(layer_labels[i], &lv_font_montserrat_28, 0);
-        lv_obj_set_width(layer_labels[i], label_width);
-        lv_obj_set_style_text_align(layer_labels[i], LV_TEXT_ALIGN_CENTER, 0);
-
-        char text[2] = {(char)('0' + i), '\0'};
-        lv_label_set_text(layer_labels[i], text);
-
-        if (i == active_layer) {
-            lv_obj_set_style_text_color(layer_labels[i], get_layer_color(i), 0);
-            lv_obj_set_style_text_opa(layer_labels[i], LV_OPA_COVER, 0);
-        } else {
-            lv_obj_set_style_text_color(layer_labels[i], lv_color_make(40, 40, 40), 0);
-            lv_obj_set_style_text_opa(layer_labels[i], LV_OPA_30, 0);
-        }
-
-        lv_obj_set_pos(layer_labels[i], start_x + (i * spacing), 105);
+    /* Create layer display - either list or over-max based on active_layer */
+    if (active_layer >= ds_max_layers) {
+        layer_mode_over_max = true;
+        create_over_max_widget(screen, active_layer, 105);
+    } else {
+        layer_mode_over_max = false;
+        create_layer_list_widgets(screen, 105);
     }
     LOG_INF("[INIT] layer widget created");
 
@@ -493,108 +492,93 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_obj_align(modifier_label, LV_ALIGN_TOP_MID, 0, 145);
     LOG_INF("[INIT] modifier widget created");
 
-    /* ===== 7. Keyboard Battery (using BOTTOM_MID alignment like original) ===== */
-    LOG_INF("[INIT] Creating keyboard battery...");
+    /* ===== 7. Keyboard Battery (dynamic layout for 1-4 batteries) ===== */
+    LOG_INF("[INIT] Creating keyboard battery widgets...");
 
-    /* Position constants (same as scanner_battery_widget.c) */
-    #define KB_BAR_WIDTH       110
+    /* Position constants - configurable for different battery counts */
     #define KB_BAR_HEIGHT      4
-    #define KB_BAR_Y_OFFSET    -33    /* Distance from bottom (5px lower) */
-    #define KB_LABEL_Y_OFFSET  -42    /* Label above bar (3px down) */
-    #define KB_LEFT_X_OFFSET   -70    /* Left battery x offset from center */
-    #define KB_RIGHT_X_OFFSET  70     /* Right battery x offset from center */
+    #define KB_BAR_Y_OFFSET    -33    /* Distance from bottom */
+    #define KB_PCT_Y_OFFSET    -42    /* Percentage label above bar */
+    #define KB_NAME_X_OFFSET   0      /* Name label right edge aligns with bar left edge */
 
-    /* === Left battery === */
-    /* Connected state bar - initially hidden (opa=0) */
-    left_bat_bar = lv_bar_create(screen);
-    lv_obj_set_size(left_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(left_bat_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_bar_set_range(left_bat_bar, 0, 100);
-    lv_bar_set_value(left_bat_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_color(left_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_dir(left_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_INDICATOR);
-    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_MAIN);  /* Initially hidden */
-    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_INDICATOR);
+    /* Layout for different battery counts (bar width and positions) */
+    /* 1 battery: centered, width 165 (1.5x of 110) */
+    /* 2 batteries: L/R side by side, width 110 each */
+    /* 3 batteries: width 70 each, spread across */
+    /* 4 batteries: width 52 each, spread across */
+    #define KB_BAR_WIDTH_1     165
+    #define KB_BAR_WIDTH_2     110
+    #define KB_BAR_WIDTH_3     70
+    #define KB_BAR_WIDTH_4     52
 
-    /* Connected state label - initially hidden */
-    left_bat_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(left_bat_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(left_bat_label, lv_color_white(), 0);
-    lv_obj_align(left_bat_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(left_bat_label, "0");
-    lv_obj_set_style_opa(left_bat_label, 0, 0);  /* Initially hidden */
+    /* X offsets for each layout (from center) */
+    static const int16_t kb_x_offsets_1[] = {0};
+    static const int16_t kb_x_offsets_2[] = {-70, 70};
+    static const int16_t kb_x_offsets_3[] = {-90, 0, 90};
+    static const int16_t kb_x_offsets_4[] = {-100, -35, 35, 100};
 
-    /* Disconnected state bar - initially visible */
-    left_bat_nc_bar = lv_obj_create(screen);
-    lv_obj_set_size(left_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(left_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_obj_set_style_bg_color(left_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(left_bat_nc_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(left_bat_nc_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_width(left_bat_nc_bar, 0, 0);
-    lv_obj_set_style_pad_all(left_bat_nc_bar, 0, 0);
-    lv_obj_set_style_opa(left_bat_nc_bar, 255, 0);  /* Initially visible */
+    /* Create all 4 battery slot widgets (initially hidden) */
+    for (int i = 0; i < MAX_KB_BATTERIES; i++) {
+        /* Default to 2-battery layout initially */
+        int16_t bar_width = KB_BAR_WIDTH_2;
+        int16_t x_offset = (i < 2) ? kb_x_offsets_2[i] : 0;
 
-    /* Disconnected state label (× symbol) - initially visible */
-    left_bat_nc_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(left_bat_nc_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(left_bat_nc_label, lv_color_hex(0xe63030), 0);
-    lv_obj_align(left_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(left_bat_nc_label, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_opa(left_bat_nc_label, 255, 0);  /* Initially visible */
+        /* Connected state bar */
+        kb_bat_bar[i] = lv_bar_create(screen);
+        lv_obj_set_size(kb_bat_bar[i], bar_width, KB_BAR_HEIGHT);
+        lv_obj_align(kb_bat_bar[i], LV_ALIGN_BOTTOM_MID, x_offset, KB_BAR_Y_OFFSET);
+        lv_bar_set_range(kb_bat_bar[i], 0, 100);
+        lv_bar_set_value(kb_bat_bar[i], 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(kb_bat_bar[i], lv_color_hex(0x202020), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(kb_bat_bar[i], 255, LV_PART_MAIN);
+        lv_obj_set_style_radius(kb_bat_bar[i], 1, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(kb_bat_bar[i], lv_color_hex(0x909090), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(kb_bat_bar[i], 255, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_grad_color(kb_bat_bar[i], lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_grad_dir(kb_bat_bar[i], LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(kb_bat_bar[i], 1, LV_PART_INDICATOR);
+        lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_MAIN);
+        lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_INDICATOR);
 
-    /* === Right battery === */
-    /* Connected state bar - initially hidden (opa=0) */
-    right_bat_bar = lv_bar_create(screen);
-    lv_obj_set_size(right_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(right_bat_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_bar_set_range(right_bat_bar, 0, 100);
-    lv_bar_set_value(right_bat_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_color(right_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_dir(right_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_INDICATOR);
-    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_MAIN);  /* Initially hidden */
-    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_INDICATOR);
+        /* Percentage label (above bar, centered) */
+        kb_bat_pct[i] = lv_label_create(screen);
+        lv_obj_set_style_text_font(kb_bat_pct[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(kb_bat_pct[i], lv_color_white(), 0);
+        lv_obj_align(kb_bat_pct[i], LV_ALIGN_BOTTOM_MID, x_offset, KB_PCT_Y_OFFSET);
+        lv_label_set_text(kb_bat_pct[i], "0");
+        lv_obj_set_style_opa(kb_bat_pct[i], 0, 0);
 
-    /* Connected state label - initially hidden */
-    right_bat_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(right_bat_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(right_bat_label, lv_color_white(), 0);
-    lv_obj_align(right_bat_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(right_bat_label, "0");
-    lv_obj_set_style_opa(right_bat_label, 0, 0);  /* Initially hidden */
+        /* Name label (left of bar, same height as percentage) */
+        kb_bat_name[i] = lv_label_create(screen);
+        lv_obj_set_style_text_font(kb_bat_name[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(kb_bat_name[i], lv_color_hex(0x808080), 0);
+        lv_obj_align(kb_bat_name[i], LV_ALIGN_BOTTOM_MID, x_offset - bar_width/2 + KB_NAME_X_OFFSET, KB_PCT_Y_OFFSET);
+        lv_obj_set_style_text_align(kb_bat_name[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_text(kb_bat_name[i], "");
+        lv_obj_set_style_opa(kb_bat_name[i], 0, 0);
 
-    /* Disconnected state bar - initially visible */
-    right_bat_nc_bar = lv_obj_create(screen);
-    lv_obj_set_size(right_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(right_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_obj_set_style_bg_color(right_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(right_bat_nc_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(right_bat_nc_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_width(right_bat_nc_bar, 0, 0);
-    lv_obj_set_style_pad_all(right_bat_nc_bar, 0, 0);
-    lv_obj_set_style_opa(right_bat_nc_bar, 255, 0);  /* Initially visible */
+        /* Disconnected state bar */
+        kb_bat_nc_bar[i] = lv_obj_create(screen);
+        lv_obj_set_size(kb_bat_nc_bar[i], bar_width, KB_BAR_HEIGHT);
+        lv_obj_align(kb_bat_nc_bar[i], LV_ALIGN_BOTTOM_MID, x_offset, KB_BAR_Y_OFFSET);
+        lv_obj_set_style_bg_color(kb_bat_nc_bar[i], lv_color_hex(0x9e2121), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(kb_bat_nc_bar[i], 255, LV_PART_MAIN);
+        lv_obj_set_style_radius(kb_bat_nc_bar[i], 1, LV_PART_MAIN);
+        lv_obj_set_style_border_width(kb_bat_nc_bar[i], 0, 0);
+        lv_obj_set_style_pad_all(kb_bat_nc_bar[i], 0, 0);
+        /* Initially hide slots 2 and 3 (only show first 2 by default) */
+        lv_obj_set_style_opa(kb_bat_nc_bar[i], (i < 2) ? 255 : 0, 0);
 
-    /* Disconnected state label (× symbol) - initially visible */
-    right_bat_nc_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(right_bat_nc_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(right_bat_nc_label, lv_color_hex(0xe63030), 0);
-    lv_obj_align(right_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(right_bat_nc_label, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_opa(right_bat_nc_label, 255, 0);  /* Initially visible */
+        /* Disconnected state label (× symbol) */
+        kb_bat_nc_label[i] = lv_label_create(screen);
+        lv_obj_set_style_text_font(kb_bat_nc_label[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(kb_bat_nc_label[i], lv_color_hex(0xe63030), 0);
+        lv_obj_align(kb_bat_nc_label[i], LV_ALIGN_BOTTOM_MID, x_offset, KB_PCT_Y_OFFSET);
+        lv_label_set_text(kb_bat_nc_label[i], LV_SYMBOL_CLOSE);
+        lv_obj_set_style_opa(kb_bat_nc_label[i], (i < 2) ? 255 : 0, 0);
+    }
 
-    LOG_INF("[INIT] keyboard battery created");
+    LOG_INF("[INIT] keyboard battery widgets created (4 slots)");
 
     /* ===== 8. Signal Status (BOTTOM, y=220) ===== */
     LOG_INF("[INIT] Creating signal status...");
@@ -714,14 +698,45 @@ void display_update_scanner_battery(int level) {
     }
 }
 
-void display_update_layer(int layer) {
-    if (layer < 0 || layer > 9) return;
+/* Animation callback for horizontal (X) slide - for over-max label (uses align) */
+static void layer_slide_x_anim_cb(void *var, int32_t value) {
+    lv_obj_t *obj = (lv_obj_t *)var;
+    lv_obj_align(obj, LV_ALIGN_TOP_MID, value, 105);  /* Keep Y at 105, animate X offset */
+}
 
-    /* Update active layer */
-    active_layer = layer;
+/* Animation callback for absolute X position - for layer list labels */
+static void layer_pos_x_anim_cb(void *var, int32_t value) {
+    lv_obj_set_x((lv_obj_t *)var, value);
+}
 
-    int num_layers = 7;
-    for (int i = 0; i < num_layers && layer_labels[i]; i++) {
+/* Animation callback for pulse scale effect */
+static void layer_pulse_anim_cb(void *var, int32_t value) {
+    /* value goes 100 -> 130 -> 100 (percentage) */
+    lv_obj_t *label = (lv_obj_t *)var;
+    int32_t scale = (value * 256) / 100;  /* Convert to LVGL scale (256 = 100%) */
+    lv_obj_set_style_transform_scale(label, scale, 0);
+}
+
+/* Helper to create layer list widgets */
+static void create_layer_list_widgets(lv_obj_t *parent, int y_offset) {
+    int num_layers = ds_max_layers;
+    int spacing = 25;
+    int label_width = 22;
+    int start_x = 140 - ((num_layers - 1) * spacing / 2) - (label_width / 2);
+
+    for (int i = 0; i < num_layers && i < 10; i++) {
+        layer_labels[i] = lv_label_create(parent);
+        lv_obj_set_style_text_font(layer_labels[i], &lv_font_montserrat_28, 0);
+        lv_obj_set_width(layer_labels[i], label_width);
+        lv_obj_set_style_text_align(layer_labels[i], LV_TEXT_ALIGN_CENTER, 0);
+        /* Enable transform for pulse animation */
+        lv_obj_set_style_transform_pivot_x(layer_labels[i], label_width / 2, 0);
+        lv_obj_set_style_transform_pivot_y(layer_labels[i], 14, 0);  /* Half of font height */
+
+        char text[4];
+        snprintf(text, sizeof(text), "%d", i);
+        lv_label_set_text(layer_labels[i], text);
+
         if (i == active_layer) {
             lv_obj_set_style_text_color(layer_labels[i], get_layer_color(i), 0);
             lv_obj_set_style_text_opa(layer_labels[i], LV_OPA_COVER, 0);
@@ -729,7 +744,195 @@ void display_update_layer(int layer) {
             lv_obj_set_style_text_color(layer_labels[i], lv_color_make(40, 40, 40), 0);
             lv_obj_set_style_text_opa(layer_labels[i], LV_OPA_30, 0);
         }
+        lv_obj_set_pos(layer_labels[i], start_x + (i * spacing), y_offset);
     }
+}
+
+/* Helper to destroy layer list widgets */
+static void destroy_layer_list_widgets(void) {
+    for (int i = 0; i < 10; i++) {
+        if (layer_labels[i]) {
+            lv_obj_del(layer_labels[i]);
+            layer_labels[i] = NULL;
+        }
+    }
+}
+
+/* Helper to create over-max label widget */
+static void create_over_max_widget(lv_obj_t *parent, int layer, int y_offset) {
+    layer_over_max_label = lv_label_create(parent);
+    lv_obj_set_style_text_font(layer_over_max_label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(layer_over_max_label, get_layer_color(layer % 10), 0);
+    lv_obj_set_style_text_align(layer_over_max_label, LV_TEXT_ALIGN_CENTER, 0);
+    /* Enable transform for animations */
+    lv_obj_set_style_transform_pivot_x(layer_over_max_label, 30, 0);
+    lv_obj_set_style_transform_pivot_y(layer_over_max_label, 14, 0);
+
+    char text[8];
+    snprintf(text, sizeof(text), "%d", layer);
+    lv_label_set_text(layer_over_max_label, text);
+    lv_obj_align(layer_over_max_label, LV_ALIGN_TOP_MID, 0, y_offset);
+}
+
+/* Helper to destroy over-max widget */
+static void destroy_over_max_widget(void) {
+    if (layer_over_max_label) {
+        lv_obj_del(layer_over_max_label);
+        layer_over_max_label = NULL;
+    }
+}
+
+/* Callback to delete object after slide-out animation completes */
+static void slide_out_ready_cb(lv_anim_t *anim) {
+    lv_obj_t *obj = (lv_obj_t *)anim->var;
+    if (obj) {
+        lv_obj_del(obj);
+    }
+}
+
+/* Start horizontal slide-in animation
+ * from_right: true = slide from right to left, false = slide from left to right */
+static void start_slide_in_x_anim(lv_obj_t *obj, bool from_right) {
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, obj);
+    lv_anim_set_exec_cb(&anim, layer_slide_x_anim_cb);
+    int start_x = from_right ? 40 : -40;  /* Start 40px to the side */
+    lv_anim_set_values(&anim, start_x, 0);  /* Animate to center (x_offset=0) */
+    lv_anim_set_time(&anim, 150);  /* 150ms */
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_start(&anim);
+}
+
+/* Start horizontal slide-out animation with auto-delete
+ * to_left: true = slide to left, false = slide to right */
+static void start_slide_out_x_anim(lv_obj_t *obj, bool to_left) {
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, obj);
+    lv_anim_set_exec_cb(&anim, layer_slide_x_anim_cb);
+    int end_x = to_left ? -40 : 40;  /* End 40px to the side */
+    lv_anim_set_values(&anim, 0, end_x);  /* From center to side */
+    lv_anim_set_time(&anim, 80);  /* 80ms - fast disappear */
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
+    lv_anim_set_ready_cb(&anim, slide_out_ready_cb);
+    lv_anim_start(&anim);
+}
+
+/* Start pulse animation on active layer */
+static void start_pulse_anim(lv_obj_t *obj) {
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, obj);
+    lv_anim_set_exec_cb(&anim, layer_pulse_anim_cb);
+    lv_anim_set_values(&anim, 100, 125);  /* Scale 100% -> 125% */
+    lv_anim_set_time(&anim, 100);  /* 100ms expand */
+    lv_anim_set_playback_time(&anim, 100);  /* 100ms shrink back */
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&anim);
+}
+
+/* Slide in layer list labels from left */
+static void start_layer_list_slide_in(void) {
+    int num_layers = ds_max_layers;
+    int spacing = 25;
+    int label_width = 22;
+    int start_x = 140 - ((num_layers - 1) * spacing / 2) - (label_width / 2);
+    int slide_offset = 50;  /* Slide from 50px to the left */
+
+    for (int i = 0; i < num_layers && i < 10 && layer_labels[i]; i++) {
+        int target_x = start_x + (i * spacing);
+        lv_anim_t anim;
+        lv_anim_init(&anim);
+        lv_anim_set_var(&anim, layer_labels[i]);
+        lv_anim_set_exec_cb(&anim, layer_pos_x_anim_cb);
+        lv_anim_set_values(&anim, target_x - slide_offset, target_x);
+        lv_anim_set_time(&anim, 150);
+        lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+        lv_anim_start(&anim);
+    }
+}
+
+void display_update_layer(int layer) {
+    if (layer < 0 || layer > 255) return;
+
+    int prev_layer = active_layer;
+    active_layer = layer;
+
+    bool should_be_over_max = (layer >= ds_max_layers);
+    int layer_y = 105;  /* Y position for layer widgets */
+
+    /* Determine slide direction based on layer change */
+    bool going_up = (layer > prev_layer);  /* Layer increasing = slide from right */
+
+    /* Mode transition: normal -> over-max */
+    if (should_be_over_max && !layer_mode_over_max) {
+        layer_mode_over_max = true;
+
+        /* Slide-out layer list to left (animation callback will delete) */
+        for (int i = 0; i < 10; i++) {
+            if (layer_labels[i]) {
+                start_slide_out_x_anim(layer_labels[i], true);  /* to_left = true */
+                layer_labels[i] = NULL;
+            }
+        }
+
+        /* Create over-max widget with slide-in from right */
+        if (screen_obj) {
+            create_over_max_widget(screen_obj, layer, layer_y);
+            start_slide_in_x_anim(layer_over_max_label, true);  /* from_right = true */
+        }
+    }
+    /* Mode transition: over-max -> normal */
+    else if (!should_be_over_max && layer_mode_over_max) {
+        layer_mode_over_max = false;
+
+        /* Slide-out over-max widget to right (animation callback will delete) */
+        if (layer_over_max_label) {
+            start_slide_out_x_anim(layer_over_max_label, false);  /* to_left = false */
+            layer_over_max_label = NULL;
+        }
+
+        /* Create layer list with slide-in from left */
+        if (screen_obj) {
+            create_layer_list_widgets(screen_obj, layer_y);
+            start_layer_list_slide_in();
+        }
+    }
+    /* Update within over-max mode */
+    else if (layer_mode_over_max) {
+        if (prev_layer != layer && screen_obj) {
+            /* Slide out old number, slide in new number */
+            if (layer_over_max_label) {
+                /* Slide out: going_up = slide to left, going_down = slide to right */
+                start_slide_out_x_anim(layer_over_max_label, going_up);
+                layer_over_max_label = NULL;
+            }
+
+            /* Create new label and slide in from opposite direction */
+            create_over_max_widget(screen_obj, layer, layer_y);
+            start_slide_in_x_anim(layer_over_max_label, going_up);  /* from_right if going_up */
+        }
+    }
+    else {
+        /* Update normal layer list - just update colors, pulse on active */
+        for (int i = 0; i < ds_max_layers && i < 10 && layer_labels[i]; i++) {
+            if (i == active_layer) {
+                lv_obj_set_style_text_color(layer_labels[i], get_layer_color(i), 0);
+                lv_obj_set_style_text_opa(layer_labels[i], LV_OPA_COVER, 0);
+
+                /* Pulse animation on active layer change */
+                if (prev_layer != layer) {
+                    start_pulse_anim(layer_labels[i]);
+                }
+            } else {
+                lv_obj_set_style_text_color(layer_labels[i], lv_color_make(40, 40, 40), 0);
+                lv_obj_set_style_text_opa(layer_labels[i], LV_OPA_30, 0);
+            }
+        }
+    }
+
+    last_active_layer = layer;
 }
 
 void display_update_wpm(int wpm) {
@@ -806,67 +1009,173 @@ void display_update_modifiers(uint8_t mods) {
     }
 }
 
+/* Helper function to reposition battery widgets based on count */
+static void reposition_battery_widgets(int count) {
+    if (count < 1) count = 1;
+    if (count > MAX_KB_BATTERIES) count = MAX_KB_BATTERIES;
+
+    /* Select layout based on count */
+    static const int16_t kb_x_offsets_1[] = {0, 0, 0, 0};
+    static const int16_t kb_x_offsets_2[] = {-70, 70, 0, 0};
+    static const int16_t kb_x_offsets_3[] = {-90, 0, 90, 0};
+    static const int16_t kb_x_offsets_4[] = {-100, -35, 35, 100};
+
+    const int16_t *x_offsets;
+    int16_t bar_width;
+
+    switch (count) {
+    case 1:
+        x_offsets = kb_x_offsets_1;
+        bar_width = 165;  /* 1.5x of standard width */
+        break;
+    case 2:
+        x_offsets = kb_x_offsets_2;
+        bar_width = 110;
+        break;
+    case 3:
+        x_offsets = kb_x_offsets_3;
+        bar_width = 70;
+        break;
+    case 4:
+    default:
+        x_offsets = kb_x_offsets_4;
+        bar_width = 52;
+        break;
+    }
+
+    /* Get name labels based on count */
+    const char **names = NULL;
+    if (count == 2) names = battery_names_2;
+    else if (count == 3) names = battery_names_3;
+    else if (count == 4) names = battery_names_4;
+
+    #define KB_BAR_Y_OFFSET_R    -33
+    #define KB_PCT_Y_OFFSET_R    -42
+    #define KB_NAME_X_OFFSET_R   0
+
+    for (int i = 0; i < MAX_KB_BATTERIES; i++) {
+        bool visible = (i < count);
+        int16_t x_off = x_offsets[i];
+
+        /* Reposition bar */
+        if (kb_bat_bar[i]) {
+            lv_obj_set_size(kb_bat_bar[i], bar_width, 4);
+            lv_obj_align(kb_bat_bar[i], LV_ALIGN_BOTTOM_MID, x_off, KB_BAR_Y_OFFSET_R);
+        }
+
+        /* Reposition percentage label */
+        if (kb_bat_pct[i]) {
+            lv_obj_align(kb_bat_pct[i], LV_ALIGN_BOTTOM_MID, x_off, KB_PCT_Y_OFFSET_R);
+        }
+
+        /* Reposition and set name label */
+        if (kb_bat_name[i]) {
+            lv_obj_align(kb_bat_name[i], LV_ALIGN_BOTTOM_MID, x_off - bar_width/2 + KB_NAME_X_OFFSET_R, KB_PCT_Y_OFFSET_R);
+            if (visible && names && names[i]) {
+                lv_label_set_text(kb_bat_name[i], names[i]);
+            } else {
+                lv_label_set_text(kb_bat_name[i], "");
+            }
+        }
+
+        /* Reposition nc bar */
+        if (kb_bat_nc_bar[i]) {
+            lv_obj_set_size(kb_bat_nc_bar[i], bar_width, 4);
+            lv_obj_align(kb_bat_nc_bar[i], LV_ALIGN_BOTTOM_MID, x_off, KB_BAR_Y_OFFSET_R);
+            /* Hide unused slots, but keep visible slots ready (visibility controlled by update function) */
+            if (!visible) {
+                lv_obj_set_style_opa(kb_bat_nc_bar[i], 0, 0);
+            }
+            lv_obj_invalidate(kb_bat_nc_bar[i]);  /* Force redraw */
+        }
+
+        /* Reposition nc label */
+        if (kb_bat_nc_label[i]) {
+            lv_obj_align(kb_bat_nc_label[i], LV_ALIGN_BOTTOM_MID, x_off, KB_PCT_Y_OFFSET_R);
+            /* Hide unused slots */
+            if (!visible) {
+                lv_obj_set_style_opa(kb_bat_nc_label[i], 0, 0);
+            }
+            lv_obj_invalidate(kb_bat_nc_label[i]);  /* Force redraw */
+        }
+
+        /* Force redraw for bar, pct, name */
+        if (kb_bat_bar[i]) lv_obj_invalidate(kb_bat_bar[i]);
+        if (kb_bat_pct[i]) lv_obj_invalidate(kb_bat_pct[i]);
+        if (kb_bat_name[i]) lv_obj_invalidate(kb_bat_name[i]);
+    }
+
+    LOG_INF("Battery widgets repositioned for count=%d", count);
+}
+
+void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3) {
+    int values[MAX_KB_BATTERIES] = {bat0, bat1, bat2, bat3};
+
+    /* Count active batteries */
+    int count = 0;
+    for (int i = 0; i < MAX_KB_BATTERIES; i++) {
+        battery_values[i] = values[i];
+        if (values[i] > 0) count++;
+    }
+
+    /* If count changed, reposition widgets */
+    if (count != active_battery_count && count > 0) {
+        active_battery_count = count;
+        reposition_battery_widgets(count);
+    }
+
+    /* Update each battery slot */
+    for (int i = 0; i < MAX_KB_BATTERIES; i++) {
+        bool slot_visible = (i < active_battery_count);
+        int val = values[i];
+
+        if (slot_visible && val > 0) {
+            /* Connected: show bar and percentage, hide × */
+            if (kb_bat_nc_bar[i]) lv_obj_set_style_opa(kb_bat_nc_bar[i], 0, 0);
+            if (kb_bat_nc_label[i]) lv_obj_set_style_opa(kb_bat_nc_label[i], 0, 0);
+            if (kb_bat_bar[i]) {
+                lv_obj_set_style_opa(kb_bat_bar[i], 255, LV_PART_MAIN);
+                lv_obj_set_style_opa(kb_bat_bar[i], 255, LV_PART_INDICATOR);
+                lv_bar_set_value(kb_bat_bar[i], val, LV_ANIM_OFF);
+                lv_obj_set_style_bg_color(kb_bat_bar[i], get_keyboard_battery_color(val), LV_PART_INDICATOR);
+            }
+            if (kb_bat_pct[i]) {
+                lv_obj_set_style_opa(kb_bat_pct[i], 255, 0);
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", val);
+                lv_label_set_text(kb_bat_pct[i], buf);
+                lv_obj_set_style_text_color(kb_bat_pct[i], get_keyboard_battery_color(val), 0);
+            }
+            if (kb_bat_name[i]) {
+                lv_obj_set_style_opa(kb_bat_name[i], 255, 0);
+            }
+        } else if (slot_visible) {
+            /* Disconnected: show ×, hide bar and percentage */
+            if (kb_bat_bar[i]) {
+                lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_MAIN);
+                lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_INDICATOR);
+            }
+            if (kb_bat_pct[i]) lv_obj_set_style_opa(kb_bat_pct[i], 0, 0);
+            if (kb_bat_name[i]) lv_obj_set_style_opa(kb_bat_name[i], 255, 0);
+            if (kb_bat_nc_bar[i]) lv_obj_set_style_opa(kb_bat_nc_bar[i], 255, 0);
+            if (kb_bat_nc_label[i]) lv_obj_set_style_opa(kb_bat_nc_label[i], 255, 0);
+        } else {
+            /* Slot not visible (beyond active count) - hide everything */
+            if (kb_bat_bar[i]) {
+                lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_MAIN);
+                lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_INDICATOR);
+            }
+            if (kb_bat_pct[i]) lv_obj_set_style_opa(kb_bat_pct[i], 0, 0);
+            if (kb_bat_name[i]) lv_obj_set_style_opa(kb_bat_name[i], 0, 0);
+            if (kb_bat_nc_bar[i]) lv_obj_set_style_opa(kb_bat_nc_bar[i], 0, 0);
+            if (kb_bat_nc_label[i]) lv_obj_set_style_opa(kb_bat_nc_label[i], 0, 0);
+        }
+    }
+}
+
+/* Legacy 2-battery interface for backward compatibility */
 void display_update_keyboard_battery(int left, int right) {
-    battery_left = left;
-    battery_right = right;
-
-    /* Left battery - toggle between connected/disconnected state */
-    if (left > 0) {
-        /* Connected: show bar and percentage, hide × */
-        if (left_bat_nc_bar) lv_obj_set_style_opa(left_bat_nc_bar, 0, 0);
-        if (left_bat_nc_label) lv_obj_set_style_opa(left_bat_nc_label, 0, 0);
-        if (left_bat_bar) {
-            lv_obj_set_style_opa(left_bat_bar, 255, LV_PART_MAIN);
-            lv_obj_set_style_opa(left_bat_bar, 255, LV_PART_INDICATOR);
-            lv_bar_set_value(left_bat_bar, left, LV_ANIM_OFF);
-            lv_obj_set_style_bg_color(left_bat_bar, get_keyboard_battery_color(left), LV_PART_INDICATOR);
-        }
-        if (left_bat_label) {
-            lv_obj_set_style_opa(left_bat_label, 255, 0);
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%d", left);
-            lv_label_set_text(left_bat_label, buf);
-            lv_obj_set_style_text_color(left_bat_label, get_keyboard_battery_color(left), 0);
-        }
-    } else {
-        /* Disconnected: show ×, hide bar and percentage */
-        if (left_bat_bar) {
-            lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_MAIN);
-            lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_INDICATOR);
-        }
-        if (left_bat_label) lv_obj_set_style_opa(left_bat_label, 0, 0);
-        if (left_bat_nc_bar) lv_obj_set_style_opa(left_bat_nc_bar, 255, 0);
-        if (left_bat_nc_label) lv_obj_set_style_opa(left_bat_nc_label, 255, 0);
-    }
-
-    /* Right battery - toggle between connected/disconnected state */
-    if (right > 0) {
-        /* Connected: show bar and percentage, hide × */
-        if (right_bat_nc_bar) lv_obj_set_style_opa(right_bat_nc_bar, 0, 0);
-        if (right_bat_nc_label) lv_obj_set_style_opa(right_bat_nc_label, 0, 0);
-        if (right_bat_bar) {
-            lv_obj_set_style_opa(right_bat_bar, 255, LV_PART_MAIN);
-            lv_obj_set_style_opa(right_bat_bar, 255, LV_PART_INDICATOR);
-            lv_bar_set_value(right_bat_bar, right, LV_ANIM_OFF);
-            lv_obj_set_style_bg_color(right_bat_bar, get_keyboard_battery_color(right), LV_PART_INDICATOR);
-        }
-        if (right_bat_label) {
-            lv_obj_set_style_opa(right_bat_label, 255, 0);
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%d", right);
-            lv_label_set_text(right_bat_label, buf);
-            lv_obj_set_style_text_color(right_bat_label, get_keyboard_battery_color(right), 0);
-        }
-    } else {
-        /* Disconnected: show ×, hide bar and percentage */
-        if (right_bat_bar) {
-            lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_MAIN);
-            lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_INDICATOR);
-        }
-        if (right_bat_label) lv_obj_set_style_opa(right_bat_label, 0, 0);
-        if (right_bat_nc_bar) lv_obj_set_style_opa(right_bat_nc_bar, 255, 0);
-        if (right_bat_nc_label) lv_obj_set_style_opa(right_bat_nc_label, 255, 0);
-    }
+    display_update_keyboard_battery_4(left, right, 0, 0);
 }
 
 void display_update_signal(int8_t rssi_val, float rate) {
@@ -899,25 +1208,34 @@ void display_update_signal(int8_t rssi_val, float rate) {
 static void destroy_main_screen_widgets(void) {
     LOG_INF("Destroying main screen widgets...");
 
+    /* Cancel any running layer animations BEFORE deleting objects */
+    for (int i = 0; i < 10; i++) {
+        if (layer_labels[i]) {
+            lv_anim_del(layer_labels[i], NULL);  /* Cancel all animations on this object */
+        }
+    }
+    if (layer_over_max_label) {
+        lv_anim_del(layer_over_max_label, NULL);
+    }
+
     if (rate_label) { lv_obj_del(rate_label); rate_label = NULL; }
     if (rssi_label) { lv_obj_del(rssi_label); rssi_label = NULL; }
     if (rssi_bar) { lv_obj_del(rssi_bar); rssi_bar = NULL; }
     if (rx_title_label) { lv_obj_del(rx_title_label); rx_title_label = NULL; }
     if (channel_label) { lv_obj_del(channel_label); channel_label = NULL; }
-    /* Keyboard battery - nc elements */
-    if (right_bat_nc_label) { lv_obj_del(right_bat_nc_label); right_bat_nc_label = NULL; }
-    if (right_bat_nc_bar) { lv_obj_del(right_bat_nc_bar); right_bat_nc_bar = NULL; }
-    if (left_bat_nc_label) { lv_obj_del(left_bat_nc_label); left_bat_nc_label = NULL; }
-    if (left_bat_nc_bar) { lv_obj_del(left_bat_nc_bar); left_bat_nc_bar = NULL; }
-    /* Keyboard battery - connected elements */
-    if (right_bat_bar) { lv_obj_del(right_bat_bar); right_bat_bar = NULL; }
-    if (right_bat_label) { lv_obj_del(right_bat_label); right_bat_label = NULL; }
-    if (left_bat_bar) { lv_obj_del(left_bat_bar); left_bat_bar = NULL; }
-    if (left_bat_label) { lv_obj_del(left_bat_label); left_bat_label = NULL; }
+    /* Keyboard battery - delete all 4 slots */
+    for (int i = 0; i < MAX_KB_BATTERIES; i++) {
+        if (kb_bat_nc_label[i]) { lv_obj_del(kb_bat_nc_label[i]); kb_bat_nc_label[i] = NULL; }
+        if (kb_bat_nc_bar[i]) { lv_obj_del(kb_bat_nc_bar[i]); kb_bat_nc_bar[i] = NULL; }
+        if (kb_bat_name[i]) { lv_obj_del(kb_bat_name[i]); kb_bat_name[i] = NULL; }
+        if (kb_bat_pct[i]) { lv_obj_del(kb_bat_pct[i]); kb_bat_pct[i] = NULL; }
+        if (kb_bat_bar[i]) { lv_obj_del(kb_bat_bar[i]); kb_bat_bar[i] = NULL; }
+    }
     if (modifier_label) { lv_obj_del(modifier_label); modifier_label = NULL; }
     for (int i = 0; i < 10; i++) {
         if (layer_labels[i]) { lv_obj_del(layer_labels[i]); layer_labels[i] = NULL; }
     }
+    if (layer_over_max_label) { lv_obj_del(layer_over_max_label); layer_over_max_label = NULL; }
     if (layer_title_label) { lv_obj_del(layer_title_label); layer_title_label = NULL; }
     if (ble_profile_label) { lv_obj_del(ble_profile_label); ble_profile_label = NULL; }
     if (transport_label) { lv_obj_del(transport_label); transport_label = NULL; }
@@ -926,6 +1244,10 @@ static void destroy_main_screen_widgets(void) {
     if (scanner_bat_pct) { lv_obj_del(scanner_bat_pct); scanner_bat_pct = NULL; }
     if (scanner_bat_icon) { lv_obj_del(scanner_bat_icon); scanner_bat_icon = NULL; }
     if (device_name_label) { lv_obj_del(device_name_label); device_name_label = NULL; }
+
+    /* Reset state for proper reinitialization */
+    layer_mode_over_max = false;
+    active_battery_count = 0;  /* Force reposition on next update */
 
     LOG_INF("Main screen widgets destroyed");
 }
@@ -993,21 +1315,13 @@ static void create_main_screen_widgets(void) {
     lv_label_set_text(layer_title_label, "Layer");
     lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 82);  /* 3px up */
 
-    int num_layers = ds_max_layers, spacing = 25;  /* Use setting from Display Settings */
-    int label_width = 20;  /* Fixed width for center alignment */
-    int start_x = 140 - ((num_layers - 1) * spacing / 2) - (label_width / 2);
-    for (int i = 0; i < num_layers; i++) {
-        layer_labels[i] = lv_label_create(screen_obj);
-        lv_obj_set_style_text_font(layer_labels[i], &lv_font_montserrat_28, 0);
-        lv_obj_set_width(layer_labels[i], label_width);
-        lv_obj_set_style_text_align(layer_labels[i], LV_TEXT_ALIGN_CENTER, 0);
-        char text[2] = {(char)('0' + i), '\0'};
-        lv_label_set_text(layer_labels[i], text);
-        lv_obj_set_style_text_color(layer_labels[i],
-            (i == active_layer) ? get_layer_color(i) : lv_color_make(40, 40, 40), 0);
-        lv_obj_set_style_text_opa(layer_labels[i],
-            (i == active_layer) ? LV_OPA_COVER : LV_OPA_30, 0);
-        lv_obj_set_pos(layer_labels[i], start_x + (i * spacing), 105);
+    /* Create layer display - either list or over-max based on active_layer */
+    if (active_layer >= ds_max_layers) {
+        layer_mode_over_max = true;
+        create_over_max_widget(screen_obj, active_layer, 105);
+    } else {
+        layer_mode_over_max = false;
+        create_layer_list_widgets(screen_obj, 105);
     }
 
     modifier_label = lv_label_create(screen_obj);
@@ -1017,95 +1331,66 @@ static void create_main_screen_widgets(void) {
     lv_label_set_text(modifier_label, "");
     lv_obj_align(modifier_label, LV_ALIGN_TOP_MID, 0, 145);
 
-    /* === Left battery (using BOTTOM_MID alignment) === */
-    /* Connected state bar - initially hidden */
-    left_bat_bar = lv_bar_create(screen_obj);
-    lv_obj_set_size(left_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(left_bat_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_bar_set_range(left_bat_bar, 0, 100);
-    lv_bar_set_value(left_bat_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(left_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(left_bat_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_color(left_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_dir(left_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(left_bat_bar, 1, LV_PART_INDICATOR);
-    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_opa(left_bat_bar, 0, LV_PART_INDICATOR);
+    /* === Keyboard battery widgets (4 slots, dynamic layout) === */
+    static const int16_t kb_x_offsets_2_r[] = {-70, 70, 0, 0};
+    int16_t bar_width_r = 110;  /* Default to 2-battery layout */
 
-    /* Connected state label - initially hidden */
-    left_bat_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(left_bat_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(left_bat_label, lv_color_white(), 0);
-    lv_obj_align(left_bat_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(left_bat_label, "0");
-    lv_obj_set_style_opa(left_bat_label, 0, 0);
+    for (int i = 0; i < MAX_KB_BATTERIES; i++) {
+        int16_t x_offset_r = (i < 2) ? kb_x_offsets_2_r[i] : 0;
 
-    /* Disconnected state bar - initially visible */
-    left_bat_nc_bar = lv_obj_create(screen_obj);
-    lv_obj_set_size(left_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(left_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_obj_set_style_bg_color(left_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(left_bat_nc_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(left_bat_nc_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_width(left_bat_nc_bar, 0, 0);
-    lv_obj_set_style_pad_all(left_bat_nc_bar, 0, 0);
-    lv_obj_set_style_opa(left_bat_nc_bar, 255, 0);
+        /* Connected state bar */
+        kb_bat_bar[i] = lv_bar_create(screen_obj);
+        lv_obj_set_size(kb_bat_bar[i], bar_width_r, 4);
+        lv_obj_align(kb_bat_bar[i], LV_ALIGN_BOTTOM_MID, x_offset_r, -33);
+        lv_bar_set_range(kb_bat_bar[i], 0, 100);
+        lv_bar_set_value(kb_bat_bar[i], 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(kb_bat_bar[i], lv_color_hex(0x202020), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(kb_bat_bar[i], 255, LV_PART_MAIN);
+        lv_obj_set_style_radius(kb_bat_bar[i], 1, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(kb_bat_bar[i], lv_color_hex(0x909090), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(kb_bat_bar[i], 255, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_grad_color(kb_bat_bar[i], lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_grad_dir(kb_bat_bar[i], LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(kb_bat_bar[i], 1, LV_PART_INDICATOR);
+        lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_MAIN);
+        lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_INDICATOR);
 
-    /* Disconnected state label (× symbol) - initially visible */
-    left_bat_nc_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(left_bat_nc_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(left_bat_nc_label, lv_color_hex(0xe63030), 0);
-    lv_obj_align(left_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_LEFT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(left_bat_nc_label, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_opa(left_bat_nc_label, 255, 0);
+        /* Percentage label */
+        kb_bat_pct[i] = lv_label_create(screen_obj);
+        lv_obj_set_style_text_font(kb_bat_pct[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(kb_bat_pct[i], lv_color_white(), 0);
+        lv_obj_align(kb_bat_pct[i], LV_ALIGN_BOTTOM_MID, x_offset_r, -42);
+        lv_label_set_text(kb_bat_pct[i], "0");
+        lv_obj_set_style_opa(kb_bat_pct[i], 0, 0);
 
-    /* === Right battery (using BOTTOM_MID alignment) === */
-    /* Connected state bar - initially hidden */
-    right_bat_bar = lv_bar_create(screen_obj);
-    lv_obj_set_size(right_bat_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(right_bat_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_bar_set_range(right_bat_bar, 0, 100);
-    lv_bar_set_value(right_bat_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x202020), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(right_bat_bar, lv_color_hex(0x909090), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(right_bat_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_color(right_bat_bar, lv_color_hex(0xf0f0f0), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_grad_dir(right_bat_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(right_bat_bar, 1, LV_PART_INDICATOR);
-    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_opa(right_bat_bar, 0, LV_PART_INDICATOR);
+        /* Name label */
+        kb_bat_name[i] = lv_label_create(screen_obj);
+        lv_obj_set_style_text_font(kb_bat_name[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(kb_bat_name[i], lv_color_hex(0x808080), 0);
+        lv_obj_align(kb_bat_name[i], LV_ALIGN_BOTTOM_MID, x_offset_r - bar_width_r/2, -42);
+        lv_obj_set_style_text_align(kb_bat_name[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_text(kb_bat_name[i], "");
+        lv_obj_set_style_opa(kb_bat_name[i], 0, 0);
 
-    /* Connected state label - initially hidden */
-    right_bat_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(right_bat_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(right_bat_label, lv_color_white(), 0);
-    lv_obj_align(right_bat_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(right_bat_label, "0");
-    lv_obj_set_style_opa(right_bat_label, 0, 0);
+        /* Disconnected state bar */
+        kb_bat_nc_bar[i] = lv_obj_create(screen_obj);
+        lv_obj_set_size(kb_bat_nc_bar[i], bar_width_r, 4);
+        lv_obj_align(kb_bat_nc_bar[i], LV_ALIGN_BOTTOM_MID, x_offset_r, -33);
+        lv_obj_set_style_bg_color(kb_bat_nc_bar[i], lv_color_hex(0x9e2121), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(kb_bat_nc_bar[i], 255, LV_PART_MAIN);
+        lv_obj_set_style_radius(kb_bat_nc_bar[i], 1, LV_PART_MAIN);
+        lv_obj_set_style_border_width(kb_bat_nc_bar[i], 0, 0);
+        lv_obj_set_style_pad_all(kb_bat_nc_bar[i], 0, 0);
+        lv_obj_set_style_opa(kb_bat_nc_bar[i], (i < 2) ? 255 : 0, 0);
 
-    /* Disconnected state bar - initially visible */
-    right_bat_nc_bar = lv_obj_create(screen_obj);
-    lv_obj_set_size(right_bat_nc_bar, KB_BAR_WIDTH, KB_BAR_HEIGHT);
-    lv_obj_align(right_bat_nc_bar, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_BAR_Y_OFFSET);
-    lv_obj_set_style_bg_color(right_bat_nc_bar, lv_color_hex(0x9e2121), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(right_bat_nc_bar, 255, LV_PART_MAIN);
-    lv_obj_set_style_radius(right_bat_nc_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_width(right_bat_nc_bar, 0, 0);
-    lv_obj_set_style_pad_all(right_bat_nc_bar, 0, 0);
-    lv_obj_set_style_opa(right_bat_nc_bar, 255, 0);
-
-    /* Disconnected state label (× symbol) - initially visible */
-    right_bat_nc_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(right_bat_nc_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(right_bat_nc_label, lv_color_hex(0xe63030), 0);
-    lv_obj_align(right_bat_nc_label, LV_ALIGN_BOTTOM_MID, KB_RIGHT_X_OFFSET, KB_LABEL_Y_OFFSET);
-    lv_label_set_text(right_bat_nc_label, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_opa(right_bat_nc_label, 255, 0);
+        /* Disconnected state label */
+        kb_bat_nc_label[i] = lv_label_create(screen_obj);
+        lv_obj_set_style_text_font(kb_bat_nc_label[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(kb_bat_nc_label[i], lv_color_hex(0xe63030), 0);
+        lv_obj_align(kb_bat_nc_label[i], LV_ALIGN_BOTTOM_MID, x_offset_r, -42);
+        lv_label_set_text(kb_bat_nc_label[i], LV_SYMBOL_CLOSE);
+        lv_obj_set_style_opa(kb_bat_nc_label[i], (i < 2) ? 255 : 0, 0);
+    }
 
     channel_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(channel_label, &lv_font_montserrat_12, 0);
@@ -1152,7 +1437,22 @@ static void create_main_screen_widgets(void) {
     display_update_connection(usb_ready, ble_connected, ble_bonded, ble_profile);
     display_update_layer(active_layer);
     display_update_modifiers(cached_modifiers);
-    display_update_keyboard_battery(battery_left, battery_right);
+
+    /* Force battery widget reposition based on cached values */
+    /* Count how many batteries have non-zero values */
+    int cached_count = 0;
+    for (int i = 0; i < MAX_KB_BATTERIES; i++) {
+        if (battery_values[i] > 0) cached_count++;
+    }
+    if (cached_count > 0) {
+        /* Force reposition with cached count */
+        active_battery_count = cached_count;
+        reposition_battery_widgets(cached_count);
+        LOG_INF("Battery widgets repositioned for cached count=%d", cached_count);
+    }
+    /* Now update battery display with values */
+    display_update_keyboard_battery_4(battery_values[0], battery_values[1], battery_values[2], battery_values[3]);
+
     display_update_signal(rssi, rate_hz);
 
     LOG_INF("Cached values restored");
@@ -1670,6 +1970,7 @@ static void destroy_system_settings_widgets(void) {
     if (ss_nav_hint) { lv_obj_del(ss_nav_hint); ss_nav_hint = NULL; }
     if (ss_reset_btn) { lv_obj_del(ss_reset_btn); ss_reset_btn = NULL; }
     if (ss_bootloader_btn) { lv_obj_del(ss_bootloader_btn); ss_bootloader_btn = NULL; }
+    if (ss_version_label) { lv_obj_del(ss_version_label); ss_version_label = NULL; }
     if (ss_title_label) { lv_obj_del(ss_title_label); ss_title_label = NULL; }
     LOG_INF("System settings widgets destroyed");
 }
@@ -1684,6 +1985,13 @@ static void create_system_settings_widgets(void) {
     lv_obj_set_style_text_color(ss_title_label, lv_color_white(), 0);
     lv_label_set_text(ss_title_label, "Quick Actions");
     lv_obj_align(ss_title_label, LV_ALIGN_TOP_MID, 0, 20);
+
+    /* Version label - gray, small, centered between title and bootloader button */
+    ss_version_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(ss_version_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(ss_version_label, lv_color_hex(0x808080), 0);
+    lv_label_set_text(ss_version_label, "Prospector Scanner v2.1b");
+    lv_obj_align(ss_version_label, LV_ALIGN_TOP_MID, 0, 52);
 
     /* Bootloader button (blue) - position matches original system_settings_widget.c */
     ss_bootloader_btn = lv_btn_create(screen_obj);

@@ -66,6 +66,7 @@ extern void display_update_wpm(int wpm);
 extern void display_update_connection(bool usb_ready, bool ble_connected, bool ble_bonded, int profile);
 extern void display_update_modifiers(uint8_t mods);
 extern void display_update_keyboard_battery(int left, int right);
+extern void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3);
 extern void display_update_signal(int8_t rssi, float rate_hz);
 extern void display_update_scanner_battery(int level);
 
@@ -191,15 +192,28 @@ static void display_update_work_handler(struct k_work *work) {
 
     display_update_modifiers(data.modifier_flags);
 
-    /* For split keyboards, peripheral_battery[0] = left, [1] = right */
-    int left_bat = data.peripheral_battery[0];
-    int right_bat = data.peripheral_battery[1];
-    /* If no peripheral batteries, use main battery */
-    if (left_bat == 0 && right_bat == 0) {
-        left_bat = data.battery_level;
-        right_bat = data.battery_level;
+    /* Battery layout:
+     * - battery_level = Central/Standalone battery
+     * - peripheral_battery[0] = Left/First peripheral
+     * - peripheral_battery[1] = Right/Aux peripheral
+     * - peripheral_battery[2] = Third device
+     *
+     * Keyboard side manages order via CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE.
+     * Display shows: 1 battery (no label), 2 (L/R), 3 (L/R/Aux), 4 (L/R/A1/A2)
+     */
+    int bat0 = data.battery_level;          /* Central/Main battery */
+    int bat1 = data.peripheral_battery[0];  /* Peripheral 1 */
+    int bat2 = data.peripheral_battery[1];  /* Peripheral 2 / Aux */
+    int bat3 = data.peripheral_battery[2];  /* Peripheral 3 */
+
+    /* For standalone keyboards (no peripherals), show single battery */
+    if (bat1 == 0 && bat2 == 0 && bat3 == 0) {
+        /* Only main battery - pass as single value */
+        display_update_keyboard_battery_4(bat0, 0, 0, 0);
+    } else {
+        /* Split or multi-device - pass all batteries */
+        display_update_keyboard_battery_4(bat0, bat1, bat2, bat3);
     }
-    display_update_keyboard_battery(left_bat, right_bat);
 
     /* Calculate reception rate */
     last_rssi = rssi;
