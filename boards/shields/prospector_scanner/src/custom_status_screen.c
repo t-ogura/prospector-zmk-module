@@ -857,7 +857,12 @@ void display_update_layer(int layer) {
     if (layer < 0 || layer > 255) return;
 
     int prev_layer = active_layer;
-    active_layer = layer;
+    active_layer = layer;  /* Always cache the value */
+
+    /* Only update UI when on main screen */
+    if (current_screen != SCREEN_MAIN) {
+        return;
+    }
 
     bool should_be_over_max = (layer >= ds_max_layers);
     int layer_y = 105;  /* Y position for layer widgets */
