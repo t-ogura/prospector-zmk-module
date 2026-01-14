@@ -476,7 +476,7 @@ static void build_manufacturer_payload(void) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     manufacturer_data.device_role = ZMK_DEVICE_ROLE_CENTRAL;
     manufacturer_data.device_index = 0; // Central is always index 0
-    
+
     // Handle battery placement based on central side configuration
     // Default to "RIGHT" if not configured (backward compatibility)
     const char *central_side = "RIGHT";
@@ -484,18 +484,36 @@ static void build_manufacturer_payload(void) {
     central_side = CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE;
 #endif
 
+    // Peripheral index mapping (backward compatible defaults)
+#ifndef CONFIG_ZMK_STATUS_ADV_HALF_PERIPHERAL
+#define CONFIG_ZMK_STATUS_ADV_HALF_PERIPHERAL 0
+#endif
+#ifndef CONFIG_ZMK_STATUS_ADV_AUX1_PERIPHERAL
+#define CONFIG_ZMK_STATUS_ADV_AUX1_PERIPHERAL 1
+#endif
+#ifndef CONFIG_ZMK_STATUS_ADV_AUX2_PERIPHERAL
+#define CONFIG_ZMK_STATUS_ADV_AUX2_PERIPHERAL 2
+#endif
+
+    // Get peripheral batteries using configurable indices
+    uint8_t half_battery = peripheral_batteries[CONFIG_ZMK_STATUS_ADV_HALF_PERIPHERAL];
+    uint8_t aux1_battery = peripheral_batteries[CONFIG_ZMK_STATUS_ADV_AUX1_PERIPHERAL];
+    uint8_t aux2_battery = peripheral_batteries[CONFIG_ZMK_STATUS_ADV_AUX2_PERIPHERAL];
+
     if (strcmp(central_side, "LEFT") == 0) {
         // Central is on LEFT: Scanner expects battery_level=Right, peripheral_battery[0]=Left
-        // So we swap: battery_level gets peripheral, peripheral_battery[0] gets central
+        // So we swap: battery_level gets peripheral (half), peripheral_battery[0] gets central
         uint8_t central_battery = battery_level;
-        manufacturer_data.battery_level = peripheral_batteries[0]; // Right (peripheral) -> battery_level
+        manufacturer_data.battery_level = half_battery;           // Right (peripheral half) -> battery_level
         manufacturer_data.peripheral_battery[0] = central_battery; // Left (central) -> peripheral_battery[0]
-        manufacturer_data.peripheral_battery[1] = peripheral_batteries[1]; // Aux if exists
-        manufacturer_data.peripheral_battery[2] = peripheral_batteries[2]; // Third peripheral
+        manufacturer_data.peripheral_battery[1] = aux1_battery;    // Aux1 (e.g., trackball)
+        manufacturer_data.peripheral_battery[2] = aux2_battery;    // Aux2
     } else {
         // Central is on RIGHT (default): Scanner expects battery_level=Right, peripheral_battery[0]=Left
-        // This matches naturally: battery_level=central(right), peripheral_battery[0]=peripheral(left)
-        memcpy(manufacturer_data.peripheral_battery, peripheral_batteries, 3);
+        // battery_level=central(right), peripheral_battery[0]=peripheral half(left)
+        manufacturer_data.peripheral_battery[0] = half_battery;    // Left (peripheral half)
+        manufacturer_data.peripheral_battery[1] = aux1_battery;    // Aux1 (e.g., trackball)
+        manufacturer_data.peripheral_battery[2] = aux2_battery;    // Aux2
     }
            
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)

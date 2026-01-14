@@ -98,6 +98,38 @@ config ZMK_STATUS_ADV_CENTRAL_SIDE
       LEFT: Central is on the left side (e.g. some keyboards like Sweep)
       This determines the battery display position in scanner devices.
 
+config ZMK_STATUS_ADV_HALF_PERIPHERAL
+    int "Peripheral index for the other keyboard half"
+    default 0
+    range 0 2
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Which peripheral index to display in the keyboard half slot
+      (opposite side of central). Default is 0 (first connected peripheral).
+
+      Use this when the peripheral connection order doesn't match the
+      physical keyboard layout (e.g., after settings_reset, trackball
+      connected before the keyboard half).
+
+config ZMK_STATUS_ADV_AUX1_PERIPHERAL
+    int "Peripheral index for Aux1 slot"
+    default 1
+    range 0 2
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Which peripheral index to display in the Aux1 slot.
+      Typically used for trackball or additional peripheral device.
+      Default is 1 (second connected peripheral).
+
+config ZMK_STATUS_ADV_AUX2_PERIPHERAL
+    int "Peripheral index for Aux2 slot"
+    default 2
+    range 0 2
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Which peripheral index to display in the Aux2 slot.
+      Default is 2 (third connected peripheral).
+
 config PROSPECTOR_MODE_SCANNER
     bool "Enable Prospector Scanner Mode"
     default n
