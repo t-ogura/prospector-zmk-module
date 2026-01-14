@@ -8,6 +8,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zmk/status_advertisement.h>
 #include <lvgl.h>
 
@@ -57,18 +58,73 @@ static int selected_keyboard = 0;
 static struct k_mutex data_mutex;
 static bool mutex_initialized = false;
 
-/* ========== External Widget Update Functions ========== */
-/* These are implemented in custom_status_screen.c */
+/* ========== Pending Display Data (thread-safe flag-based update) ========== */
+/* Work queue sets data + flag, LVGL timer in main thread processes it */
 
-extern void display_update_device_name(const char *name);
-extern void display_update_layer(int layer);
-extern void display_update_wpm(int wpm);
-extern void display_update_connection(bool usb_ready, bool ble_connected, bool ble_bonded, int profile);
-extern void display_update_modifiers(uint8_t mods);
-extern void display_update_keyboard_battery(int left, int right);
-extern void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3);
-extern void display_update_signal(int8_t rssi, float rate_hz);
-extern void display_update_scanner_battery(int level);
+struct pending_display_data {
+    /* Flags - set by work queue, cleared by LVGL timer */
+    volatile bool update_pending;
+    volatile bool signal_update_pending;  /* Signal widget updates separately (1Hz) */
+
+    /* Cached data for LVGL update */
+    char device_name[MAX_NAME_LEN];
+    int layer;
+    int wpm;
+    bool usb_ready;
+    bool ble_connected;
+    bool ble_bonded;
+    int profile;
+    uint8_t modifiers;
+    int bat[4];
+    int8_t rssi;
+    float rate_hz;
+    int scanner_battery;
+    bool scanner_battery_pending;
+};
+
+static struct pending_display_data pending_data = {0};
+
+/* Getter for pending data - called from LVGL timer in main thread */
+bool scanner_get_pending_update(struct pending_display_data *out) {
+    if (!pending_data.update_pending) {
+        return false;
+    }
+    /* Copy data (atomic enough for our use case) */
+    *out = pending_data;
+    pending_data.update_pending = false;
+    /* Note: signal_update_pending is checked separately via scanner_get_pending_signal */
+    return true;
+}
+
+/* Global signal data - set by work handler, read DIRECTLY by timer callback */
+/* Completely avoiding float function parameters */
+volatile int8_t scanner_signal_rssi = -100;
+volatile int32_t scanner_signal_rate_x100 = -100;  /* rate * 100, as integer */
+
+/* Called by work handler to set signal data */
+static void set_signal_data(int8_t rssi, float rate_hz) {
+    scanner_signal_rssi = rssi;
+    scanner_signal_rate_x100 = (int32_t)(rate_hz * 100.0f);
+}
+
+/* Check if signal update is pending (no data returned - caller reads globals directly) */
+bool scanner_is_signal_pending(void) {
+    if (!pending_data.signal_update_pending) {
+        return false;
+    }
+    pending_data.signal_update_pending = false;
+    return true;
+}
+
+/* Check if scanner battery update is pending */
+bool scanner_get_pending_battery(int *level) {
+    if (!pending_data.scanner_battery_pending) {
+        return false;
+    }
+    *level = pending_data.scanner_battery;
+    pending_data.scanner_battery_pending = false;
+    return true;
+}
 
 /* ========== Public API for Display ========== */
 
@@ -131,10 +187,16 @@ void scanner_set_selected_keyboard(int index) {
 
 /* ========== Display Update Work (runs in system work queue context) ========== */
 
-/* Rate calculation state */
-static uint32_t rate_last_update = 0;
-static int rate_update_count = 0;
+/* Rate calculation state - using actual advertisement reception count */
+static atomic_t adv_receive_count = ATOMIC_INIT(0);  /* Incremented on each adv reception */
+static uint32_t rate_last_calc_time = 0;
 static int8_t last_rssi = -100;
+
+/* Moving average for smooth rate display */
+#define RATE_HISTORY_SIZE 4
+static float rate_history[RATE_HISTORY_SIZE] = {0};
+static int rate_history_idx = 0;
+static bool rate_history_filled = false;  /* True after first full cycle */
 
 /* External flags from custom_status_screen.c */
 extern volatile bool transition_in_progress;
@@ -177,54 +239,69 @@ static void display_update_work_handler(struct k_work *work) {
         return;
     }
 
-    LOG_INF("Updating display: %s, Layer=%d, Battery=%d%%",
+    LOG_INF("Pending display update: %s, Layer=%d, Battery=%d%%",
             name, data.active_layer, data.battery_level);
 
-    /* Update all widgets with the keyboard data */
-    display_update_device_name(name);
-    display_update_layer(data.active_layer);
-    display_update_wpm(data.wpm_value);
+    /* Store data in pending structure - NO LVGL calls here! */
+    strncpy(pending_data.device_name, name, MAX_NAME_LEN - 1);
+    pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
+    pending_data.layer = data.active_layer;
+    pending_data.wpm = data.wpm_value;
+    pending_data.usb_ready = (data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
+    pending_data.ble_connected = (data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
+    pending_data.ble_bonded = (data.status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
+    pending_data.profile = data.profile_slot;
+    pending_data.modifiers = data.modifier_flags;
+    pending_data.bat[0] = data.battery_level;
+    pending_data.bat[1] = data.peripheral_battery[0];
+    pending_data.bat[2] = data.peripheral_battery[1];
+    pending_data.bat[3] = data.peripheral_battery[2];
 
-    bool usb_ready = (data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
-    bool ble_connected = (data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
-    bool ble_bonded = (data.status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
-    display_update_connection(usb_ready, ble_connected, ble_bonded, data.profile_slot);
-
-    display_update_modifiers(data.modifier_flags);
-
-    /* Battery layout:
-     * - battery_level = Central/Standalone battery
-     * - peripheral_battery[0] = Left/First peripheral
-     * - peripheral_battery[1] = Right/Aux peripheral
-     * - peripheral_battery[2] = Third device
-     *
-     * Keyboard side manages order via CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE.
-     * Display shows: 1 battery (no label), 2 (L/R), 3 (L/R/Aux), 4 (L/R/A1/A2)
-     */
-    int bat0 = data.battery_level;          /* Central/Main battery */
-    int bat1 = data.peripheral_battery[0];  /* Peripheral 1 */
-    int bat2 = data.peripheral_battery[1];  /* Peripheral 2 / Aux */
-    int bat3 = data.peripheral_battery[2];  /* Peripheral 3 */
-
-    /* For standalone keyboards (no peripherals), show single battery */
-    if (bat1 == 0 && bat2 == 0 && bat3 == 0) {
-        /* Only main battery - pass as single value */
-        display_update_keyboard_battery_4(bat0, 0, 0, 0);
-    } else {
-        /* Split or multi-device - pass all batteries */
-        display_update_keyboard_battery_4(bat0, bat1, bat2, bat3);
-    }
-
-    /* Calculate reception rate */
+    /* Calculate reception rate from actual advertisement count (1Hz update with moving average) */
     last_rssi = rssi;
-    rate_update_count++;
 
-    if (now - rate_last_update >= 1000) {
-        float rate = (float)rate_update_count * 1000.0f / (float)(now - rate_last_update);
-        display_update_signal(rssi, rate);
-        rate_update_count = 0;
-        rate_last_update = now;
+    /* Initialize rate calculation on first call */
+    if (rate_last_calc_time == 0) {
+        rate_last_calc_time = now;
+        /* Don't reset counter - let advertisements that arrived before init be counted */
     }
+
+    /* Check if 1 second has passed since last calculation */
+    uint32_t elapsed_since_calc = now - rate_last_calc_time;
+
+    if (elapsed_since_calc >= 1000) {
+        /* 1 second elapsed - calculate rate from actual advertisement receptions */
+        uint32_t elapsed = now - rate_last_calc_time;
+        int count = atomic_get(&adv_receive_count);
+        atomic_set(&adv_receive_count, 0);  /* Reset for next interval */
+
+        /* Calculate instantaneous rate */
+        float instant_rate = (float)count * 1000.0f / (float)elapsed;
+
+        /* Add to moving average history */
+        rate_history[rate_history_idx] = instant_rate;
+        rate_history_idx = (rate_history_idx + 1) % RATE_HISTORY_SIZE;
+        if (rate_history_idx == 0) {
+            rate_history_filled = true;
+        }
+
+        /* Calculate moving average */
+        float avg_rate = 0.0f;
+        int samples = rate_history_filled ? RATE_HISTORY_SIZE : rate_history_idx;
+        if (samples == 0) samples = 1;  /* Prevent division by zero */
+        for (int i = 0; i < samples; i++) {
+            avg_rate += rate_history[i];
+        }
+        avg_rate /= (float)samples;
+
+        /* Set signal data via global variables (avoids float pointer issues) */
+        set_signal_data(rssi, avg_rate);
+        pending_data.signal_update_pending = true;  /* Signal widget updates at 1Hz */
+        rate_last_calc_time = now;
+    }
+
+    /* Set flag - LVGL timer in main thread will pick this up */
+    pending_data.update_pending = true;
 }
 
 static void schedule_display_update(void) {
@@ -339,8 +416,9 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
     k_mutex_unlock(&data_mutex);
     msgs_sent++;
 
-    /* Schedule display update (deferred to work queue for thread safety) */
+    /* Count advertisement reception for rate calculation */
     if (index == selected_keyboard) {
+        atomic_inc(&adv_receive_count);
         schedule_display_update();
     }
 

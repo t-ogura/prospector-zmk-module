@@ -37,6 +37,37 @@
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
 
+/* ========== Pending Display Data from scanner_stub.c ========== */
+/* Work queue sets data + flag, LVGL timer here processes it in main thread */
+#define MAX_NAME_LEN 32
+struct pending_display_data {
+    volatile bool update_pending;
+    volatile bool signal_update_pending;  /* Signal widget updates separately (1Hz) */
+    char device_name[MAX_NAME_LEN];
+    int layer;
+    int wpm;
+    bool usb_ready;
+    bool ble_connected;
+    bool ble_bonded;
+    int profile;
+    uint8_t modifiers;
+    int bat[4];
+    int8_t rssi;
+    float rate_hz;
+    int scanner_battery;
+    bool scanner_battery_pending;
+};
+
+/* Defined in scanner_stub.c */
+extern bool scanner_get_pending_update(struct pending_display_data *out);
+extern bool scanner_is_signal_pending(void);
+extern volatile int8_t scanner_signal_rssi;
+extern volatile int32_t scanner_signal_rate_x100;  /* rate * 100 */
+extern bool scanner_get_pending_battery(int *level);
+
+/* LVGL timer for processing pending updates in main thread */
+static lv_timer_t *pending_update_timer = NULL;
+
 /* ========== Screen State Management ========== */
 enum screen_state {
     SCREEN_MAIN = 0,
@@ -126,8 +157,8 @@ static int wpm_value = 0;
 static int battery_values[MAX_KB_BATTERIES] = {0, 0, 0, 0};  /* Up to 4 keyboard batteries */
 static int active_battery_count = 0;  /* How many batteries are active (>0) */
 static int scanner_battery = 0;
-static int rssi = -100;  /* Default: very weak signal */
-static float rate_hz = 0.0f;
+static int8_t rssi = -100;  /* Default: very weak signal */
+static float rate_hz = -1.0f;  /* Negative = not yet received, will show as "-.--Hz" */
 static int ble_profile = 0;
 static bool usb_ready = false;
 static bool ble_connected = false;
@@ -180,12 +211,18 @@ static lv_obj_t *wpm_value_label = NULL;
 static lv_obj_t *transport_label = NULL;
 static lv_obj_t *ble_profile_label = NULL;
 
-/* Layer */
+/* Layer - Fixed mode */
 static lv_obj_t *layer_title_label = NULL;
 static lv_obj_t *layer_labels[10] = {NULL};
 static lv_obj_t *layer_over_max_label = NULL;  /* Large number for over-max display */
 static bool layer_mode_over_max = false;       /* true when active_layer >= max_layers */
 static int last_active_layer = -1;             /* Track previous layer for animations */
+
+/* Layer - Slide mode */
+#define SLIDE_VISIBLE_COUNT 9   /* Number of visible layer slots: 小中大大大大大中小 */
+#define SLIDE_LARGE_COUNT 3     /* Number of "large" slots in center */
+static lv_obj_t *layer_slide_labels[SLIDE_VISIBLE_COUNT] = {NULL};
+static int layer_slide_window_start = 0;  /* First visible layer number in the window */
 
 /* Modifier - placeholder for now (no NerdFont in ZMK test) */
 static lv_obj_t *modifier_label = NULL;
@@ -226,6 +263,8 @@ static lv_obj_t *ds_battery_switch = NULL;
 static lv_obj_t *ds_layer_label = NULL;
 static lv_obj_t *ds_layer_slider = NULL;
 static lv_obj_t *ds_layer_value = NULL;
+static lv_obj_t *ds_slide_label = NULL;
+static lv_obj_t *ds_slide_switch = NULL;
 static lv_obj_t *ds_nav_hint = NULL;
 
 /* Display Settings State (persists across screen transitions) */
@@ -234,12 +273,19 @@ static uint8_t ds_manual_brightness = 65;
 /* Battery visible if CONFIG_PROSPECTOR_BATTERY_SUPPORT=y in config */
 static bool ds_battery_visible = IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT);
 static uint8_t ds_max_layers = 7;
+static bool ds_layer_slide_mode = IS_ENABLED(CONFIG_PROSPECTOR_LAYER_SLIDE_DEFAULT);  /* Slide animation mode for layer display */
+static uint8_t ds_layer_slide_max = 7;    /* Dynamic max layer for slide mode */
 
 /* Forward declarations for layer display helpers */
 static void create_layer_list_widgets(lv_obj_t *parent, int y_offset);
 static void destroy_layer_list_widgets(void);
 static void create_over_max_widget(lv_obj_t *parent, int layer, int y_offset);
 static void destroy_over_max_widget(void);
+/* Slide mode helpers */
+static void create_layer_slide_widgets(lv_obj_t *parent, int y_offset);
+static void destroy_layer_slide_widgets(void);
+static void update_layer_slide_display(int layer, bool animate);
+static lv_color_t get_slide_layer_color(int layer, int max_layer);
 
 /* UI interaction flag - prevents swipe during slider drag */
 static bool ui_interaction_active = false;
@@ -335,6 +381,39 @@ static lv_color_t get_layer_color(int layer) {
     }
 }
 
+/* Dynamic Hue-based pastel color for slide mode
+ * Hue is divided evenly by max_layer count
+ * Returns pastel color with 40% saturation, 100% brightness */
+static lv_color_t get_slide_layer_color(int layer, int max_layer) {
+    if (max_layer <= 0) max_layer = 1;
+
+    /* Calculate Hue (0-360) based on layer position */
+    int hue = (layer * 360) / max_layer;
+    hue = hue % 360;  /* Wrap around */
+
+    /* HSV to RGB conversion with S=0.4 (pastel), V=1.0 (bright) */
+    float s = 0.4f;
+    float v = 1.0f;
+    float h = hue / 60.0f;
+    int i = (int)h;
+    float f = h - i;
+    float p = v * (1.0f - s);
+    float q = v * (1.0f - s * f);
+    float t = v * (1.0f - s * (1.0f - f));
+
+    float r, g, b;
+    switch (i % 6) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+
+    return lv_color_make((uint8_t)(r * 255), (uint8_t)(g * 255), (uint8_t)(b * 255));
+}
+
 static lv_color_t get_scanner_battery_color(int level) {
     if (level >= 80) return lv_color_hex(0x00FF00);
     else if (level >= 60) return lv_color_hex(0x7FFF00);
@@ -376,6 +455,87 @@ static lv_color_t get_rssi_color(uint8_t bars) {
         case 2: return lv_color_make(0x60, 0x60, 0x60);
         case 1: return lv_color_make(0x40, 0x40, 0x40);
         default: return lv_color_make(0x20, 0x20, 0x20);
+    }
+}
+
+/* ========== Pending Update Timer Callback (runs in main thread) ========== */
+static char last_keyboard_name[MAX_NAME_LEN] = "";  /* Track keyboard changes */
+
+static void pending_update_timer_cb(lv_timer_t *timer) {
+    ARG_UNUSED(timer);
+
+    /* Only process updates on main screen */
+    if (current_screen != SCREEN_MAIN) {
+        return;
+    }
+
+    /* Check for pending display update */
+    struct pending_display_data data;
+    if (scanner_get_pending_update(&data)) {
+        /* Detect keyboard change - reset battery count to force full reposition */
+        if (strcmp(last_keyboard_name, data.device_name) != 0) {
+            LOG_INF("Keyboard changed: %s -> %s, resetting battery layout",
+                    last_keyboard_name, data.device_name);
+            strncpy(last_keyboard_name, data.device_name, MAX_NAME_LEN - 1);
+            last_keyboard_name[MAX_NAME_LEN - 1] = '\0';
+            active_battery_count = -1;  /* Force reposition on next battery update */
+        }
+
+        /* Process all updates in main thread - safe to call LVGL */
+        display_update_device_name(data.device_name);
+        display_update_layer(data.layer);
+        display_update_wpm(data.wpm);
+        display_update_connection(data.usb_ready, data.ble_connected,
+                                  data.ble_bonded, data.profile);
+        display_update_modifiers(data.modifiers);
+
+        /* Battery update */
+        if (data.bat[1] == 0 && data.bat[2] == 0 && data.bat[3] == 0) {
+            display_update_keyboard_battery_4(data.bat[0], 0, 0, 0);
+        } else {
+            display_update_keyboard_battery_4(data.bat[0], data.bat[1],
+                                              data.bat[2], data.bat[3]);
+        }
+    }
+
+    /* Check for pending signal update (separate from main data, updates at 1Hz) */
+    /* Read globals directly and update display inline (avoid ALL float function params) */
+    if (scanner_is_signal_pending()) {
+        int8_t sig_rssi = scanner_signal_rssi;
+        int32_t sig_rate_x100 = scanner_signal_rate_x100;
+
+        /* Update signal display INLINE (no function call with float param) */
+        rssi = sig_rssi;
+        rate_hz = (float)sig_rate_x100 / 100.0f;
+
+        uint8_t bars = rssi_to_bars(sig_rssi);
+        if (rssi_bar) {
+            lv_bar_set_value(rssi_bar, bars, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(rssi_bar, get_rssi_color(bars), LV_PART_INDICATOR);
+        }
+        if (rssi_label) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%ddBm", sig_rssi);
+            lv_label_set_text(rssi_label, buf);
+        }
+        if (rate_label) {
+            char buf[16];
+            if (sig_rate_x100 < 0) {
+                snprintf(buf, sizeof(buf), "-.--Hz");
+            } else {
+                /* Display from integer directly: rate_x100 / 100 . rate_x100 % 100 */
+                int whole = sig_rate_x100 / 100;
+                int frac = (sig_rate_x100 % 100) / 10;  /* One decimal place */
+                snprintf(buf, sizeof(buf), "%d.%dHz", whole, frac);
+            }
+            lv_label_set_text(rate_label, buf);
+        }
+    }
+
+    /* Check for pending scanner battery update */
+    int scanner_bat;
+    if (scanner_get_pending_battery(&scanner_bat)) {
+        display_update_scanner_battery(scanner_bat);
     }
 }
 
@@ -472,8 +632,12 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_label_set_text(layer_title_label, "Layer");
     lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 82);  /* 3px up */
 
-    /* Create layer display - either list or over-max based on active_layer */
-    if (active_layer >= ds_max_layers) {
+    /* Create layer display - slide mode OR fixed mode (list/over-max) */
+    if (ds_layer_slide_mode) {
+        /* Slide mode: create 7-slot dial display */
+        create_layer_slide_widgets(screen, 105);
+        layer_mode_over_max = false;  /* Not used in slide mode */
+    } else if (active_layer >= ds_max_layers) {
         layer_mode_over_max = true;
         create_over_max_widget(screen, active_layer, 105);
     } else {
@@ -638,6 +802,12 @@ lv_obj_t *zmk_display_status_screen(void) {
     if (!swipe_process_timer) {
         swipe_process_timer = lv_timer_create(swipe_process_timer_cb, 50, NULL);
         LOG_INF("Swipe processing timer registered (50ms interval)");
+    }
+
+    /* Create pending update timer - processes Work Queue data in main thread */
+    if (!pending_update_timer) {
+        pending_update_timer = lv_timer_create(pending_update_timer_cb, 100, NULL);
+        LOG_INF("Pending update timer registered (100ms interval)");
     }
 
     return screen;
@@ -853,6 +1023,285 @@ static void start_layer_list_slide_in(void) {
     }
 }
 
+/* ========== Slide Mode Layer Display Functions ========== */
+
+/* Slide mode layout with gradient fade:
+ * 7 visible slots: [0] [1] [2] [3] [4] [5] [6]
+ * - Slot 0,6: small (16pt, very dim) - fade out edges
+ * - Slot 1-5: large (28pt, bright) - center zone (5 slots)
+ *
+ * Active layer stays in large zone (1-5), scrolls only when needed.
+ * Negative window_start allowed - negative slots shown as empty.
+ */
+
+#define SLIDE_LARGE_ZONE_START 2  /* Index where large zone begins (slots 2,3,4,5,6) */
+#define SLIDE_LARGE_ZONE_END 6    /* Index where large zone ends (inclusive) - 5 large slots */
+
+/* Get font for slot based on gradient position:
+ * Pattern: 小中大大大大大中小 (9 slots: 0-8)
+ * Slot 0,8: Small (16pt) - edge
+ * Slot 1,7: Medium (20pt) - transition
+ * Slot 2,3,4,5,6: Large (28pt) - center (5 large slots)
+ */
+static const lv_font_t* get_slide_slot_font(int slot) {
+    if (slot == 0 || slot == 8) {
+        return &lv_font_montserrat_16;  /* Edge - small */
+    } else if (slot == 1 || slot == 7) {
+        return &lv_font_montserrat_20;  /* Transition - medium */
+    }
+    return &lv_font_montserrat_28;      /* Center - large (slots 2,3,4,5,6) */
+}
+
+/* Get opacity for slot based on gradient position (inactive):
+ * Edge: very dim, Medium: dim, Large: visible
+ */
+static lv_opa_t get_slide_slot_opa(int slot) {
+    if (slot == 0 || slot == 8) {
+        return LV_OPA_20;  /* Edge - very dim (darker) */
+    } else if (slot == 1 || slot == 7) {
+        return LV_OPA_40;  /* Transition - dim (darker) */
+    }
+    return LV_OPA_70;      /* Center - visible */
+}
+
+/* Get Y adjustment for vertical alignment based on font size */
+static int get_slide_slot_y_adj(int slot) {
+    if (slot == 0 || slot == 8) {
+        return 6;   /* Small font needs more Y adjustment */
+    } else if (slot == 1 || slot == 7) {
+        return 4;   /* Medium font needs some Y adjustment */
+    }
+    return 0;       /* Large font - no adjustment */
+}
+
+/* Get X offset to move edge slots slightly inward */
+static int get_slide_slot_x_offset(int slot) {
+    if (slot == 0) {
+        return 4;   /* Move left edge slot inward (right) */
+    } else if (slot == 8) {
+        return -4;  /* Move right edge slot inward (left) */
+    }
+    return 0;
+}
+
+/* Slide mode layout constants - using fixed width labels like fixed mode */
+#define SLIDE_SLOT_SPACING 34       /* Uniform spacing between slots (wider for 2-digit) */
+#define SLIDE_LABEL_WIDTH_SMALL 22  /* Width for edge slots (small font) */
+#define SLIDE_LABEL_WIDTH_MEDIUM 28 /* Width for transition slots (medium font) */
+#define SLIDE_LABEL_WIDTH_LARGE 34  /* Width for center slots (large font) */
+
+/* Get label width for slot based on font size */
+static int get_slide_label_width(int slot) {
+    if (slot == 0 || slot == 8) {
+        return SLIDE_LABEL_WIDTH_SMALL;
+    } else if (slot == 1 || slot == 7) {
+        return SLIDE_LABEL_WIDTH_MEDIUM;
+    }
+    return SLIDE_LABEL_WIDTH_LARGE;
+}
+
+/* Create slide mode layer widgets */
+static void create_layer_slide_widgets(lv_obj_t *parent, int y_offset) {
+    /* Calculate window start to keep active_layer in large zone
+     * Prefer left side of large zone so large zone stays visually centered */
+    layer_slide_window_start = active_layer - SLIDE_LARGE_ZONE_START;
+    /* DON'T clamp to 0 - allow negative values, empty slots for negative layers */
+
+    /* Calculate start_x to center all slots */
+    int total_width = (SLIDE_VISIBLE_COUNT - 1) * SLIDE_SLOT_SPACING;
+    int start_x = 140 - (total_width / 2);
+
+    for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+        int layer_num = layer_slide_window_start + i;
+        bool is_active = (layer_num == active_layer && layer_num >= 0);
+        int label_width = get_slide_label_width(i);
+
+        layer_slide_labels[i] = lv_label_create(parent);
+
+        /* Font size based on gradient position */
+        lv_obj_set_style_text_font(layer_slide_labels[i], get_slide_slot_font(i), 0);
+
+        /* Fixed width and center alignment for uniform spacing */
+        lv_obj_set_width(layer_slide_labels[i], label_width);
+        lv_obj_set_style_text_align(layer_slide_labels[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(layer_slide_labels[i], LV_LABEL_LONG_CLIP);  /* Prevent text wrapping */
+
+        /* Text color and opacity based on active state and gradient */
+        if (layer_num < 0) {
+            /* Negative layer number = empty/invisible */
+            lv_obj_set_style_text_opa(layer_slide_labels[i], LV_OPA_TRANSP, 0);
+        } else if (is_active) {
+            /* Active layer = Hue-based color, full opacity */
+            lv_obj_set_style_text_color(layer_slide_labels[i],
+                get_slide_layer_color(layer_num, ds_layer_slide_max), 0);
+            lv_obj_set_style_text_opa(layer_slide_labels[i], LV_OPA_COVER, 0);
+        } else {
+            /* Inactive = gray with gradient opacity */
+            lv_obj_set_style_text_color(layer_slide_labels[i], lv_color_make(80, 80, 80), 0);
+            lv_obj_set_style_text_opa(layer_slide_labels[i], get_slide_slot_opa(i), 0);
+        }
+
+        /* Set label text (layer number or empty for negative) */
+        char text[8];
+        if (layer_num >= 0) {
+            snprintf(text, sizeof(text), "%d", layer_num);
+        } else {
+            text[0] = '\0';  /* Empty for negative */
+        }
+        lv_label_set_text(layer_slide_labels[i], text);
+
+        /* Position using uniform spacing (center each label on its slot) */
+        int y_adj = get_slide_slot_y_adj(i);
+        int x_offset = get_slide_slot_x_offset(i);
+        int x_pos = start_x + (i * SLIDE_SLOT_SPACING) - (label_width / 2) + x_offset;
+        lv_obj_set_pos(layer_slide_labels[i], x_pos, y_offset + y_adj);
+
+        /* Enable transform for animations */
+        lv_obj_set_style_transform_pivot_x(layer_slide_labels[i], label_width / 2, 0);
+        lv_obj_set_style_transform_pivot_y(layer_slide_labels[i], 14, 0);
+    }
+
+    LOG_INF("Slide mode widgets created: window_start=%d, active=%d", layer_slide_window_start, active_layer);
+}
+
+/* Destroy slide mode layer widgets */
+static void destroy_layer_slide_widgets(void) {
+    for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+        if (layer_slide_labels[i]) {
+            lv_anim_del(layer_slide_labels[i], NULL);  /* Cancel any running animations */
+            lv_obj_del(layer_slide_labels[i]);
+            layer_slide_labels[i] = NULL;
+        }
+    }
+    layer_slide_window_start = 0;
+}
+
+/* Reset all label positions to ensure they stay in correct place */
+static void slide_reset_positions(void) {
+    int total_width = (SLIDE_VISIBLE_COUNT - 1) * SLIDE_SLOT_SPACING;
+    int start_x = 140 - (total_width / 2);
+
+    for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+        if (layer_slide_labels[i]) {
+            int label_width = get_slide_label_width(i);
+            int y_adj = get_slide_slot_y_adj(i);
+            int x_offset = get_slide_slot_x_offset(i);
+            int x_pos = start_x + (i * SLIDE_SLOT_SPACING) - (label_width / 2) + x_offset;
+            lv_obj_set_pos(layer_slide_labels[i], x_pos, 105 + y_adj);
+        }
+    }
+}
+
+/* Animation callback for scroll complete */
+static void slide_scroll_anim_cb(void *var, int32_t value) {
+    lv_obj_t *obj = (lv_obj_t *)var;
+    if (obj) {
+        lv_obj_set_style_translate_x(obj, value, 0);
+    }
+}
+
+/* Update slide mode display - called when layer changes */
+static void update_layer_slide_display(int layer, bool animate) {
+    /* Auto-expand max layer if needed */
+    if (layer >= ds_layer_slide_max) {
+        ds_layer_slide_max = layer + 1;
+        LOG_INF("Slide max expanded to %d", ds_layer_slide_max);
+    }
+
+    /* Calculate which slot the active layer is currently in */
+    int current_slot = layer - layer_slide_window_start;
+
+    /* Check if we need to scroll */
+    bool need_scroll = false;
+    int new_window_start = layer_slide_window_start;
+
+    if (current_slot < SLIDE_LARGE_ZONE_START) {
+        /* Layer moving left of large zone - scroll left */
+        new_window_start = layer - SLIDE_LARGE_ZONE_START;
+        need_scroll = true;
+    } else if (current_slot > SLIDE_LARGE_ZONE_END) {
+        /* Layer moving right of large zone - scroll right */
+        new_window_start = layer - SLIDE_LARGE_ZONE_END;
+        need_scroll = true;
+    }
+
+    /* DON'T clamp to 0 - allow negative values for edge layers (0, 1, 2) */
+
+    /* Calculate scroll amount (number of slots shifted) */
+    int scroll_slots = 0;
+    if (need_scroll) {
+        scroll_slots = new_window_start - layer_slide_window_start;
+        layer_slide_window_start = new_window_start;
+    }
+
+    /* Update all labels with correct content and styling */
+    for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+        if (!layer_slide_labels[i]) continue;
+
+        int layer_num = layer_slide_window_start + i;
+        bool is_active = (layer_num == layer && layer_num >= 0);
+
+        /* Update text */
+        char text[8];
+        if (layer_num >= 0) {
+            snprintf(text, sizeof(text), "%d", layer_num);
+        } else {
+            text[0] = '\0';  /* Empty for negative */
+        }
+        lv_label_set_text(layer_slide_labels[i], text);
+
+        /* Update styling with gradient */
+        if (layer_num < 0) {
+            /* Negative layer = invisible */
+            lv_obj_set_style_text_opa(layer_slide_labels[i], LV_OPA_TRANSP, 0);
+        } else if (is_active) {
+            /* Active layer = Hue-based color, full opacity */
+            lv_obj_set_style_text_color(layer_slide_labels[i],
+                get_slide_layer_color(layer_num, ds_layer_slide_max), 0);
+            lv_obj_set_style_text_opa(layer_slide_labels[i], LV_OPA_COVER, 0);
+
+            /* Pulse animation on active layer change */
+            if (animate) {
+                start_pulse_anim(layer_slide_labels[i]);
+            }
+        } else {
+            /* Inactive = gray with gradient opacity based on slot position */
+            lv_obj_set_style_text_color(layer_slide_labels[i], lv_color_make(80, 80, 80), 0);
+            lv_obj_set_style_text_opa(layer_slide_labels[i], get_slide_slot_opa(i), 0);
+        }
+    }
+
+    /* Set correct positions for all labels */
+    slide_reset_positions();
+
+    /* Apply scroll animation if scrolling occurred */
+    if (need_scroll && animate && scroll_slots != 0) {
+        /* Calculate scroll offset in pixels */
+        int scroll_offset = scroll_slots * SLIDE_SLOT_SPACING;
+
+        /* Animate all labels from offset position to final position */
+        for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+            if (!layer_slide_labels[i]) continue;
+
+            /* Cancel any existing translate animation */
+            lv_anim_del(layer_slide_labels[i], slide_scroll_anim_cb);
+
+            /* Start from offset position and animate to 0 (final position) */
+            lv_anim_t anim;
+            lv_anim_init(&anim);
+            lv_anim_set_var(&anim, layer_slide_labels[i]);
+            lv_anim_set_exec_cb(&anim, slide_scroll_anim_cb);
+            lv_anim_set_values(&anim, scroll_offset, 0);
+            lv_anim_set_time(&anim, 150);
+            lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+            lv_anim_start(&anim);
+        }
+    }
+
+    LOG_DBG("Slide update: layer=%d, window_start=%d, slot=%d, scroll=%d",
+            layer, layer_slide_window_start, layer - layer_slide_window_start, scroll_slots);
+}
+
 void display_update_layer(int layer) {
     if (layer < 0 || layer > 255) return;
 
@@ -864,6 +1313,16 @@ void display_update_layer(int layer) {
         return;
     }
 
+    /* ========== Slide Mode ========== */
+    if (ds_layer_slide_mode) {
+        /* Slide mode: just update the slide display, it handles everything */
+        bool animate = (prev_layer != layer);
+        update_layer_slide_display(layer, animate);
+        last_active_layer = layer;
+        return;
+    }
+
+    /* ========== Fixed Mode (original behavior) ========== */
     bool should_be_over_max = (layer >= ds_max_layers);
     int layer_y = 105;  /* Y position for layer widgets */
 
@@ -1123,15 +1582,18 @@ void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3) {
         if (values[i] > 0) count++;
     }
 
-    /* If count changed, reposition widgets */
-    if (count != active_battery_count && count > 0) {
+    /* If count changed, reposition widgets (including count=0 case) */
+    if (count != active_battery_count) {
         active_battery_count = count;
-        reposition_battery_widgets(count);
+        if (count > 0) {
+            reposition_battery_widgets(count);
+        }
+        /* When count=0, hide all widgets below */
     }
 
     /* Update each battery slot */
     for (int i = 0; i < MAX_KB_BATTERIES; i++) {
-        bool slot_visible = (i < active_battery_count);
+        bool slot_visible = (count > 0 && i < count);
         int val = values[i];
 
         if (slot_visible && val > 0) {
@@ -1165,7 +1627,7 @@ void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3) {
             if (kb_bat_nc_bar[i]) lv_obj_set_style_opa(kb_bat_nc_bar[i], 255, 0);
             if (kb_bat_nc_label[i]) lv_obj_set_style_opa(kb_bat_nc_label[i], 255, 0);
         } else {
-            /* Slot not visible (beyond active count) - hide everything */
+            /* Slot not visible (beyond active count or count=0) - hide everything */
             if (kb_bat_bar[i]) {
                 lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_MAIN);
                 lv_obj_set_style_opa(kb_bat_bar[i], 0, LV_PART_INDICATOR);
@@ -1202,8 +1664,19 @@ void display_update_signal(int8_t rssi_val, float rate) {
 
     if (rate_label) {
         char buf[16];
-        int rate_int = (int)(rate * 10);
-        snprintf(buf, sizeof(buf), "%d.%dHz", rate_int / 10, rate_int % 10);
+        /* Robust rate display: handle invalid/out-of-range values */
+        if (rate < 0.0f) {
+            /* Negative = no data yet */
+            snprintf(buf, sizeof(buf), "-.--Hz");
+        } else if (rate > 999.9f || rate != rate) {  /* rate != rate checks for NaN */
+            LOG_WRN("Invalid rate value: %.2f, displaying as -.--", (double)rate);
+            snprintf(buf, sizeof(buf), "-.--Hz");
+        } else {
+            /* Safe conversion with rounding */
+            int rate_int = (int)(rate * 10.0f + 0.5f);
+            if (rate_int > 9999) rate_int = 9999;  /* Cap at 999.9Hz */
+            snprintf(buf, sizeof(buf), "%d.%dHz", rate_int / 10, rate_int % 10);
+        }
         lv_label_set_text(rate_label, buf);
     }
 }
@@ -1221,6 +1694,12 @@ static void destroy_main_screen_widgets(void) {
     }
     if (layer_over_max_label) {
         lv_anim_del(layer_over_max_label, NULL);
+    }
+    /* Cancel slide mode animations */
+    for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+        if (layer_slide_labels[i]) {
+            lv_anim_del(layer_slide_labels[i], NULL);
+        }
     }
 
     if (rate_label) { lv_obj_del(rate_label); rate_label = NULL; }
@@ -1241,6 +1720,10 @@ static void destroy_main_screen_widgets(void) {
         if (layer_labels[i]) { lv_obj_del(layer_labels[i]); layer_labels[i] = NULL; }
     }
     if (layer_over_max_label) { lv_obj_del(layer_over_max_label); layer_over_max_label = NULL; }
+    /* Delete slide mode widgets */
+    for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+        if (layer_slide_labels[i]) { lv_obj_del(layer_slide_labels[i]); layer_slide_labels[i] = NULL; }
+    }
     if (layer_title_label) { lv_obj_del(layer_title_label); layer_title_label = NULL; }
     if (ble_profile_label) { lv_obj_del(ble_profile_label); ble_profile_label = NULL; }
     if (transport_label) { lv_obj_del(transport_label); transport_label = NULL; }
@@ -1320,8 +1803,12 @@ static void create_main_screen_widgets(void) {
     lv_label_set_text(layer_title_label, "Layer");
     lv_obj_align(layer_title_label, LV_ALIGN_TOP_MID, 0, 82);  /* 3px up */
 
-    /* Create layer display - either list or over-max based on active_layer */
-    if (active_layer >= ds_max_layers) {
+    /* Create layer display - slide mode OR fixed mode (list/over-max) */
+    if (ds_layer_slide_mode) {
+        /* Slide mode: create 7-slot dial display */
+        create_layer_slide_widgets(screen_obj, 105);
+        layer_mode_over_max = false;  /* Not used in slide mode */
+    } else if (active_layer >= ds_max_layers) {
         layer_mode_over_max = true;
         create_over_max_widget(screen_obj, active_layer, 105);
     } else {
@@ -1430,7 +1917,7 @@ static void create_main_screen_widgets(void) {
     rate_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(rate_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
-    lv_label_set_text(rate_label, "0.0Hz");
+    lv_label_set_text(rate_label, "-.--Hz");
     lv_obj_set_pos(rate_label, 222, 219);  /* 5px down, 5px left */
 
     LOG_INF("Main screen widgets created, restoring cached values...");
@@ -1719,6 +2206,21 @@ static void ds_layer_slider_event_cb(lv_event_t *e) {
     LOG_DBG("Max layers: %d", value);
 }
 
+/* Slide mode switch handler */
+static void ds_slide_switch_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_VALUE_CHANGED) return;
+
+    lv_obj_t *sw = lv_event_get_target(e);
+    bool checked = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    ds_layer_slide_mode = checked;
+
+    LOG_INF("Layer slide mode: %s", checked ? "ON" : "OFF");
+
+    /* Rebuild layer display on main screen if we have screen_obj */
+    /* This will be handled when returning to main screen */
+}
+
 /* ========== System Settings Event Handlers ========== */
 
 static void ss_bootloader_btn_event_cb(lv_event_t *e) {
@@ -1765,6 +2267,8 @@ static void ss_reset_btn_event_cb(lv_event_t *e) {
 static void destroy_display_settings_widgets(void) {
     LOG_INF("Destroying display settings widgets...");
     if (ds_nav_hint) { lv_obj_del(ds_nav_hint); ds_nav_hint = NULL; }
+    if (ds_slide_switch) { lv_obj_del(ds_slide_switch); ds_slide_switch = NULL; }
+    if (ds_slide_label) { lv_obj_del(ds_slide_label); ds_slide_label = NULL; }
     if (ds_layer_value) { lv_obj_del(ds_layer_value); ds_layer_value = NULL; }
     if (ds_layer_slider) { lv_obj_del(ds_layer_slider); ds_layer_slider = NULL; }
     if (ds_layer_label) { lv_obj_del(ds_layer_label); ds_layer_label = NULL; }
@@ -1880,7 +2384,7 @@ static void create_display_settings_widgets(void) {
     lv_label_set_text(ds_brightness_value, buf);
     lv_obj_set_pos(ds_brightness_value, 230, y_pos);
 
-    y_pos += 40;
+    y_pos += 30;  /* Compact spacing */
 
     /* ===== Battery Section ===== */
     ds_battery_label = lv_label_create(screen_obj);
@@ -1912,7 +2416,7 @@ static void create_display_settings_widgets(void) {
     lv_obj_set_ext_click_area(ds_battery_switch, 15);  /* Extend tap area for easier touch */
     lv_obj_add_event_cb(ds_battery_switch, ds_battery_switch_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    y_pos += 40;
+    y_pos += 35;  /* Slightly more space before Max Layers */
 
     /* ===== Max Layers Section ===== */
     ds_layer_label = lv_label_create(screen_obj);
@@ -1921,7 +2425,36 @@ static void create_display_settings_widgets(void) {
     lv_label_set_text(ds_layer_label, "Max Layers");
     lv_obj_set_pos(ds_layer_label, 15, y_pos);
 
-    y_pos += 25;
+    /* Slide label and switch (same row as Max Layers, like Auto is on Brightness row) */
+    ds_slide_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(ds_slide_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(ds_slide_label, lv_color_hex(0xAAAAAA), 0);
+    lv_label_set_text(ds_slide_label, "Slide");
+    lv_obj_set_pos(ds_slide_label, 195, y_pos + 4);  /* Same x as Auto label */
+
+    ds_slide_switch = lv_switch_create(screen_obj);
+    lv_obj_set_size(ds_slide_switch, 50, 28);  /* Same size as Auto switch */
+    lv_obj_set_pos(ds_slide_switch, 230, y_pos);  /* Same x as Auto switch */
+    if (ds_layer_slide_mode) {
+        lv_obj_add_state(ds_slide_switch, LV_STATE_CHECKED);
+    }
+    /* iOS-style switch styling (same as Auto) */
+    lv_obj_set_style_radius(ds_slide_switch, 14, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ds_slide_switch, lv_color_hex(0x3A3A3C), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ds_slide_switch, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(ds_slide_switch, 14, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(ds_slide_switch, lv_color_hex(0x34C759), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(ds_slide_switch, lv_color_hex(0x3A3A3C), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(ds_slide_switch, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(ds_slide_switch, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+    lv_obj_set_style_bg_color(ds_slide_switch, lv_color_white(), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(ds_slide_switch, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(ds_slide_switch, -2, LV_PART_KNOB);
+    lv_obj_set_style_border_width(ds_slide_switch, 0, LV_PART_MAIN);
+    lv_obj_set_ext_click_area(ds_slide_switch, 15);  /* Same as Auto */
+    lv_obj_add_event_cb(ds_slide_switch, ds_slide_switch_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    y_pos += 35;  /* Space between Max Layers label and slider */
 
     /* Layer slider */
     ds_layer_slider = lv_slider_create(screen_obj);
@@ -1950,13 +2483,13 @@ static void create_display_settings_widgets(void) {
     lv_obj_add_event_cb(ds_layer_slider, ds_custom_slider_drag_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(ds_layer_slider, ds_custom_slider_drag_cb, LV_EVENT_RELEASED, NULL);
 
-    /* Layer value label */
+    /* Layer value label (aligned with Brightness value at x=230) */
     ds_layer_value = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(ds_layer_value, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(ds_layer_value, lv_color_hex(0x007AFF), 0);
     snprintf(buf, sizeof(buf), "%d", ds_max_layers);
     lv_label_set_text(ds_layer_value, buf);
-    lv_obj_set_pos(ds_layer_value, 250, y_pos);
+    lv_obj_set_pos(ds_layer_value, 230, y_pos);
 
     /* Navigation hint */
     ds_nav_hint = lv_label_create(screen_obj);

@@ -149,6 +149,17 @@ config PROSPECTOR_MAX_LAYERS
       Automatically centers when fewer layers are configured.
       This setting only applies to scanner mode and is ignored for keyboard builds.
 
+config PROSPECTOR_LAYER_SLIDE_DEFAULT
+    bool "Enable layer slide display mode by default"
+    default n
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Enable slide animation mode for layer display by default.
+      In slide mode, the active layer slides to the center position with animation.
+      When disabled, layers are displayed as a static list.
+      This can be toggled at runtime via the Display Settings screen (if touch enabled).
+      Works in both touch and non-touch modes.
+
 config PROSPECTOR_SCANNER_TIMEOUT_MS
     int "Scanner timeout in milliseconds (0 to disable)"
     range 0 600000
