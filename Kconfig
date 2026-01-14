@@ -14,10 +14,14 @@ config ZMK_STATUS_ADVERTISEMENT
     bool "Enable ZMK Status Advertisement"
     default n
     depends on ZMK_BLE
+    select BT_EXT_ADV
     help
       Enable broadcasting of keyboard status information via BLE Advertisement.
       This allows external devices to receive status updates without establishing
       a connection to the keyboard.
+
+config BT_EXT_ADV_MAX_ADV_SET
+    default 2 if ZMK_STATUS_ADVERTISEMENT
 
 config ZMK_STATUS_ADV_INTERVAL_MS
     int "Status advertisement interval in milliseconds"
@@ -68,7 +72,7 @@ config ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS
       200ms = 5Hz for responsive status updates.
 
 config ZMK_STATUS_ADV_IDLE_INTERVAL_MS
-    int "Idle advertisement interval in milliseconds" 
+    int "Idle advertisement interval in milliseconds"
     range 500 300000
     default 30000
     depends on ZMK_STATUS_ADV_ACTIVITY_BASED
@@ -495,7 +499,7 @@ config ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
       Set to 0 to auto-calculate as 2x the window size (recommended).
       Manual values: 10-300 seconds for custom timeout behavior.
       Default 0 = auto (60s for 30s window, 20s for 10s window, etc.)
-      
+
       Examples:
       - 0: Auto-calculate (recommended) - 2x window size
       - 30: Manual 30-second timeout
@@ -510,10 +514,10 @@ config ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
     help
       DEPRECATED: This is a typo alias for ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS.
       Please use ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS instead.
-      
+
       This setting handles the common typo (WMP instead of WPM) found in external
       keyboard configurations to prevent build errors.
-      
+
       This alias will be removed in future versions. Please update your configuration
       to use the correct setting name: ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
 
