@@ -219,16 +219,17 @@ ZMK_SUBSCRIPTION(prospector_layer_listener, zmk_layer_state_changed);
 
 // Modifier change listener for immediate advertisement updates
 // Triggers on both press AND release for responsive display updates
-// Uses burst mode to send multiple advertisements for reliability
+// NOTE: No burst mode for modifiers - they change too frequently and burst
+// would block scan response (device name) from being sent
 static int modifiers_changed_listener(const zmk_event_t *eh) {
     const struct zmk_modifiers_state_changed *ev = as_zmk_modifiers_state_changed(eh);
     if (ev) {
         // Trigger on both press (state=true) and release (state=false)
-        LOG_DBG("🎹 Modifiers %s (0x%02x) - triggering burst advertisement (%d×%dms)",
-                ev->state ? "pressed" : "released", ev->modifiers,
-                BURST_COUNT, BURST_INTERVAL_MS);
+        // Single immediate update only (no burst) to allow scan responses
+        LOG_DBG("🎹 Modifiers %s (0x%02x) - triggering immediate advertisement",
+                ev->state ? "pressed" : "released", ev->modifiers);
         if (adv_started) {
-            atomic_set(&burst_remaining, BURST_COUNT);
+            // Don't use burst for modifiers - they're too frequent
             k_work_cancel_delayable(&adv_work);
             k_work_schedule(&adv_work, K_NO_WAIT);
         }
