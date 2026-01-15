@@ -17,7 +17,6 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include "brightness_control.h"
-#include "scanner_message.h"
 
 // Auto brightness configuration defaults
 #ifndef CONFIG_PROSPECTOR_ALS_MIN_BRIGHTNESS
