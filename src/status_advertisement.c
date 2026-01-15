@@ -459,8 +459,8 @@ static void build_manufacturer_payload(void) {
      */
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     // Central/Standalone: Use keymap API for layer detection
+    // active_layer is uint8_t (0-255), no artificial limit needed
     layer = zmk_keymap_highest_layer_active();
-    if (layer > 15) layer = 15;
 #else
     // Peripheral: No keymap available, always layer 0
     // Layer information comes from Central side via split communication
