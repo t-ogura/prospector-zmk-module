@@ -636,14 +636,21 @@ static void start_custom_advertising(void) {
 #endif
 
     if (!adv_set) {
-        // Use BT_LE_ADV_NCONN (without IDENTITY) for better Windows compatibility
-        // IDENTITY uses identity address which may cause issues with some Windows BLE stacks
-        int err = bt_le_ext_adv_create(BT_LE_ADV_NCONN, NULL, &adv_set);
+        // Use scannable non-connectable advertising for proper scan response handling
+        // BT_LE_ADV_OPT_SCANNABLE allows scan responses (device name) to be sent
+        // This fixes the "Unknown" device name issue while maintaining Windows compatibility
+        static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
+            BT_LE_ADV_OPT_SCANNABLE,  // Scannable, non-connectable
+            BT_GAP_ADV_FAST_INT_MIN_2,
+            BT_GAP_ADV_FAST_INT_MAX_2,
+            NULL);
+
+        int err = bt_le_ext_adv_create(&adv_param, NULL, &adv_set);
         if (err) {
             LOG_ERR("❌ Failed to create extended advertising set: %d", err);
             return;
         }
-        LOG_INF("✅ Extended advertising set created (Non-Connectable mode)");
+        LOG_INF("✅ Extended advertising set created (Scannable Non-Connectable mode)");
     }
 
     build_manufacturer_payload();
