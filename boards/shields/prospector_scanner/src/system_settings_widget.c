@@ -239,9 +239,16 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     lv_label_set_text(widget->title_label, "Quick Actions");
     lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, LV_STATE_DEFAULT);
-    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);  // Y: 40→20 (higher)
+    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 15);
 
-    LOG_INF("✅ Title label created");
+    // Version label (below title)
+    lv_obj_t *version_label = lv_label_create(widget->obj);
+    lv_label_set_text(version_label, "v2.1c");
+    lv_obj_set_style_text_color(version_label, lv_color_hex(0x888888), LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(version_label, &lv_font_montserrat_12, LV_STATE_DEFAULT);
+    lv_obj_align(version_label, LV_ALIGN_TOP_MID, 0, 40);
+
+    LOG_INF("✅ Title and version labels created");
 
     // Bootloader button (blue theme) - buttons closer together
     LOG_INF("Creating Bootloader button...");

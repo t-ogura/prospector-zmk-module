@@ -20,6 +20,7 @@
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
 #include <zmk/status_advertisement.h>
+#include <zmk/events/modifiers_state_changed.h>
 
 // keymap API is available on Central or Standalone (non-Split) builds only
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
@@ -108,6 +109,12 @@ static bool default_adv_stopped = false;
 static uint32_t last_activity_time = 0;
 static bool is_active = false;
 
+// Burst advertisement for high-priority events (layer/modifier changes)
+// Sends multiple advertisements in quick succession to ensure scanner receives at least one
+#define BURST_COUNT 5           // Number of advertisements per burst
+#define BURST_INTERVAL_MS 15    // Interval between burst advertisements
+static atomic_t burst_remaining = ATOMIC_INIT(0);
+
 // Latest layer state for accurate tracking (unused currently)
 // static uint8_t latest_layer = 0;
 
@@ -186,11 +193,17 @@ ZMK_SUBSCRIPTION(prospector_profile_listener, zmk_ble_active_profile_changed);
 #endif
 
 // Layer change listener for immediate advertisement updates
+// Triggers on both activation AND deactivation for responsive display updates
+// Uses burst mode to send multiple advertisements for reliability
 static int layer_changed_listener(const zmk_event_t *eh) {
     const struct zmk_layer_state_changed *ev = as_zmk_layer_state_changed(eh);
-    if (ev && ev->state) { // Only on layer activation
-        LOG_DBG("🔄 Layer changed to %d - triggering immediate advertisement update", ev->layer);
+    if (ev) {
+        // Trigger on both press (state=true) and release (state=false)
+        LOG_DBG("🔄 Layer %d %s - triggering burst advertisement (%d×%dms)",
+                ev->layer, ev->state ? "activated" : "deactivated",
+                BURST_COUNT, BURST_INTERVAL_MS);
         if (adv_started) {
+            atomic_set(&burst_remaining, BURST_COUNT);
             k_work_cancel_delayable(&adv_work);
             k_work_schedule(&adv_work, K_NO_WAIT);
         }
@@ -203,6 +216,28 @@ static int layer_changed_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(prospector_layer_listener, layer_changed_listener);
 ZMK_SUBSCRIPTION(prospector_layer_listener, zmk_layer_state_changed);
 #endif
+
+// Modifier change listener for immediate advertisement updates
+// Triggers on both press AND release for responsive display updates
+// Uses burst mode to send multiple advertisements for reliability
+static int modifiers_changed_listener(const zmk_event_t *eh) {
+    const struct zmk_modifiers_state_changed *ev = as_zmk_modifiers_state_changed(eh);
+    if (ev) {
+        // Trigger on both press (state=true) and release (state=false)
+        LOG_DBG("🎹 Modifiers %s (0x%02x) - triggering burst advertisement (%d×%dms)",
+                ev->state ? "pressed" : "released", ev->modifiers,
+                BURST_COUNT, BURST_INTERVAL_MS);
+        if (adv_started) {
+            atomic_set(&burst_remaining, BURST_COUNT);
+            k_work_cancel_delayable(&adv_work);
+            k_work_schedule(&adv_work, K_NO_WAIT);
+        }
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(prospector_modifiers_listener, modifiers_changed_listener);
+ZMK_SUBSCRIPTION(prospector_modifiers_listener, zmk_modifiers_state_changed);
 
 // WPM is now handled by custom implementation in position_state_listener
 // No separate WPM event listener needed - integrated into position_state_listener
@@ -701,7 +736,7 @@ static void adv_work_handler(struct k_work *work) {
                                     scan_rsp, ARRAY_SIZE(scan_rsp));
     
     if (err == 0) {
-        LOG_INF("✅ Advertising data updated successfully");
+        LOG_DBG("✅ Advertising data updated successfully");
     } else {
         // Any error - restart advertising to ensure continuous broadcast
         LOG_INF("Advertising update failed (%d), restarting...", err);
@@ -713,7 +748,16 @@ static void adv_work_handler(struct k_work *work) {
         // Always try to restart advertising regardless of connection state
         start_custom_advertising();
     }
-    
+
+    // Check if we're in burst mode (high-priority event)
+    int remaining = atomic_get(&burst_remaining);
+    if (remaining > 0) {
+        atomic_dec(&burst_remaining);
+        LOG_DBG("⚡ Burst advertisement %d/%d", BURST_COUNT - remaining + 1, BURST_COUNT);
+        k_work_schedule(&adv_work, K_MSEC(BURST_INTERVAL_MS));
+        return;  // Skip normal interval scheduling during burst
+    }
+
     // Schedule next update with adaptive interval
     uint32_t interval_ms = get_current_update_interval();
     

@@ -21,6 +21,13 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+// External function to trigger high-priority display update (defined in scanner_display.c)
+// Uses weak reference so it compiles even if scanner_display.c is not in the build
+__attribute__((weak)) void scanner_trigger_high_priority_update(void) {
+    // Default implementation: do nothing
+    // Will be overridden by scanner_display.c if included in build
+}
+
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER)
 
 static struct zmk_keyboard_status keyboards[ZMK_STATUS_SCANNER_MAX_KEYBOARDS];
@@ -189,6 +196,13 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
                addr->a.val[2], addr->a.val[1], addr->a.val[0]);
     }
 
+    // High-priority change detection (before updating data)
+    // Layer, modifier, profile changes trigger immediate display update
+    bool high_priority_change = is_new ||
+        (keyboards[index].data.active_layer != adv_data->active_layer) ||
+        (keyboards[index].data.modifier_flags != adv_data->modifier_flags) ||
+        (keyboards[index].data.profile_slot != adv_data->profile_slot);
+
     // Update keyboard status
     keyboards[index].active = true;
     keyboards[index].last_seen = now;
@@ -228,20 +242,22 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     // Release mutex
     scanner_unlock();
 
-    // Phase 5: Do NOT call notify_event from BLE callback context
-    // This would trigger LVGL operations from a non-main thread, causing freezes
-    // Display updates are handled by periodic rx_periodic_work (1Hz) instead
+    // Trigger high-priority display update for layer/modifier/profile changes
+    // This schedules a work handler with 10ms delay - safe to call from BLE callback
+    if (high_priority_change) {
+        scanner_trigger_high_priority_update();
+        LOG_DBG("⚡ High priority change: layer=%d mod=0x%02x profile=%d",
+                adv_data->active_layer, adv_data->modifier_flags, adv_data->profile_slot);
+    }
+
+    // Log for debugging (low-priority updates still handled by 1Hz periodic cycle)
     if (is_new) {
         const char *role_str = "UNKNOWN";
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
 
-        LOG_INF("New %s device found: %s (slot %d) - display will update on next periodic cycle",
-                role_str, device_name, index);
-    } else {
-        LOG_DBG("Device updated: %s, battery: %d%% - display will update on next periodic cycle",
-               device_name, adv_data->battery_level);
+        LOG_INF("New %s device found: %s (slot %d)", role_str, device_name, index);
     }
 }
 
@@ -586,11 +602,13 @@ int zmk_status_scanner_start(void) {
         return 0;
     }
     
+    // Use 100% duty cycle for immediate response (USB powered, no battery concern)
+    // interval = window = 30ms means continuous scanning with no gaps
     struct bt_le_scan_param scan_param = {
-        .type = BT_LE_SCAN_TYPE_ACTIVE,  // Changed to ACTIVE to receive Scan Response packets
+        .type = BT_LE_SCAN_TYPE_ACTIVE,  // ACTIVE to receive Scan Response packets
         .options = BT_LE_SCAN_OPT_NONE,
-        .interval = BT_GAP_SCAN_FAST_INTERVAL,
-        .window = BT_GAP_SCAN_FAST_WINDOW,
+        .interval = BT_GAP_SCAN_FAST_WINDOW,  // 30ms (was 60ms)
+        .window = BT_GAP_SCAN_FAST_WINDOW,    // 30ms (100% duty cycle)
     };
     
     int err = bt_le_scan_start(&scan_param, scan_callback);
