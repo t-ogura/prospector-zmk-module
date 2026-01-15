@@ -689,7 +689,12 @@ static void start_custom_advertising(void) {
     if (err == 0 || err == -EALREADY) {
         LOG_INF("✅ Extended advertising started successfully");
     } else {
-        LOG_ERR("❌ Extended advertising failed with error: %d", err);
+        LOG_ERR("❌ Extended advertising failed with error: %d, resetting...", err);
+        // Reset adv_set so it will be recreated on next attempt
+        if (adv_set) {
+            bt_le_ext_adv_delete(adv_set);
+            adv_set = NULL;
+        }
     }
 
     LOG_INF("Manufacturer data (%d bytes): %02X%02X %02X%02X %02X %02X %02X %02X %02X %02X %02X",
@@ -732,8 +737,12 @@ static void adv_work_handler(struct k_work *work) {
     if (err == 0) {
         LOG_DBG("✅ Extended advertising data updated successfully");
     } else {
-        LOG_ERR("❌ Extended advertising update failed: %d, restarting...", err);
-        // If it failed, try to restart
+        LOG_ERR("❌ Extended advertising update failed: %d, resetting adv_set...", err);
+        // If it failed, delete the invalid adv_set and recreate
+        if (adv_set) {
+            bt_le_ext_adv_delete(adv_set);
+            adv_set = NULL;
+        }
         start_custom_advertising();
     }
 
