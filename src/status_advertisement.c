@@ -636,11 +636,14 @@ static void start_custom_advertising(void) {
 #endif
 
     if (!adv_set) {
-        // Use scannable non-connectable advertising for proper scan response handling
-        // BT_LE_ADV_OPT_SCANNABLE allows scan responses (device name) to be sent
-        // This fixes the "Unknown" device name issue while maintaining Windows compatibility
+        // Use scannable non-connectable advertising with identity address
+        // BT_LE_ADV_OPT_SCANNABLE - allows scan responses (device name) to be sent
+        // BT_LE_ADV_OPT_USE_IDENTITY - uses same address as ZMK's default advertising
+        // This combination should:
+        // 1. Fix "Unknown" device name issue (scannable)
+        // 2. Show as single device in OS Bluetooth list (identity address)
         static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
-            BT_LE_ADV_OPT_SCANNABLE,  // Scannable, non-connectable
+            BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_IDENTITY,
             BT_GAP_ADV_FAST_INT_MIN_2,
             BT_GAP_ADV_FAST_INT_MAX_2,
             NULL);
@@ -650,7 +653,7 @@ static void start_custom_advertising(void) {
             LOG_ERR("❌ Failed to create extended advertising set: %d", err);
             return;
         }
-        LOG_INF("✅ Extended advertising set created (Scannable Non-Connectable mode)");
+        LOG_INF("✅ Extended advertising set created (Scannable + Identity mode)");
     }
 
     build_manufacturer_payload();
