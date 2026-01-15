@@ -731,37 +731,32 @@ static void adv_work_handler(struct k_work *work) {
     // Update manufacturer data
     build_manufacturer_payload();
 
-    // Ensure device name is set in scan response (may be 0 if start_custom_advertising wasn't called yet)
-    // This fixes "Unknown" device name issue when bt_le_adv_update_data succeeds before proper init
+    // If device name not yet initialized, restart advertising to ensure proper scan response
+    // bt_le_adv_update_data may not correctly update scan response if advertising was
+    // started by ZMK before our initialization
     if (scan_rsp[0].data_len == 0) {
-        const char *full_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
-        int full_name_len = strlen(full_name);
-        int max_name_len = sizeof(device_name_buffer) - 1;
-        int actual_name_len = (full_name_len < max_name_len) ? full_name_len : max_name_len;
-
-        memcpy(device_name_buffer, full_name, actual_name_len);
-        device_name_buffer[actual_name_len] = '\0';
-        scan_rsp[0].data_len = actual_name_len;
-
-        LOG_INF("📛 Device name initialized in scan response: %s", device_name_buffer);
-    }
-
-    // Try to update existing advertising data first
-    int err = bt_le_adv_update_data(adv_data_array, ARRAY_SIZE(adv_data_array),
-                                    scan_rsp, ARRAY_SIZE(scan_rsp));
-
-    if (err == 0) {
-        LOG_DBG("✅ Advertising data updated successfully");
-    } else {
-        // Any error - restart advertising to ensure continuous broadcast
-        LOG_INF("Advertising update failed (%d), restarting...", err);
-
-        // Stop any existing advertising
+        LOG_INF("📛 Device name not set - restarting advertising with proper scan response");
         bt_le_adv_stop();
         k_sleep(K_MSEC(50));
-
-        // Always try to restart advertising regardless of connection state
         start_custom_advertising();
+    } else {
+        // Try to update existing advertising data
+        int err = bt_le_adv_update_data(adv_data_array, ARRAY_SIZE(adv_data_array),
+                                        scan_rsp, ARRAY_SIZE(scan_rsp));
+
+        if (err == 0) {
+            LOG_DBG("✅ Advertising data updated successfully");
+        } else {
+            // Any error - restart advertising to ensure continuous broadcast
+            LOG_INF("Advertising update failed (%d), restarting...", err);
+
+            // Stop any existing advertising
+            bt_le_adv_stop();
+            k_sleep(K_MSEC(50));
+
+            // Always try to restart advertising regardless of connection state
+            start_custom_advertising();
+        }
     }
 
     // Check if we're in burst mode (high-priority event)
