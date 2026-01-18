@@ -8,16 +8,16 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/net/buf.h>
+#include <zephyr/net_buf.h>
 #include <zephyr/init.h>
 #include <string.h>
 
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
 
-// Message queue for thread-safe architecture (Phase 2 reconstruction)
+// Scanner stub functions for thread-safe display updates
 // Include path assumes build from zmk-config-prospector
-#include "../boards/shields/prospector_scanner/src/scanner_message.h"
+#include "../boards/shields/prospector_scanner/src/scanner_stub.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
