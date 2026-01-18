@@ -97,6 +97,8 @@ static bool adv_started = false;
 static struct bt_le_ext_adv *adv_set = NULL;
 static enum zmk_activity_state last_activity_state = ZMK_ACTIVITY_ACTIVE;
 static bool adv_needs_restart = false;  // Flag to indicate advertising needs restart after sleep
+static int adv_error_count = 0;  // Error counter for retry logic
+#define ADV_MAX_ERRORS_BEFORE_RESET 3
 
 // Adaptive update intervals based on activity - using Kconfig values for flexibility
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
@@ -789,10 +791,6 @@ static void start_custom_advertising(void) {
         }
     }
 }
-
-// Retry counter for error recovery
-static int adv_error_count = 0;
-#define ADV_MAX_ERRORS_BEFORE_RESET 3
 
 static void adv_work_handler(struct k_work *work) {
     // If adv_set is NULL (after sleep wake or error), recreate it
