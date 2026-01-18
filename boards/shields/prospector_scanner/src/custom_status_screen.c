@@ -108,6 +108,15 @@ static void destroy_pong_wars_widgets(void);
 static void create_pong_wars_widgets(void);
 static void swipe_process_timer_cb(lv_timer_t *timer);
 
+/* Display update functions - called from pending_update_timer_cb */
+void display_update_device_name(const char *name);
+void display_update_layer(int layer);
+void display_update_wpm(int wpm);
+void display_update_connection(bool usb_rdy, bool ble_conn, bool ble_bond, int profile);
+void display_update_modifiers(uint8_t mods);
+void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3);
+void display_update_scanner_battery(int level);
+
 /* Custom slider state for inverted drag handling */
 /* Due to 180° touch panel rotation, LVGL X decreases when user drags right */
 /* We track touch position manually and invert the calculation */
