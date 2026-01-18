@@ -1175,7 +1175,7 @@ static void create_layer_slide_widgets(lv_obj_t *parent, int y_offset) {
         }
 
         /* Set label text (layer number or empty for negative) */
-        char text[8];
+        char text[12];
         if (layer_num >= 0) {
             snprintf(text, sizeof(text), "%d", layer_num);
         } else {
