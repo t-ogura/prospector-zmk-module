@@ -21,6 +21,8 @@
 #include <zmk/hid.h>
 #include <zmk/status_advertisement.h>
 #include <zmk/events/modifiers_state_changed.h>
+#include <zmk/events/activity_state_changed.h>
+#include <zmk/activity.h>
 
 // keymap API is available on Central or Standalone (non-Split) builds only
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
@@ -93,6 +95,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static struct bt_le_ext_adv *adv_set = NULL;
+static enum zmk_activity_state last_activity_state = ZMK_ACTIVITY_ACTIVE;
+static bool adv_needs_restart = false;  // Flag to indicate advertising needs restart after sleep
 
 // Adaptive update intervals based on activity - using Kconfig values for flexibility
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
@@ -239,6 +243,65 @@ static int modifiers_changed_listener(const zmk_event_t *eh) {
 
 ZMK_LISTENER(prospector_modifiers_listener, modifiers_changed_listener);
 ZMK_SUBSCRIPTION(prospector_modifiers_listener, zmk_modifiers_state_changed);
+
+// Activity state listener for sleep/wake handling
+// This ensures proper advertising restart after system sleep
+static int activity_state_listener(const zmk_event_t *eh) {
+    const struct zmk_activity_state_changed *ev = as_zmk_activity_state_changed(eh);
+    if (!ev) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    enum zmk_activity_state new_state = ev->state;
+
+    LOG_INF("🔄 Activity state changed: %s -> %s",
+            last_activity_state == ZMK_ACTIVITY_ACTIVE ? "ACTIVE" :
+            last_activity_state == ZMK_ACTIVITY_IDLE ? "IDLE" : "SLEEP",
+            new_state == ZMK_ACTIVITY_ACTIVE ? "ACTIVE" :
+            new_state == ZMK_ACTIVITY_IDLE ? "IDLE" : "SLEEP");
+
+    // Handle sleep entry
+    if (new_state == ZMK_ACTIVITY_SLEEP) {
+        LOG_INF("💤 Entering sleep - stopping advertising cleanly");
+        if (adv_set) {
+            // Stop advertising before sleep
+            bt_le_ext_adv_stop(adv_set);
+            // Delete the advertising set - it will be invalid after sleep
+            bt_le_ext_adv_delete(adv_set);
+            adv_set = NULL;
+            adv_needs_restart = true;
+            LOG_INF("💤 Advertising set deleted for clean sleep");
+        }
+    }
+    // Handle wake from sleep (or idle)
+    else if (new_state == ZMK_ACTIVITY_ACTIVE &&
+             (last_activity_state == ZMK_ACTIVITY_SLEEP || adv_needs_restart)) {
+        LOG_INF("⚡ Waking from sleep - restarting advertising");
+
+        // Ensure adv_set is clean
+        if (adv_set) {
+            LOG_WRN("⚠️ adv_set still exists after sleep - cleaning up");
+            bt_le_ext_adv_stop(adv_set);
+            bt_le_ext_adv_delete(adv_set);
+            adv_set = NULL;
+        }
+
+        adv_needs_restart = false;
+
+        // Schedule advertising restart with small delay to allow BLE stack to stabilize
+        if (adv_started) {
+            k_work_cancel_delayable(&adv_work);
+            k_work_schedule(&adv_work, K_MSEC(500));  // 500ms delay for BLE stability
+            LOG_INF("⚡ Advertising restart scheduled (500ms delay)");
+        }
+    }
+
+    last_activity_state = new_state;
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(prospector_activity_listener, activity_state_listener);
+ZMK_SUBSCRIPTION(prospector_activity_listener, zmk_activity_state_changed);
 
 // WPM is now handled by custom implementation in position_state_listener
 // No separate WPM event listener needed - integrated into position_state_listener
@@ -688,13 +751,14 @@ static void start_custom_advertising(void) {
 
     if (err == 0 || err == -EALREADY) {
         LOG_INF("✅ Extended advertising started successfully");
+        adv_error_count = 0;  // Reset error count on success
+    } else if (err == -EAGAIN || err == -EBUSY) {
+        // Temporary error - keep adv_set and retry later
+        LOG_WRN("⚠️ Advertising start busy (%d), will retry on next work cycle", err);
     } else {
-        LOG_ERR("❌ Extended advertising failed with error: %d, resetting...", err);
-        // Reset adv_set so it will be recreated on next attempt
-        if (adv_set) {
-            bt_le_ext_adv_delete(adv_set);
-            adv_set = NULL;
-        }
+        LOG_ERR("❌ Extended advertising start failed with error: %d", err);
+        // Don't immediately reset - let adv_work_handler handle retries
+        // Only reset if this is a persistent failure (handled by error count in work handler)
     }
 
     LOG_INF("Manufacturer data (%d bytes): %02X%02X %02X%02X %02X %02X %02X %02X %02X %02X %02X",
@@ -726,7 +790,24 @@ static void start_custom_advertising(void) {
     }
 }
 
+// Retry counter for error recovery
+static int adv_error_count = 0;
+#define ADV_MAX_ERRORS_BEFORE_RESET 3
+
 static void adv_work_handler(struct k_work *work) {
+    // If adv_set is NULL (after sleep wake or error), recreate it
+    if (!adv_set) {
+        LOG_INF("📡 adv_set is NULL - creating new advertising set");
+        start_custom_advertising();
+        if (!adv_set) {
+            // Failed to create - retry later
+            LOG_ERR("❌ Failed to create advertising set, retrying in 1s");
+            k_work_schedule(&adv_work, K_SECONDS(1));
+            return;
+        }
+        adv_error_count = 0;  // Reset error count on successful creation
+    }
+
     // Update manufacturer data
     build_manufacturer_payload();
 
@@ -736,14 +817,30 @@ static void adv_work_handler(struct k_work *work) {
 
     if (err == 0) {
         LOG_DBG("✅ Extended advertising data updated successfully");
+        adv_error_count = 0;  // Reset error count on success
+    } else if (err == -EAGAIN || err == -EBUSY) {
+        // Temporary error - just retry later without resetting
+        LOG_WRN("⚠️ Advertising update busy (%d), retrying...", err);
+        k_work_schedule(&adv_work, K_MSEC(100));
+        return;
     } else {
-        LOG_ERR("❌ Extended advertising update failed: %d, resetting adv_set...", err);
-        // If it failed, delete the invalid adv_set and recreate
-        if (adv_set) {
-            bt_le_ext_adv_delete(adv_set);
-            adv_set = NULL;
+        // Persistent error - count and potentially reset
+        adv_error_count++;
+        LOG_ERR("❌ Extended advertising update failed: %d (error %d/%d)",
+                err, adv_error_count, ADV_MAX_ERRORS_BEFORE_RESET);
+
+        if (adv_error_count >= ADV_MAX_ERRORS_BEFORE_RESET) {
+            LOG_ERR("❌ Too many errors - resetting advertising set");
+            if (adv_set) {
+                bt_le_ext_adv_stop(adv_set);
+                bt_le_ext_adv_delete(adv_set);
+                adv_set = NULL;
+            }
+            adv_error_count = 0;
+            // Schedule restart with delay
+            k_work_schedule(&adv_work, K_MSEC(500));
+            return;
         }
-        start_custom_advertising();
     }
 
     // Check if we're in burst mode (high-priority event)

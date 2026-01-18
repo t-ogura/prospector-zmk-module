@@ -43,6 +43,7 @@ LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
 struct pending_display_data {
     volatile bool update_pending;
     volatile bool signal_update_pending;  /* Signal widget updates separately (1Hz) */
+    volatile bool no_keyboards;           /* True when all keyboards timed out */
     char device_name[MAX_NAME_LEN];
     int layer;
     int wpm;
@@ -472,6 +473,32 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
     /* Check for pending display update */
     struct pending_display_data data;
     if (scanner_get_pending_update(&data)) {
+        /* Check if all keyboards have timed out */
+        if (data.no_keyboards) {
+            LOG_INF("All keyboards timed out - returning to Scanning... state");
+
+            /* Reset display to initial "Scanning..." state */
+            display_update_device_name("Scanning...");
+            display_update_layer(0);
+            display_update_wpm(0);
+            display_update_connection(false, false, false, 0);
+            display_update_modifiers(0);
+            display_update_keyboard_battery_4(0, 0, 0, 0);
+
+            /* Clear last keyboard name so next keyboard triggers battery reposition */
+            last_keyboard_name[0] = '\0';
+            active_battery_count = -1;
+
+            /* Apply timeout brightness if configured */
+#ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
+            if (CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS > 0) {
+                set_pwm_brightness(CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
+                LOG_INF("Timeout brightness set to %d%%", CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
+            }
+#endif
+            return;
+        }
+
         /* Detect keyboard change - reset battery count to force full reposition */
         if (strcmp(last_keyboard_name, data.device_name) != 0) {
             LOG_INF("Keyboard changed: %s -> %s, resetting battery layout",
@@ -479,6 +506,12 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
             strncpy(last_keyboard_name, data.device_name, MAX_NAME_LEN - 1);
             last_keyboard_name[MAX_NAME_LEN - 1] = '\0';
             active_battery_count = -1;  /* Force reposition on next battery update */
+
+            /* Restore normal brightness when keyboard activity resumes */
+#ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
+            set_pwm_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+            LOG_INF("Brightness restored to %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+#endif
         }
 
         /* Process all updates in main thread - safe to call LVGL */

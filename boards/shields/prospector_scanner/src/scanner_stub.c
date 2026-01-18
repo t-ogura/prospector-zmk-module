@@ -65,6 +65,7 @@ struct pending_display_data {
     /* Flags - set by work queue, cleared by LVGL timer */
     volatile bool update_pending;
     volatile bool signal_update_pending;  /* Signal widget updates separately (1Hz) */
+    volatile bool no_keyboards;           /* True when all keyboards timed out */
 
     /* Cached data for LVGL update */
     char device_name[MAX_NAME_LEN];
@@ -235,9 +236,43 @@ static void display_update_work_handler(struct k_work *work) {
     char name[MAX_NAME_LEN];
 
     if (!scanner_get_keyboard_data(selected_keyboard, &data, &rssi, name, sizeof(name))) {
-        LOG_DBG("No keyboard data for slot %d", selected_keyboard);
+        /* Check if any keyboard is active */
+        int active_count = scanner_get_active_keyboard_count();
+        if (active_count == 0) {
+            /* All keyboards timed out - trigger "Scanning..." display */
+            LOG_INF("No active keyboards - returning to Scanning... state");
+            pending_data.no_keyboards = true;
+            pending_data.update_pending = true;
+
+            /* Reset signal data */
+            set_signal_data(-100, -1.0f);
+            pending_data.signal_update_pending = true;
+
+            /* Reset rate calculation state */
+            rate_last_calc_time = 0;
+            atomic_set(&adv_receive_count, 0);
+            rate_history_filled = false;
+            rate_history_idx = 0;
+        } else {
+            /* Try to switch to another active keyboard */
+            for (int i = 0; i < MAX_KEYBOARDS; i++) {
+                if (i != selected_keyboard) {
+                    struct zmk_status_adv_data tmp_data;
+                    if (scanner_get_keyboard_data(i, &tmp_data, NULL, NULL, 0)) {
+                        selected_keyboard = i;
+                        LOG_INF("Switched to keyboard slot %d", i);
+                        /* Reschedule to update with new keyboard */
+                        k_work_schedule(&display_update_work, K_MSEC(10));
+                        return;
+                    }
+                }
+            }
+        }
         return;
     }
+
+    /* Keyboard data available - clear no_keyboards flag */
+    pending_data.no_keyboards = false;
 
     LOG_INF("Pending display update: %s, Layer=%d, Battery=%d%%",
             name, data.active_layer, data.battery_level);
@@ -464,23 +499,42 @@ int scanner_msg_send_timeout_check(void) {
     if (!mutex_initialized) return 0;
 
     uint32_t now = k_uptime_get_32();
-    const uint32_t timeout_ms = 10000;  /* 10 seconds */
+
+    /* Use CONFIG value for timeout (synced with status_scanner.c) */
+#ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
+    const uint32_t timeout_ms = CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS;
+#else
+    const uint32_t timeout_ms = 480000;  /* 8 minutes default */
+#endif
+
+    /* Skip if timeout is disabled */
+    if (timeout_ms == 0) {
+        return 0;
+    }
 
     if (k_mutex_lock(&data_mutex, K_MSEC(5)) != 0) {
         return -EBUSY;
     }
 
+    bool any_timed_out = false;
     for (int i = 0; i < MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) {
             if ((now - keyboards[i].last_seen) > timeout_ms) {
                 LOG_INF("Keyboard in slot %d timed out", i);
                 keyboards[i].active = false;
                 keyboards[i].name[0] = '\0';
+                any_timed_out = true;
             }
         }
     }
 
     k_mutex_unlock(&data_mutex);
+
+    /* Trigger display update if any keyboard timed out */
+    if (any_timed_out) {
+        schedule_display_update();
+    }
+
     msgs_sent++;
     return 0;
 }

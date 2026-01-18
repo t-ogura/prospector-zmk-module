@@ -529,6 +529,11 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 }
 
 static void timeout_work_handler(struct k_work *work) {
+    // Skip if timeout is disabled (0)
+    if (KEYBOARD_TIMEOUT_MS == 0) {
+        return;
+    }
+
     // Phase 4: Send timeout check message to queue
     // This allows the main task to handle timeout processing
     int msg_ret = scanner_msg_send_timeout_check();
@@ -580,8 +585,8 @@ static void timeout_work_handler(struct k_work *work) {
                 timeout_indices[i]);
     }
 
-    // Reschedule timeout check
-    if (scanning) {
+    // Reschedule timeout check (only if timeout is enabled)
+    if (scanning && KEYBOARD_TIMEOUT_MS > 0) {
         k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
     }
 }
@@ -618,8 +623,15 @@ int zmk_status_scanner_start(void) {
     }
     
     scanning = true;
-    k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
-    
+
+    // Only schedule timeout work if timeout is enabled (non-zero)
+    if (KEYBOARD_TIMEOUT_MS > 0) {
+        k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
+        LOG_INF("Status scanner started - timeout enabled (%ums)", KEYBOARD_TIMEOUT_MS);
+    } else {
+        LOG_INF("Status scanner started - timeout DISABLED");
+    }
+
     LOG_INF("Status scanner started in ACTIVE mode - will receive Scan Response packets");
     return 0;
 }
