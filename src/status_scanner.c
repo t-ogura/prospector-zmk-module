@@ -15,6 +15,11 @@
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
 
+// Periodic Sync support (v2.2.0)
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+#include <zephyr/bluetooth/gap.h>
+#endif
+
 // Scanner stub functions for thread-safe display updates
 // Include path assumes build from zmk-config-prospector
 #include "../boards/shields/prospector_scanner/src/scanner_stub.h"
@@ -39,6 +44,24 @@ static struct k_work_delayable timeout_work;
 // Protects against concurrent access from BLE scan callback, timeout handler, and API calls
 static struct k_mutex scanner_mutex;
 static bool scanner_mutex_initialized = false;
+
+// Periodic Sync state tracking (v2.2.0)
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+static struct bt_le_per_adv_sync *per_sync = NULL;
+static sync_state_t current_sync_state = SYNC_STATE_NONE;
+static int selected_keyboard_index = -1;
+static uint8_t sync_retry_count = 0;
+static struct k_work_delayable sync_retry_work;
+
+#define SYNC_TIMEOUT_MS      10000   // 10 seconds sync timeout
+#define SYNC_RETRY_DELAY_MS  3000    // 3 seconds retry delay
+#define SYNC_MAX_RETRIES     1       // Retry once before fallback
+
+// Forward declarations for Periodic sync functions
+static int start_periodic_sync(int keyboard_index);
+static void stop_periodic_sync(void);
+static void sync_retry_work_handler(struct k_work *work);
+#endif // CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC
 
 static void scanner_mutex_init(void) {
     if (!scanner_mutex_initialized) {
@@ -212,6 +235,19 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     // Store BLE address for unique identification
     memcpy(keyboards[index].ble_addr, addr->a.val, 6);
     keyboards[index].ble_addr_type = addr->type;
+
+    // Detect v2 keyboard (Periodic Advertising support) from HAS_PERIODIC flag
+    bool has_periodic = (adv_data->status_flags & ZMK_STATUS_FLAG_HAS_PERIODIC) != 0;
+    if (has_periodic != keyboards[index].has_periodic) {
+        keyboards[index].has_periodic = has_periodic;
+        // TODO: SID extraction requires Extended ADV scan callback
+        // For now, SID is set to 0 and will be updated when we implement extended scanning
+        keyboards[index].sid = 0;
+        LOG_INF("🔄 Keyboard %s supports Periodic ADV: %s",
+                keyboards[index].ble_name[0] ? keyboards[index].ble_name : "Unknown",
+                has_periodic ? "YES (v2)" : "NO (v1)");
+    }
+
     // Update name: always set if empty, otherwise only update if real name (not "Unknown")
     if (keyboards[index].ble_name[0] == '\0') {
         // First time - set whatever we have (even "Unknown")
@@ -708,7 +744,234 @@ int zmk_status_scanner_get_primary_keyboard(void) {
     return primary;
 }
 
+// ============================================================================
+// Periodic Sync Implementation (v2.2.0)
+// ============================================================================
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+
+// Periodic sync callbacks
+static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
+                                    struct bt_le_per_adv_sync_synced_info *info) {
+    LOG_INF("✅ Periodic sync established! Interval: %d ms", info->interval * 125 / 100);
+    current_sync_state = SYNC_STATE_SYNCED;
+    sync_retry_count = 0;
+    // Notify UI to update sync icon
+    scanner_trigger_high_priority_update();
+}
+
+static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
+                                  const struct bt_le_per_adv_sync_term_info *info) {
+    LOG_INF("⚠️ Periodic sync terminated (reason: %d)", info->reason);
+    per_sync = NULL;
+
+    // If we were synced, try to retry
+    if (current_sync_state == SYNC_STATE_SYNCING) {
+        if (sync_retry_count < SYNC_MAX_RETRIES) {
+            LOG_INF("📡 Scheduling sync retry in %dms", SYNC_RETRY_DELAY_MS);
+            k_work_schedule(&sync_retry_work, K_MSEC(SYNC_RETRY_DELAY_MS));
+        } else {
+            LOG_INF("📡 Max retries reached, falling back to Legacy");
+            current_sync_state = SYNC_STATE_FALLBACK;
+            sync_retry_count = 0;
+        }
+    } else {
+        current_sync_state = SYNC_STATE_NONE;
+    }
+
+    scanner_trigger_high_priority_update();
+}
+
+static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
+                            const struct bt_le_per_adv_sync_recv_info *info,
+                            struct net_buf_simple *buf) {
+    // Parse Periodic ADV data - same format as Legacy
+    if (buf->len >= sizeof(struct zmk_status_adv_data)) {
+        // Check for manufacturer data header
+        if (buf->len > 2) {
+            uint8_t len = net_buf_simple_pull_u8(buf);
+            uint8_t type = net_buf_simple_pull_u8(buf);
+
+            if (type == BT_DATA_MANUFACTURER_DATA && len >= sizeof(struct zmk_status_adv_data)) {
+                const struct zmk_status_adv_data *data =
+                    (const struct zmk_status_adv_data *)buf->data;
+
+                // Verify Prospector signature
+                if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF &&
+                    data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
+
+                    // Update selected keyboard with Periodic data
+                    if (selected_keyboard_index >= 0 &&
+                        selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+
+                        // Acquire mutex for keyboard update
+                        if (scanner_lock(K_MSEC(5)) == 0) {
+                            keyboards[selected_keyboard_index].last_seen = k_uptime_get_32();
+                            keyboards[selected_keyboard_index].rssi = info->rssi;
+                            memcpy(&keyboards[selected_keyboard_index].data, data,
+                                   sizeof(struct zmk_status_adv_data));
+                            scanner_unlock();
+
+                            LOG_DBG("📡 Periodic data: Layer=%d, Bat=%d%%, RSSI=%d",
+                                    data->active_layer, data->battery_level, info->rssi);
+
+                            // Trigger high-priority update for responsive display
+                            scanner_trigger_high_priority_update();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+static struct bt_le_per_adv_sync_cb sync_callbacks = {
+    .synced = per_adv_sync_synced_cb,
+    .term = per_adv_sync_term_cb,
+    .recv = per_adv_recv_cb,
+};
+
+static bool sync_callbacks_registered = false;
+
+static void sync_retry_work_handler(struct k_work *work) {
+    if (selected_keyboard_index >= 0) {
+        sync_retry_count++;
+        LOG_INF("📡 Sync retry %d/%d", sync_retry_count, SYNC_MAX_RETRIES + 1);
+        start_periodic_sync(selected_keyboard_index);
+    }
+}
+
+static int start_periodic_sync(int keyboard_index) {
+    if (keyboard_index < 0 || keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+        return -EINVAL;
+    }
+
+    struct zmk_keyboard_status *kb = &keyboards[keyboard_index];
+    if (!kb->active || !kb->has_periodic) {
+        LOG_DBG("📡 Keyboard %d not eligible for Periodic sync", keyboard_index);
+        current_sync_state = SYNC_STATE_NONE;
+        return -ENOTSUP;
+    }
+
+    // Register callbacks if not done yet
+    if (!sync_callbacks_registered) {
+        bt_le_per_adv_sync_cb_register(&sync_callbacks);
+        sync_callbacks_registered = true;
+    }
+
+    // Stop existing sync if any
+    stop_periodic_sync();
+
+    // Build sync parameters
+    bt_addr_le_t addr;
+    memcpy(addr.a.val, kb->ble_addr, 6);
+    addr.type = kb->ble_addr_type;
+
+    struct bt_le_per_adv_sync_param sync_param = {
+        .options = 0,
+        .sid = kb->sid,  // TODO: Get actual SID from Extended ADV
+        .skip = 0,
+        .timeout = SYNC_TIMEOUT_MS / 10,  // In 10ms units
+    };
+    bt_addr_le_copy(&sync_param.addr, &addr);
+
+    int err = bt_le_per_adv_sync_create(&sync_param, &per_sync);
+    if (err) {
+        LOG_ERR("❌ Failed to create periodic sync: %d", err);
+        current_sync_state = SYNC_STATE_FALLBACK;
+        return err;
+    }
+
+    current_sync_state = SYNC_STATE_SYNCING;
+    LOG_INF("📡 Periodic sync initiated for keyboard %d", keyboard_index);
+    return 0;
+}
+
+static void stop_periodic_sync(void) {
+    if (per_sync) {
+        bt_le_per_adv_sync_delete(per_sync);
+        per_sync = NULL;
+    }
+    current_sync_state = SYNC_STATE_NONE;
+    sync_retry_count = 0;
+    k_work_cancel_delayable(&sync_retry_work);
+}
+
+#endif // CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC
+
+// ============================================================================
+// Public API for Periodic Sync (v2.2.0)
+// ============================================================================
+
+sync_state_t zmk_status_scanner_get_sync_state(void) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+    return current_sync_state;
+#else
+    return SYNC_STATE_NONE;
+#endif
+}
+
+int zmk_status_scanner_select_keyboard(int keyboard_index) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+    if (keyboard_index < 0 || keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+        return -EINVAL;
+    }
+
+    // Cancel any pending retry
+    k_work_cancel_delayable(&sync_retry_work);
+
+    // Stop existing sync
+    stop_periodic_sync();
+
+    selected_keyboard_index = keyboard_index;
+    sync_retry_count = 0;
+
+    // Check if keyboard supports Periodic
+    struct zmk_keyboard_status *kb = &keyboards[keyboard_index];
+    if (kb->active && kb->has_periodic) {
+        LOG_INF("📡 Selected v2 keyboard %d - initiating Periodic sync", keyboard_index);
+        return start_periodic_sync(keyboard_index);
+    } else {
+        LOG_INF("📡 Selected v1 keyboard %d - using Legacy mode", keyboard_index);
+        current_sync_state = SYNC_STATE_NONE;
+        return 0;
+    }
+#else
+    // Without Periodic support, just track selection
+    return 0;
+#endif
+}
+
+int zmk_status_scanner_get_selected_keyboard(void) {
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+    return selected_keyboard_index;
+#else
+    return zmk_status_scanner_get_primary_keyboard();
+#endif
+}
+
+const char* zmk_status_scanner_get_sync_icon(sync_state_t state) {
+    switch (state) {
+    case SYNC_STATE_NONE:      return "   ";   // v1 or not selected
+    case SYNC_STATE_SYNCING:   return ">>>";   // Sync in progress
+    case SYNC_STATE_SYNCED:    return "SYN";   // Periodic synced
+    case SYNC_STATE_FALLBACK:  return "LGC";   // Legacy fallback
+    default:                   return "   ";
+    }
+}
+
 // Initialize on system startup - use later priority to ensure BT is ready
-SYS_INIT(zmk_status_scanner_init, APPLICATION, 99);
+static int scanner_init(const struct device *dev) {
+    int ret = zmk_status_scanner_init();
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+    k_work_init_delayable(&sync_retry_work, sync_retry_work_handler);
+    LOG_INF("📡 Periodic Sync support enabled");
+#endif
+
+    return ret;
+}
+
+SYS_INIT(scanner_init, APPLICATION, 99);
 
 #endif // CONFIG_PROSPECTOR_MODE_SCANNER

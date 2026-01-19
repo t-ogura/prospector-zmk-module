@@ -175,6 +175,30 @@ config PROSPECTOR_MODE_SCANNER
       Enable scanner mode to receive status advertisements from ZMK keyboards.
       In this mode, Prospector acts as a standalone status display device.
 
+config PROSPECTOR_SCANNER_PERIODIC_SYNC
+    bool "Enable Periodic Advertising sync support"
+    default y
+    depends on PROSPECTOR_MODE_SCANNER
+    depends on BT_PER_ADV_SYNC
+    help
+      Enable the scanner to sync with keyboards using Periodic Advertising
+      for improved latency and stability.
+
+      When enabled, the scanner will:
+      - Detect v2 keyboards (with HAS_PERIODIC flag)
+      - Establish Periodic sync with the selected keyboard
+      - Receive low-latency updates via Periodic ADV
+      - Fall back to Legacy scanning if sync fails
+
+      Requires BLE 5.0 support. Legacy scanning continues in background
+      for keyboard discovery and v1 keyboard support.
+
+config BT_PER_ADV_SYNC_MAX
+    default 1 if PROSPECTOR_SCANNER_PERIODIC_SYNC
+    help
+      Maximum number of Periodic Advertising syncs.
+      Only 1 is needed since we sync with the main screen keyboard only.
+
 config PROSPECTOR_TOUCH_ENABLED
     bool "Enable touch panel support"
     default y
