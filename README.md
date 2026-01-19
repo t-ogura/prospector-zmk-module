@@ -4,6 +4,9 @@ ZMK module for Prospector status display devices.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![ZMK Compatible](https://img.shields.io/badge/ZMK-compatible-blue)](https://zmk.dev/)
+[![Version](https://img.shields.io/badge/version-v2.1.0-brightgreen)](https://github.com/t-ogura/zmk-config-prospector/releases)
+
+> **v2.1.0**: Zephyr 4.x / ZMK main branch compatible. For ZMK ≤0.3 (Zephyr 3.x), use `v2.0.0`.
 
 ## Overview
 
