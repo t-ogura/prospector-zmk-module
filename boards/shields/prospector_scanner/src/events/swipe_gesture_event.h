@@ -11,6 +11,7 @@
 
 // Swipe gesture directions
 enum swipe_direction {
+    SWIPE_DIRECTION_NONE = -1,  /* No pending swipe */
     SWIPE_DIRECTION_UP = 0,
     SWIPE_DIRECTION_DOWN = 1,
     SWIPE_DIRECTION_LEFT = 2,

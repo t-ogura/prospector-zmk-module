@@ -10,6 +10,39 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+// ========== Runtime Channel Storage ==========
+
+// Runtime channel value (0 = All, 1-255 = specific channel)
+// Initialized from Kconfig default, can be changed at runtime
+static uint8_t runtime_scanner_channel = 0;
+static bool runtime_channel_initialized = false;
+
+static void init_runtime_channel(void) {
+    if (!runtime_channel_initialized) {
+#ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
+        runtime_scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
+#else
+        runtime_scanner_channel = 0;  // Default: accept all
+#endif
+        runtime_channel_initialized = true;
+        LOG_INF("📡 Runtime channel initialized to %d", runtime_scanner_channel);
+    }
+}
+
+uint8_t scanner_get_runtime_channel(void) {
+    init_runtime_channel();
+    return runtime_scanner_channel;
+}
+
+void scanner_set_runtime_channel(uint8_t channel) {
+    init_runtime_channel();
+    runtime_scanner_channel = channel;
+    LOG_INF("📡 Scanner channel set to %d (%s)", channel, channel == 0 ? "All" : "Filtered");
+}
+
+// Forward declaration for channel value update
+static void update_channel_value_display(struct zmk_widget_system_settings *widget);
+
 // ========== Button Event Handlers ==========
 
 static void bootloader_btn_event_cb(lv_event_t *e) {
@@ -69,6 +102,64 @@ static void reset_btn_event_cb(lv_event_t *e) {
 
         // Perform warm reboot (normal restart)
         sys_reboot(SYS_REBOOT_WARM);
+    }
+}
+
+// ========== Channel Selector Event Handlers ==========
+
+// Maximum channel value (0 = All, 1-9 for easy selection)
+#define CHANNEL_MAX 9
+
+static void update_channel_value_display(struct zmk_widget_system_settings *widget) {
+    if (!widget || !widget->channel_value) return;
+
+    uint8_t ch = scanner_get_runtime_channel();
+    if (ch == 0) {
+        lv_label_set_text(widget->channel_value, "All");
+    } else {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", ch);
+        lv_label_set_text(widget->channel_value, buf);
+    }
+}
+
+static void channel_left_btn_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED || code == LV_EVENT_SHORT_CLICKED) {
+        uint8_t ch = scanner_get_runtime_channel();
+        if (ch > 0) {
+            ch--;
+        } else {
+            ch = CHANNEL_MAX;  // Wrap around to max
+        }
+        scanner_set_runtime_channel(ch);
+
+        // Update display
+        struct zmk_widget_system_settings *widget = lv_event_get_user_data(e);
+        update_channel_value_display(widget);
+
+        LOG_INF("📡 Channel decreased to %d", ch);
+    }
+}
+
+static void channel_right_btn_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED || code == LV_EVENT_SHORT_CLICKED) {
+        uint8_t ch = scanner_get_runtime_channel();
+        if (ch < CHANNEL_MAX) {
+            ch++;
+        } else {
+            ch = 0;  // Wrap around to All
+        }
+        scanner_set_runtime_channel(ch);
+
+        // Update display
+        struct zmk_widget_system_settings *widget = lv_event_get_user_data(e);
+        update_channel_value_display(widget);
+
+        LOG_INF("📡 Channel increased to %d", ch);
     }
 }
 
@@ -148,9 +239,16 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
     lv_label_set_text(widget->title_label, "Quick Actions");
     lv_obj_set_style_text_color(widget->title_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(widget->title_label, &lv_font_montserrat_20, LV_STATE_DEFAULT);
-    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 20);  // Y: 40→20 (higher)
+    lv_obj_align(widget->title_label, LV_ALIGN_TOP_MID, 0, 15);
 
-    LOG_INF("✅ Title label created");
+    // Version label (below title)
+    lv_obj_t *version_label = lv_label_create(widget->obj);
+    lv_label_set_text(version_label, "v2.1.0");
+    lv_obj_set_style_text_color(version_label, lv_color_hex(0x888888), LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(version_label, &lv_font_montserrat_12, LV_STATE_DEFAULT);
+    lv_obj_align(version_label, LV_ALIGN_TOP_MID, 0, 40);
+
+    LOG_INF("✅ Title and version labels created");
 
     // Bootloader button (blue theme) - buttons closer together
     LOG_INF("Creating Bootloader button...");
@@ -194,6 +292,57 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
 
     LOG_INF("✅ Reset button created with event handler");
 
+    // ========== Channel Selector UI ==========
+    LOG_INF("Creating Channel selector...");
+
+    // Channel label
+    widget->channel_label = lv_label_create(widget->obj);
+    lv_label_set_text(widget->channel_label, "Channel:");
+    lv_obj_set_style_text_color(widget->channel_label, lv_color_hex(0xAAAAAA), LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(widget->channel_label, &lv_font_montserrat_16, LV_STATE_DEFAULT);
+    lv_obj_align(widget->channel_label, LV_ALIGN_BOTTOM_MID, -60, -50);
+
+    // Channel value display
+    widget->channel_value = lv_label_create(widget->obj);
+    lv_obj_set_style_text_color(widget->channel_value, lv_color_hex(0x4A90E2), LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(widget->channel_value, &lv_font_montserrat_20, LV_STATE_DEFAULT);
+    lv_obj_set_width(widget->channel_value, 50);
+    lv_obj_set_style_text_align(widget->channel_value, LV_TEXT_ALIGN_CENTER, LV_STATE_DEFAULT);
+    lv_obj_align(widget->channel_value, LV_ALIGN_BOTTOM_MID, 15, -48);
+    update_channel_value_display(widget);  // Set initial value
+
+    // Left arrow button (decrease channel)
+    widget->channel_left_btn = lv_btn_create(widget->obj);
+    lv_obj_set_size(widget->channel_left_btn, 40, 32);
+    lv_obj_align(widget->channel_left_btn, LV_ALIGN_BOTTOM_MID, -25, -45);
+    lv_obj_set_style_bg_color(widget->channel_left_btn, lv_color_hex(0x333333), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(widget->channel_left_btn, lv_color_hex(0x555555), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(widget->channel_left_btn, 6, LV_STATE_DEFAULT);
+
+    lv_obj_t *left_arrow = lv_label_create(widget->channel_left_btn);
+    lv_label_set_text(left_arrow, LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_color(left_arrow, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+    lv_obj_center(left_arrow);
+
+    lv_obj_add_event_cb(widget->channel_left_btn, channel_left_btn_event_cb, LV_EVENT_ALL, widget);
+
+    // Right arrow button (increase channel)
+    widget->channel_right_btn = lv_btn_create(widget->obj);
+    lv_obj_set_size(widget->channel_right_btn, 40, 32);
+    lv_obj_align(widget->channel_right_btn, LV_ALIGN_BOTTOM_MID, 55, -45);
+    lv_obj_set_style_bg_color(widget->channel_right_btn, lv_color_hex(0x333333), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(widget->channel_right_btn, lv_color_hex(0x555555), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(widget->channel_right_btn, 6, LV_STATE_DEFAULT);
+
+    lv_obj_t *right_arrow = lv_label_create(widget->channel_right_btn);
+    lv_label_set_text(right_arrow, LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_color(right_arrow, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+    lv_obj_center(right_arrow);
+
+    lv_obj_add_event_cb(widget->channel_right_btn, channel_right_btn_event_cb, LV_EVENT_ALL, widget);
+
+    LOG_INF("✅ Channel selector created");
+
     // Initially hidden
     lv_obj_add_flag(widget->obj, LV_OBJ_FLAG_HIDDEN);
 
@@ -213,7 +362,7 @@ struct zmk_widget_system_settings *zmk_widget_system_settings_create(lv_obj_t *p
 
     // Allocate memory using LVGL's allocator
     struct zmk_widget_system_settings *widget =
-        (struct zmk_widget_system_settings *)lv_mem_alloc(sizeof(struct zmk_widget_system_settings));
+        (struct zmk_widget_system_settings *)lv_malloc(sizeof(struct zmk_widget_system_settings));
     if (!widget) {
         LOG_ERR("Failed to allocate memory for system_settings_widget (%d bytes)",
                 sizeof(struct zmk_widget_system_settings));
@@ -227,7 +376,7 @@ struct zmk_widget_system_settings *zmk_widget_system_settings_create(lv_obj_t *p
     int ret = zmk_widget_system_settings_init(widget, parent);
     if (ret != 0) {
         LOG_ERR("Widget initialization failed, freeing memory");
-        lv_mem_free(widget);
+        lv_free(widget);
         return NULL;
     }
 
@@ -254,9 +403,13 @@ void zmk_widget_system_settings_destroy(struct zmk_widget_system_settings *widge
     widget->bootloader_label = NULL;
     widget->reset_btn = NULL;
     widget->reset_label = NULL;
+    widget->channel_label = NULL;
+    widget->channel_value = NULL;
+    widget->channel_left_btn = NULL;
+    widget->channel_right_btn = NULL;
 
     // Free widget memory
-    lv_mem_free(widget);
+    lv_free(widget);
 }
 
 // ========== Widget Control Functions ==========

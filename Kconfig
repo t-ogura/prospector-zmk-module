@@ -14,10 +14,14 @@ config ZMK_STATUS_ADVERTISEMENT
     bool "Enable ZMK Status Advertisement"
     default n
     depends on ZMK_BLE
+    select BT_EXT_ADV
     help
       Enable broadcasting of keyboard status information via BLE Advertisement.
       This allows external devices to receive status updates without establishing
       a connection to the keyboard.
+
+config BT_EXT_ADV_MAX_ADV_SET
+    default 2 if ZMK_STATUS_ADVERTISEMENT
 
 config ZMK_STATUS_ADV_INTERVAL_MS
     int "Status advertisement interval in milliseconds"
@@ -68,7 +72,7 @@ config ZMK_STATUS_ADV_ACTIVE_INTERVAL_MS
       200ms = 5Hz for responsive status updates.
 
 config ZMK_STATUS_ADV_IDLE_INTERVAL_MS
-    int "Idle advertisement interval in milliseconds" 
+    int "Idle advertisement interval in milliseconds"
     range 500 300000
     default 30000
     depends on ZMK_STATUS_ADV_ACTIVITY_BASED
@@ -97,6 +101,38 @@ config ZMK_STATUS_ADV_CENTRAL_SIDE
       RIGHT: Central is on the right side (default - most split keyboards)
       LEFT: Central is on the left side (e.g. some keyboards like Sweep)
       This determines the battery display position in scanner devices.
+
+config ZMK_STATUS_ADV_HALF_PERIPHERAL
+    int "Peripheral index for the other keyboard half"
+    default 0
+    range 0 2
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Which peripheral index to display in the keyboard half slot
+      (opposite side of central). Default is 0 (first connected peripheral).
+
+      Use this when the peripheral connection order doesn't match the
+      physical keyboard layout (e.g., after settings_reset, trackball
+      connected before the keyboard half).
+
+config ZMK_STATUS_ADV_AUX1_PERIPHERAL
+    int "Peripheral index for Aux1 slot"
+    default 1
+    range 0 2
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Which peripheral index to display in the Aux1 slot.
+      Typically used for trackball or additional peripheral device.
+      Default is 1 (second connected peripheral).
+
+config ZMK_STATUS_ADV_AUX2_PERIPHERAL
+    int "Peripheral index for Aux2 slot"
+    default 2
+    range 0 2
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT
+    help
+      Which peripheral index to display in the Aux2 slot.
+      Default is 2 (third connected peripheral).
 
 config PROSPECTOR_MODE_SCANNER
     bool "Enable Prospector Scanner Mode"
@@ -148,6 +184,17 @@ config PROSPECTOR_MAX_LAYERS
       Range is 4-10 layers. Display shows layers 0 through (MAX_LAYERS-1).
       Automatically centers when fewer layers are configured.
       This setting only applies to scanner mode and is ignored for keyboard builds.
+
+config PROSPECTOR_LAYER_SLIDE_DEFAULT
+    bool "Enable layer slide display mode by default"
+    default n
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Enable slide animation mode for layer display by default.
+      In slide mode, the active layer slides to the center position with animation.
+      When disabled, layers are displayed as a static list.
+      This can be toggled at runtime via the Display Settings screen (if touch enabled).
+      Works in both touch and non-touch modes.
 
 config PROSPECTOR_SCANNER_TIMEOUT_MS
     int "Scanner timeout in milliseconds (0 to disable)"
@@ -495,7 +542,7 @@ config ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
       Set to 0 to auto-calculate as 2x the window size (recommended).
       Manual values: 10-300 seconds for custom timeout behavior.
       Default 0 = auto (60s for 30s window, 20s for 10s window, etc.)
-      
+
       Examples:
       - 0: Auto-calculate (recommended) - 2x window size
       - 30: Manual 30-second timeout
@@ -510,10 +557,10 @@ config ZMK_STATUS_ADV_WMP_DECAY_TIMEOUT_SECONDS
     help
       DEPRECATED: This is a typo alias for ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS.
       Please use ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS instead.
-      
+
       This setting handles the common typo (WMP instead of WPM) found in external
       keyboard configurations to prevent build errors.
-      
+
       This alias will be removed in future versions. Please update your configuration
       to use the correct setting name: ZMK_STATUS_ADV_WPM_DECAY_TIMEOUT_SECONDS
 

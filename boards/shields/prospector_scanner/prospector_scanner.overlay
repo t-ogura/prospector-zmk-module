@@ -1,77 +1,78 @@
 /*
- * Copyright (c) 2024 The ZMK Contributors
- *
- * SPDX-License-Identifier: MIT
+ * Display Test - ST7789V + Touch (CST816S)
+ * Pin mapping from Prospector Scanner
  */
 
 #include <dt-bindings/zmk/matrix_transform.h>
-#include <dt-bindings/i2c/i2c.h>
-#include <physical_layouts.dtsi>
 
 / {
     chosen {
         zmk,kscan = &kscan0;
-        zmk,physical-layout = &default_layout;  // ZMK Studio compatibility: no matrix_transform!
+        zmk,display = &st7789v;
         zephyr,display = &st7789v;
-        zephyr,console = &cdc_acm_uart;  // USB logging console
+        zephyr,console = &cdc_acm_uart;
     };
 
-    default_layout: default_layout {
-        compatible = "zmk,physical-layout";
-        display-name = "Scanner Layout";
-        transform = <&default_transform>;
-
-        keys  //                     w   h    x    y     rot    rx    ry
-            = <&key_physical_attrs 100 100    0    0      0     0     0>
-            ;
-    };
-
-    default_transform: keymap_transform_0 {
-        compatible = "zmk,matrix-transform";
-        columns = <1>;
-        rows = <1>;
-        map = <RC(0,0)>;
-    };
-
+    /* Dummy kscan - moved to D2 to free D0 for touch IRQ */
     kscan0: kscan {
         compatible = "zmk,kscan-gpio-direct";
         wakeup-source;
-        input-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        input-gpios = <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 
-    // PWM backlight configuration (Pin 6 = P1.11)
+    /* PWM backlight control for brightness adjustment - Pin 6 = P1.11 */
+    /* PWM period: 1000us = 1kHz for flicker-free operation */
     pwmleds {
         compatible = "pwm-leds";
-        disp_bl: pwm_led_1 {
-            pwms = <&pwm1 0 PWM_MSEC(1) PWM_POLARITY_NORMAL>;  // Channel 0 for P1.11
+        backlight: backlight {
+            pwms = <&pwm0 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+            label = "Backlight";
         };
     };
 
-    // Alternative: Simple GPIO backlight control (Pin 6 = P1.11)
-    backlight: backlight {
-        compatible = "gpio-leds";
-        bl_gpio: backlight_gpio {
-            gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;  // P1.11 for Pin 6
-            label = "Display Backlight";
-        };
+    /* Alias for backlight */
+    aliases {
+        led0 = &backlight;
     };
-
-    // Ambient light sensor alias removed - pure Kconfig control
 };
 
-// USB CDC ACM device for logging
+/* USB CDC ACM for logging */
 &zephyr_udc0 {
     cdc_acm_uart: cdc_acm_uart {
         compatible = "zephyr,cdc-acm-uart";
     };
 };
 
-// Disable default SPI2 to avoid conflicts
+/* Disable default SPI2 */
 &spi2 {
     status = "disabled";
 };
 
-// Custom pinctrl configuration to match original adapter
+/* PWM pinctrl for backlight on P1.11 */
+&pinctrl {
+    pwm0_default: pwm0_default {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;  /* P1.11 = Pin 6 = Backlight */
+        };
+    };
+
+    pwm0_sleep: pwm0_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;
+            low-power-enable;
+        };
+    };
+};
+
+/* Enable PWM0 for backlight */
+&pwm0 {
+    status = "okay";
+    pinctrl-0 = <&pwm0_default>;
+    pinctrl-1 = <&pwm0_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+/* Custom pinctrl for SPI3 */
 &pinctrl {
     spi3_default: spi3_default {
         group1 {
@@ -89,121 +90,105 @@
             low-power-enable;
         };
     };
-
-    pwm1_default: pwm1_default {
-        group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;  // Pin 6 (D6) = P1.11 = Backlight PWM
-            nordic,invert;
-        };
-    };
-
-    pwm1_sleep: pwm1_sleep {
-        group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 1, 11)>;  // Pin 6 (D6) = P1.11 = Backlight PWM
-            low-power-enable;
-        };
-    };
-
-    // I2C pinctrl for APDS9960 sensor (4-pin mode)
-    i2c0_default: i2c0_default {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,   // D4 = P0.04 = SDA
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;   // D5 = P0.05 = SCL
-        };
-    };
-
-    i2c0_sleep: i2c0_sleep {
-        group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,   // D4 = P0.04 = SDA
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;   // D5 = P0.05 = SCL
-            low-power-enable;
-        };
-    };
 };
 
-// Use SPI3 with custom pinctrl (matches original adapter)
-disp_spi: &spi3 {
+/* SPI3 for display */
+&spi3 {
     status = "okay";
     pinctrl-0 = <&spi3_default>;
     pinctrl-1 = <&spi3_sleep>;
     pinctrl-names = "default", "sleep";
     cs-gpios = <&xiao_d 9 GPIO_ACTIVE_LOW>;
+};
 
-    st7789v: st7789v@0 {
-        compatible = "sitronix,st7789v";
-        spi-max-frequency = <31000000>;
-        reg = <0>;
-        cmd-data-gpios = <&xiao_d 7 GPIO_ACTIVE_LOW>;
+/* MIPI DBI wrapper for ST7789V */
+/ {
+    mipi_dbi {
+        compatible = "zephyr,mipi-dbi-spi";
+        spi-dev = <&spi3>;
+        dc-gpios = <&xiao_d 7 GPIO_ACTIVE_HIGH>;
         reset-gpios = <&xiao_d 3 GPIO_ACTIVE_LOW>;
-        width = <240>;
-        height = <280>;
-        x-offset = <0>;
-        y-offset = <20>;
-        vcom = <0x19>;
-        gctrl = <0x35>;
-        vrhs = <0x12>;
-        vdvs = <0x20>;
-        mdac = <0x00>;
-        gamma = <0x01>;
-        colmod = <0x05>;
-        lcm = <0x2c>;
-        porch-param = [0c 0c 00 33 33];
-        cmd2en-param = [5a 69 02 01];
-        pwctrl1-param = [a4 a1];
-        pvgam-param = [D0 04 0D 11 13 2B 3F 54 4C 18 0D 0B 1F 23];
-        nvgam-param = [D0 04 0C 11 13 2C 3F 44 51 2F 1F 1F 20 23];
-        ram-param = [00 F0];
-        rgb-param = [CD 08 14];
+        write-only;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        st7789v: st7789v@0 {
+            compatible = "sitronix,st7789v";
+            reg = <0>;
+            mipi-max-frequency = <20000000>;
+            mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
+            width = <280>;
+            height = <240>;
+            x-offset = <20>;
+            y-offset = <0>;
+            /* Zephyr 4.1: inversion is ON by default, use inversion-off to disable */
+            vcom = <0x19>;
+            gctrl = <0x35>;
+            vrhs = <0x12>;
+            vdvs = <0x20>;
+            mdac = <0x60>;  /* 90 degree rotation */
+            gamma = <0x01>;
+            colmod = <0x05>;
+            lcm = <0x2c>;
+            porch-param = [0c 0c 00 33 33];
+            cmd2en-param = [5a 69 02 01];
+            pwctrl1-param = [a4 a1];
+            pvgam-param = [D0 04 0D 11 13 2B 3F 54 4C 18 0D 0B 1F 23];
+            nvgam-param = [D0 04 0C 11 13 2C 3F 44 51 2F 1F 1F 20 23];
+            ram-param = [00 F0];
+            rgb-param = [CD 08 14];
+        };
     };
 };
 
-// I2C configuration for direct I2C sensor access (no Zephyr driver)
-// The APDS9960 is accessed directly via I2C in brightness_control.c
-// This bypasses the Zephyr driver requirement for an interrupt pin
+/* ========== I2C Bus (Step 5a) ========== */
+
+/* I2C0 pinctrl for touch sensor and light sensor */
+&pinctrl {
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,  /* D4 = P0.04 = SDA */
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;  /* D5 = P0.05 = SCL */
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 5)>;
+            low-power-enable;
+        };
+    };
+};
 
 &i2c0 {
     status = "okay";
+    compatible = "nordic,nrf-twim";
     pinctrl-0 = <&i2c0_default>;
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
+    clock-frequency = <100000>;  /* Standard mode 100kHz */
 
-    // Note: APDS9960 is accessed directly via I2C at address 0x39
-    // No device tree node needed - brightness_control.c handles initialization
-
-    // CST816S Touch Controller for Waveshare 1.69" Round LCD
-    // I2C address: 0x15
-    // SDA/SCL shared with APDS9960 (both on D4/D5)
+    /* CST816S Touch Controller (Step 5b - enabled when CONFIG_INPUT_CST816S=y) */
     touch_sensor: cst816s@15 {
         compatible = "hynitron,cst816s";
         reg = <0x15>;
         status = "okay";
 
-        // Touch panel control pins
-        // TP_IRQ → D0 = P0.02 (interrupt pin)
-        // TP_RST → D1 = P0.28 (reset pin)
+        /* Touch panel control pins */
+        /* TP_IRQ → D0 = P0.02 (interrupt pin) */
+        /* TP_RST → D1 = P0.28 (reset pin) */
         irq-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
         rst-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
     };
-};
 
-// Touch Input - Direct CST816S driver events via INPUT_CALLBACK_DEFINE
-// No zmk,input-listener needed - touch_handler.c uses INPUT_CALLBACK_DEFINE instead
-// This avoids the input processing pipeline and mouse gesture system
-
-/ {
-    // Custom settings toggle behavior for gesture (future use)
-    behaviors {
-        settings_toggle: behavior_settings_toggle {
-            compatible = "zmk,behavior-settings-toggle";
-            #binding-cells = <0>;
-        };
+    /* APDS9960 Light/Gesture Sensor (Step 5c - for auto-brightness) */
+    /* NOTE: INT not physically connected, using unused internal GPIO P0.09 */
+    /* P0.09 is NFC1 pin, not exposed on XIAO but available as GPIO */
+    apds9960: apds9960@39 {
+        compatible = "avago,apds9960";
+        reg = <0x39>;
+        status = "okay";
+        int-gpios = <&gpio0 9 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
-};
-
-// PWM1 configuration for backlight (Pin 6 = P1.11)
-&pwm1 {
-    status = "okay";
-    pinctrl-0 = <&pwm1_default>;
-    pinctrl-1 = <&pwm1_sleep>;
-    pinctrl-names = "default", "sleep";
 };

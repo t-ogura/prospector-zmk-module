@@ -8,18 +8,25 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/net/buf.h>
+#include <zephyr/net_buf.h>
 #include <zephyr/init.h>
 #include <string.h>
 
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
 
-// Message queue for thread-safe architecture (Phase 2 reconstruction)
+// Scanner stub functions for thread-safe display updates
 // Include path assumes build from zmk-config-prospector
-#include "../boards/shields/prospector_scanner/src/scanner_message.h"
+#include "../boards/shields/prospector_scanner/src/scanner_stub.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+// External function to trigger high-priority display update (defined in scanner_display.c)
+// Uses weak reference so it compiles even if scanner_display.c is not in the build
+__attribute__((weak)) void scanner_trigger_high_priority_update(void) {
+    // Default implementation: do nothing
+    // Will be overridden by scanner_display.c if included in build
+}
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER)
 
@@ -112,6 +119,22 @@ static int find_keyboard_by_id_and_role(uint32_t keyboard_id, uint8_t device_rol
     return -1;
 }
 
+// Find keyboard by BLE address - more reliable than name-based ID for same-name keyboards
+static int find_keyboard_by_ble_addr(const bt_addr_le_t *addr) {
+    for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active) {
+            // Compare BLE address (6 bytes)
+            if (memcmp(keyboards[i].ble_addr, addr->a.val, 6) == 0) {
+                LOG_DBG("Found existing slot %d by BLE addr %02X:%02X:%02X:%02X:%02X:%02X",
+                       i, addr->a.val[5], addr->a.val[4], addr->a.val[3],
+                       addr->a.val[2], addr->a.val[1], addr->a.val[0]);
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
 static int find_empty_slot(void) {
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (!keyboards[i].active) {
@@ -142,30 +165,53 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
     else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
 
-    LOG_DBG("Received %s (%s), ID=%08X, Battery=%d%%, Layer=%d",
-           role_str, device_name, keyboard_id, adv_data->battery_level, adv_data->active_layer);
-    
-    // Find existing keyboard by ID AND role for split keyboards
-    int index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
+    LOG_DBG("Received %s (%s), ID=%08X, BLE=%02X:%02X:%02X:%02X:%02X:%02X, Battery=%d%%, Layer=%d",
+           role_str, device_name, keyboard_id,
+           addr->a.val[5], addr->a.val[4], addr->a.val[3],
+           addr->a.val[2], addr->a.val[1], addr->a.val[0],
+           adv_data->battery_level, adv_data->active_layer);
+
+    // PRIORITY: Find existing keyboard by BLE address first (unique per device)
+    // This fixes the same-name keyboard conflict issue
+    int index = find_keyboard_by_ble_addr(addr);
     bool is_new = false;
-    
+
+    if (index < 0) {
+        // Fallback: Try to find by ID and role (for backward compatibility)
+        index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
+    }
+
     if (index < 0) {
         // Find empty slot for new keyboard
         index = find_empty_slot();
         if (index < 0) {
             LOG_WRN("No empty slots for new keyboard");
+            scanner_unlock();
             return;
         }
         is_new = true;
-        LOG_DBG("Creating NEW slot %d for %s (%s) ID=%08X",
-               index, role_str, device_name, keyboard_id);
+        LOG_INF("Creating NEW slot %d for %s (%s) BLE=%02X:%02X:%02X:%02X:%02X:%02X",
+               index, role_str, device_name,
+               addr->a.val[5], addr->a.val[4], addr->a.val[3],
+               addr->a.val[2], addr->a.val[1], addr->a.val[0]);
     }
-    
+
+    // High-priority change detection (before updating data)
+    // Layer, modifier, profile changes trigger immediate display update
+    bool high_priority_change = is_new ||
+        (keyboards[index].data.active_layer != adv_data->active_layer) ||
+        (keyboards[index].data.modifier_flags != adv_data->modifier_flags) ||
+        (keyboards[index].data.profile_slot != adv_data->profile_slot);
+
     // Update keyboard status
     keyboards[index].active = true;
     keyboards[index].last_seen = now;
     keyboards[index].rssi = rssi;
     memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
+
+    // Store BLE address for unique identification
+    memcpy(keyboards[index].ble_addr, addr->a.val, 6);
+    keyboards[index].ble_addr_type = addr->type;
     // Update name: always set if empty, otherwise only update if real name (not "Unknown")
     if (keyboards[index].ble_name[0] == '\0') {
         // First time - set whatever we have (even "Unknown")
@@ -196,20 +242,22 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     // Release mutex
     scanner_unlock();
 
-    // Phase 5: Do NOT call notify_event from BLE callback context
-    // This would trigger LVGL operations from a non-main thread, causing freezes
-    // Display updates are handled by periodic rx_periodic_work (1Hz) instead
+    // Trigger high-priority display update for layer/modifier/profile changes
+    // This schedules a work handler with 10ms delay - safe to call from BLE callback
+    if (high_priority_change) {
+        scanner_trigger_high_priority_update();
+        LOG_DBG("⚡ High priority change: layer=%d mod=0x%02x profile=%d",
+                adv_data->active_layer, adv_data->modifier_flags, adv_data->profile_slot);
+    }
+
+    // Log for debugging (low-priority updates still handled by 1Hz periodic cycle)
     if (is_new) {
         const char *role_str = "UNKNOWN";
         if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
 
-        LOG_INF("New %s device found: %s (slot %d) - display will update on next periodic cycle",
-                role_str, device_name, index);
-    } else {
-        LOG_DBG("Device updated: %s, battery: %d%% - display will update on next periodic cycle",
-               device_name, adv_data->battery_level);
+        LOG_INF("New %s device found: %s (slot %d)", role_str, device_name, index);
     }
 }
 
@@ -412,10 +460,18 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 
                     LOG_DBG("Prospector data found - Length: %d", len);
 
-                    // Channel filtering logic
+                    // Channel filtering logic - use runtime channel
+                    // scanner_get_runtime_channel() is provided by system_settings_widget.c
+                    // Fallback to Kconfig if settings widget not linked
+                    extern uint8_t scanner_get_runtime_channel(void) __attribute__((weak));
                     uint8_t scanner_channel = 0;
+                    if (scanner_get_runtime_channel) {
+                        scanner_channel = scanner_get_runtime_channel();
+                    }
 #ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
-                    scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
+                    else {
+                        scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
+                    }
 #endif
                     uint8_t keyboard_channel = data->channel;
 
@@ -460,7 +516,8 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         // Phase 2: Send message to queue for thread-safe processing
         // Get device name for the message
         const char *device_name = get_device_name(addr);
-        int msg_ret = scanner_msg_send_keyboard_data(prospector_data, rssi, device_name);
+        int msg_ret = scanner_msg_send_keyboard_data(prospector_data, rssi, device_name,
+                                                     addr->a.val, addr->type);
         if (msg_ret != 0) {
             LOG_DBG("Message queue full, falling back to direct processing");
         }
@@ -472,6 +529,11 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 }
 
 static void timeout_work_handler(struct k_work *work) {
+    // Skip if timeout is disabled (0)
+    if (KEYBOARD_TIMEOUT_MS == 0) {
+        return;
+    }
+
     // Phase 4: Send timeout check message to queue
     // This allows the main task to handle timeout processing
     int msg_ret = scanner_msg_send_timeout_check();
@@ -523,8 +585,8 @@ static void timeout_work_handler(struct k_work *work) {
                 timeout_indices[i]);
     }
 
-    // Reschedule timeout check
-    if (scanning) {
+    // Reschedule timeout check (only if timeout is enabled)
+    if (scanning && KEYBOARD_TIMEOUT_MS > 0) {
         k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
     }
 }
@@ -545,11 +607,13 @@ int zmk_status_scanner_start(void) {
         return 0;
     }
     
+    // Use 100% duty cycle for immediate response (USB powered, no battery concern)
+    // interval = window = 30ms means continuous scanning with no gaps
     struct bt_le_scan_param scan_param = {
-        .type = BT_LE_SCAN_TYPE_ACTIVE,  // Changed to ACTIVE to receive Scan Response packets
+        .type = BT_LE_SCAN_TYPE_ACTIVE,  // ACTIVE to receive Scan Response packets
         .options = BT_LE_SCAN_OPT_NONE,
-        .interval = BT_GAP_SCAN_FAST_INTERVAL,
-        .window = BT_GAP_SCAN_FAST_WINDOW,
+        .interval = BT_GAP_SCAN_FAST_WINDOW,  // 30ms (was 60ms)
+        .window = BT_GAP_SCAN_FAST_WINDOW,    // 30ms (100% duty cycle)
     };
     
     int err = bt_le_scan_start(&scan_param, scan_callback);
@@ -559,8 +623,15 @@ int zmk_status_scanner_start(void) {
     }
     
     scanning = true;
-    k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
-    
+
+    // Only schedule timeout work if timeout is enabled (non-zero)
+    if (KEYBOARD_TIMEOUT_MS > 0) {
+        k_work_schedule(&timeout_work, K_MSEC(KEYBOARD_TIMEOUT_MS / 2));
+        LOG_INF("Status scanner started - timeout enabled (%ums)", KEYBOARD_TIMEOUT_MS);
+    } else {
+        LOG_INF("Status scanner started - timeout DISABLED");
+    }
+
     LOG_INF("Status scanner started in ACTIVE mode - will receive Scan Response packets");
     return 0;
 }

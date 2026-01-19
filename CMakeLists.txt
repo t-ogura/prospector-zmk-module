@@ -15,11 +15,12 @@ if(CONFIG_PROSPECTOR_MODE_SCANNER)
         target_sources(app PRIVATE src/status_scanner.c)
 endif()
 
-# Add display and LVGL support once for any shield that needs it
-if(CONFIG_SHIELD_PROSPECTOR_ADAPTER OR CONFIG_SHIELD_PROSPECTOR_SCANNER)
-        add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/drivers/display)
-        add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/modules/lvgl)
-endif()
+# DISABLED FOR DEBUG: Custom display/LVGL drivers may be causing boot issues
+# Display_test works without these - use Zephyr's built-in drivers instead
+# if(CONFIG_SHIELD_PROSPECTOR_ADAPTER OR CONFIG_SHIELD_PROSPECTOR_SCANNER)
+#         add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/drivers/display)
+#         add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/modules/lvgl)
+# endif()
 
 if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
         if(CONFIG_DT_HAS_ZMK_BEHAVIOR_CAPS_WORD_ENABLED)
