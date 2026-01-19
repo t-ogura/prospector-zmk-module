@@ -21,6 +21,7 @@ config ZMK_STATUS_ADVERTISEMENT
       a connection to the keyboard.
 
 config BT_EXT_ADV_MAX_ADV_SET
+    default 3 if ZMK_STATUS_ADV_PERIODIC
     default 2 if ZMK_STATUS_ADVERTISEMENT
 
 config ZMK_STATUS_ADV_INTERVAL_MS
@@ -91,6 +92,38 @@ config ZMK_STATUS_ADV_ACTIVITY_TIMEOUT_MS
       Time to wait before switching from active to idle mode.
       Can be set up to 300000ms (5 minutes) for extended active periods.
       5000ms = 5 seconds default prevents frequent mode switching during brief pauses.
+
+# Periodic Advertising (v2.2.0)
+config ZMK_STATUS_ADV_PERIODIC
+    bool "Enable Periodic Advertising for low-latency status updates"
+    default n
+    depends on ZMK_STATUS_ADVERTISEMENT
+    depends on BT_PER_ADV
+    help
+      Enable Periodic Advertising in addition to Legacy/Extended Advertising.
+      This provides more stable and lower-latency status updates for
+      scanners that support periodic advertising sync.
+
+      Periodic Advertising uses deterministic timing, allowing the scanner
+      to receive updates at precise intervals (20-50ms) instead of relying
+      on random scan timing.
+
+      This requires BLE 5.0 support on both keyboard and scanner.
+      Legacy advertising is still sent for backward compatibility with
+      older scanners.
+
+config ZMK_STATUS_ADV_PERIODIC_INTERVAL_MS
+    int "Periodic advertising interval in milliseconds"
+    range 8 82000
+    default 30
+    depends on ZMK_STATUS_ADV_PERIODIC
+    help
+      Interval for periodic advertising updates.
+      Lower values = lower latency but higher power consumption.
+      Recommended: 20-50ms for active mode.
+
+      Note: Actual interval is rounded to 1.25ms units (BLE spec).
+      8ms is the minimum allowed by BLE 5.0 specification.
 
 config ZMK_STATUS_ADV_CENTRAL_SIDE
     string "Physical side of central device in split keyboard"

@@ -47,7 +47,8 @@ struct zmk_status_adv_data {
 #define ZMK_STATUS_FLAG_USB_HID_READY    (1 << 3)
 #define ZMK_STATUS_FLAG_BLE_CONNECTED    (1 << 4)
 #define ZMK_STATUS_FLAG_BLE_BONDED       (1 << 5)
-// Bits 6-7 reserved for future use
+// Bit 6 reserved for future use
+#define ZMK_STATUS_FLAG_HAS_PERIODIC     (1 << 7)  // v2.2.0: Keyboard supports Periodic Advertising
 
 /**
  * @brief Modifier key flags bit definitions (for modifier_flags field)
