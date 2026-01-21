@@ -487,6 +487,103 @@ static void schedule_display_update(void) {
     }
 }
 
+/**
+ * @brief High-priority display update for Periodic Advertising data
+ *
+ * Called from status_scanner.c when Periodic ADV data arrives.
+ * Reads directly from status_scanner.c's keyboard array (authoritative source)
+ * and populates pending_data for immediate display refresh.
+ *
+ * Unlike Legacy ADV which stores data locally, Periodic data is only in
+ * status_scanner.c's keyboards[] array, so we read from there.
+ */
+void scanner_trigger_high_priority_update(void) {
+    /* Debug: track call frequency */
+    static uint32_t call_count = 0;
+    call_count++;
+
+    /* Skip when Pong Wars is active */
+    if (pong_wars_active) {
+        if (call_count <= 3) LOG_DBG("HIGH_PRIO: skip pong_wars");
+        return;
+    }
+
+    /* Skip if screen transition in progress */
+    if (transition_in_progress) {
+        if (call_count <= 3) LOG_DBG("HIGH_PRIO: skip transition");
+        return;
+    }
+
+    /* Get selected keyboard index from status_scanner.c */
+    int idx = zmk_status_scanner_get_selected_keyboard();
+    if (idx < 0) {
+        if (call_count <= 3) LOG_WRN("HIGH_PRIO: idx=%d (no keyboard selected)", idx);
+        return;
+    }
+
+    /* Get keyboard data from status_scanner.c (authoritative source for Periodic data) */
+    struct zmk_keyboard_status *kb = zmk_status_scanner_get_keyboard(idx);
+    if (!kb || !kb->active) {
+        if (call_count <= 3) LOG_WRN("HIGH_PRIO: kb=%p, active=%d", kb, kb ? kb->active : -1);
+        return;
+    }
+
+    /* Debug: Log first few successful calls */
+    if (call_count <= 3) {
+        LOG_INF("HIGH_PRIO[%u]: idx=%d, layer=%d ✓", call_count, idx, kb->data.active_layer);
+    }
+
+    /* Populate pending_data directly - NO LVGL calls! */
+    strncpy(pending_data.device_name, kb->ble_name, MAX_NAME_LEN - 1);
+    pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
+    pending_data.layer = kb->data.active_layer;
+    pending_data.wpm = kb->data.wpm_value;
+    pending_data.usb_ready = (kb->data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
+    pending_data.ble_connected = (kb->data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
+    pending_data.ble_bonded = (kb->data.status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
+    pending_data.profile = kb->data.profile_slot;
+    pending_data.modifiers = kb->data.modifier_flags;
+    pending_data.bat[0] = kb->data.battery_level;
+    pending_data.bat[1] = kb->data.peripheral_battery[0];
+    pending_data.bat[2] = kb->data.peripheral_battery[1];
+    pending_data.bat[3] = kb->data.peripheral_battery[2];
+    pending_data.rssi = kb->rssi;
+
+    /* Update signal data with new RSSI (rate calculation remains separate) */
+    last_rssi = kb->rssi;
+
+    /* Set flags for immediate update */
+    pending_data.no_keyboards = false;
+    pending_data.update_pending = true;
+
+    /* Debug: Log when Periodic triggers high-priority update (only on layer change) */
+    static uint8_t last_periodic_layer = 0xFF;
+    if (kb->data.active_layer != last_periodic_layer) {
+        LOG_INF("⚡ PERIODIC UPDATE: Layer=%d (was %d)",
+                kb->data.active_layer, last_periodic_layer);
+        last_periodic_layer = kb->data.active_layer;
+    }
+
+    /* Also sync to local keyboards array so scanner_get_keyboard_data* functions work */
+    if (k_mutex_lock(&data_mutex, K_MSEC(2)) == 0) {
+        /* Find or allocate slot in local array */
+        int local_idx = -1;
+        for (int i = 0; i < MAX_KEYBOARDS; i++) {
+            if (keyboards[i].active &&
+                memcmp(keyboards[i].ble_addr, kb->ble_addr, 6) == 0) {
+                local_idx = i;
+                break;
+            }
+        }
+        if (local_idx >= 0) {
+            memcpy(&keyboards[local_idx].data, &kb->data, sizeof(struct zmk_status_adv_data));
+            keyboards[local_idx].rssi = kb->rssi;
+            keyboards[local_idx].last_seen = kb->last_seen;
+        }
+        k_mutex_unlock(&data_mutex);
+    }
+}
+
 /* ========== Scanner Message Functions ========== */
 
 int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,

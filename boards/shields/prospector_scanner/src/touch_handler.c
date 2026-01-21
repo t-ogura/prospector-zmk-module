@@ -82,7 +82,7 @@ static void raise_swipe_event(enum swipe_direction direction) {
     }
 
     last_swipe_time = now;
-    LOG_INF("Raising ZMK swipe event: %s", dir_name[direction]);
+    LOG_DBG("Raising ZMK swipe event: %s", dir_name[direction]);
 
     // Use ZMK event system - thread-safe, listener runs in main thread
     // No message queue needed - ZMK event manager handles synchronization
@@ -101,13 +101,14 @@ extern void touch_handler_late_register_callback(touch_event_callback_t callback
 
 static void touch_input_callback(struct input_event *evt, void *user_data) {
     ARG_UNUSED(user_data);
-    LOG_INF("📥 INPUT EVENT: type=%d code=%d value=%d", evt->type, evt->code, evt->value);
+    // Reduced logging - only log swipe gestures, not every coordinate update
+    LOG_DBG("📥 INPUT EVENT: type=%d code=%d value=%d", evt->type, evt->code, evt->value);
 
     switch (evt->code) {
         case INPUT_KEY_DOWN:
             // CST816S hardware gesture: Swipe DOWN detected
             if (evt->value == 1) {
-                LOG_INF("HW GESTURE: Swipe DOWN");
+                LOG_DBG("HW GESTURE: Swipe DOWN");
                 swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_DOWN);
             }
@@ -115,7 +116,7 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
 
         case INPUT_KEY_UP:
             if (evt->value == 1) {
-                LOG_INF("HW GESTURE: Swipe UP");
+                LOG_DBG("HW GESTURE: Swipe UP");
                 swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_UP);
             }
@@ -124,7 +125,7 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
         case INPUT_KEY_LEFT:
             if (evt->value == 1) {
                 // Direct mapping - no swap needed with corrected coordinate transform
-                LOG_INF("HW GESTURE: Swipe LEFT");
+                LOG_DBG("HW GESTURE: Swipe LEFT");
                 swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_LEFT);
             }
@@ -133,7 +134,7 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
         case INPUT_KEY_RIGHT:
             if (evt->value == 1) {
                 // Direct mapping - no swap needed with corrected coordinate transform
-                LOG_INF("HW GESTURE: Swipe RIGHT");
+                LOG_DBG("HW GESTURE: Swipe RIGHT");
                 swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_RIGHT);
             }
@@ -143,25 +144,25 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
             // Store X coordinate
             current_x = (uint16_t)evt->value;
             x_updated = true;
-            LOG_INF("📍 X: %d", current_x);
+            // No logging for coordinates - too verbose
             break;
 
         case INPUT_ABS_Y:
             // Store Y coordinate
             current_y = (uint16_t)evt->value;
             y_updated = true;
-            LOG_INF("📍 Y: %d", current_y);
+            // No logging for coordinates - too verbose
             break;
 
         case INPUT_BTN_TOUCH:
             // Touch state changed
             touch_active = (evt->value != 0);
-            LOG_INF("🔔 BTN_TOUCH event: value=%d, prev_active=%d, new_active=%d",
+            LOG_DBG("🔔 BTN_TOUCH event: value=%d, prev_active=%d, new_active=%d",
                     evt->value, prev_touch_active, touch_active);
 
             // Wait for coordinates to be updated
             if (!x_updated || !y_updated) {
-                LOG_WRN("⚠️  Touch event before coordinates updated, using previous values");
+                LOG_DBG("Touch event before coordinates updated, using previous values");
             }
 
             // Update last event with complete coordinates
@@ -184,7 +185,7 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
                 swipe_state.in_progress = true;
                 swipe_already_raised = false;  // Clear for new touch sequence
 
-                LOG_INF("Touch DOWN at (%d, %d)", current_x, current_y);
+                LOG_DBG("Touch DOWN at (%d, %d)", current_x, current_y);
 
                 // Reset coordinate update flags for next touch
                 x_updated = false;
@@ -207,10 +208,10 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
                     int16_t abs_dy = (dy < 0) ? -dy : dy;
 
                     if (abs_dy > abs_dx && abs_dy > SWIPE_THRESHOLD) {
-                        LOG_INF("SW SWIPE: %s (dy=%d)", dy > 0 ? "DOWN" : "UP", dy);
+                        LOG_DBG("SW SWIPE: %s (dy=%d)", dy > 0 ? "DOWN" : "UP", dy);
                         raise_swipe_event(dy > 0 ? SWIPE_DIRECTION_DOWN : SWIPE_DIRECTION_UP);
                     } else if (abs_dx > abs_dy && abs_dx > SWIPE_THRESHOLD) {
-                        LOG_INF("SW SWIPE: %s (dx=%d)", dx > 0 ? "RIGHT" : "LEFT", dx);
+                        LOG_DBG("SW SWIPE: %s (dx=%d)", dx > 0 ? "RIGHT" : "LEFT", dx);
                         raise_swipe_event(dx > 0 ? SWIPE_DIRECTION_RIGHT : SWIPE_DIRECTION_LEFT);
                     }
                 }
@@ -286,10 +287,7 @@ int touch_handler_init(void) {
         return -ENODEV;
     }
 
-    LOG_INF("Touch handler initialized: CST816S on I2C");
-    LOG_INF("Touch panel size: 240x280 (Waveshare 1.69\" Round LCD)");
-    LOG_INF("✅ Using ZMK event system for thread-safe LVGL operations");
-    LOG_INF("⚠️ LVGL indev will be registered later by scanner_display.c");
+    LOG_INF("Touch handler initialized: CST816S (240x280)");
 
     return 0;
 }
@@ -310,19 +308,19 @@ int touch_handler_register_lvgl_indev(void) {
     lv_indev_set_type(lvgl_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(lvgl_indev, lvgl_input_read);
 
-    LOG_INF("LVGL input device registered for touch events");
+    LOG_DBG("LVGL input device registered for touch events");
 
     return 0;
 }
 
 int touch_handler_register_callback(touch_event_callback_t callback) {
     if (!callback) {
-        LOG_ERR("❌ Callback is NULL!");
+        LOG_ERR("Callback is NULL!");
         return -EINVAL;
     }
 
     registered_callback = callback;
-    LOG_INF("✅ Touch callback registered successfully: callback=%p", (void*)callback);
+    LOG_DBG("Touch callback registered: callback=%p", (void*)callback);
 
     return 0;
 }

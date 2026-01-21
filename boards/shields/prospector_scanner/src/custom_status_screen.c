@@ -67,8 +67,12 @@ extern volatile int8_t scanner_signal_rssi;
 extern volatile int32_t scanner_signal_rate_x100;  /* rate * 100 */
 extern bool scanner_get_pending_battery(int *level);
 
-/* LVGL timer for processing pending updates in main thread */
-static lv_timer_t *pending_update_timer = NULL;
+/* Zephyr work for processing pending updates (more reliable than LVGL timer)
+ * Submitted to ZMK's display work queue for thread-safe LVGL access
+ */
+static void pending_update_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(pending_update_work, pending_update_work_handler);
+static bool pending_update_work_started = false;
 
 /* ========== Screen State Management ========== */
 enum screen_state {
@@ -482,8 +486,11 @@ static lv_color_t get_rssi_color(uint8_t bars) {
 /* ========== Pending Update Timer Callback (runs in main thread) ========== */
 static char last_keyboard_name[MAX_NAME_LEN] = "";  /* Track keyboard changes */
 
-static void pending_update_timer_cb(lv_timer_t *timer) {
-    ARG_UNUSED(timer);
+static void pending_update_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+
+    /* Reschedule immediately for next update check */
+    k_work_schedule_for_queue(zmk_display_work_q(), &pending_update_work, K_MSEC(10));
 
     /* Only process updates on main screen */
     if (current_screen != SCREEN_MAIN) {
@@ -536,6 +543,13 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
         }
 
         /* Process all updates in main thread - safe to call LVGL */
+        /* Debug: Log when timer processes layer change */
+        static int last_timer_layer = -1;
+        if (data.layer != last_timer_layer) {
+            LOG_INF("⚡ TIMER UPDATE: Layer=%d (was %d)", data.layer, last_timer_layer);
+            last_timer_layer = data.layer;
+        }
+
         display_update_device_name(data.device_name);
         display_update_layer(data.layer);
         display_update_wpm(data.wpm);
@@ -848,12 +862,8 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_obj_set_style_text_color(rate_label, lv_color_make(0xA0, 0xA0, 0xA0), 0);
     lv_label_set_text(rate_label, "0.0Hz");
     lv_obj_set_pos(rate_label, 222, 219);  /* 5px down, 5px left */
-    LOG_INF("[INIT] signal status created");
 
-    LOG_INF("=============================================");
-    LOG_INF("=== Full Widget Test Complete ===");
-    LOG_INF("=== Swipe DOWN for Settings, UP to return ===");
-    LOG_INF("=============================================");
+    LOG_INF("Main screen created (swipe DOWN=Settings, UP=Keyboards)");
 
     /* Save screen reference for screen transitions */
     screen_obj = screen;
@@ -867,13 +877,16 @@ lv_obj_t *zmk_display_status_screen(void) {
      */
     if (!swipe_process_timer) {
         swipe_process_timer = lv_timer_create(swipe_process_timer_cb, 50, NULL);
-        LOG_INF("Swipe processing timer registered (50ms interval)");
     }
 
-    /* Create pending update timer - processes Work Queue data in main thread */
-    if (!pending_update_timer) {
-        pending_update_timer = lv_timer_create(pending_update_timer_cb, 100, NULL);
-        LOG_INF("Pending update timer registered (100ms interval)");
+    /* Start pending update work - uses Zephyr work queue for reliable 10ms timing
+     * Unlike LVGL timers, this is independent of LVGL rendering delays
+     * Signal updates remain at 1Hz (gated by signal_update_pending flag)
+     */
+    if (!pending_update_work_started) {
+        k_work_schedule_for_queue(zmk_display_work_q(), &pending_update_work, K_MSEC(10));
+        pending_update_work_started = true;
+        LOG_INF("Pending update work started (10ms interval, Zephyr timer)");
     }
 
     return screen;
@@ -2203,7 +2216,7 @@ static void ds_custom_slider_drag_cb(lv_event_t *e) {
         /* Check for vertical swipe - if Y movement > threshold and > X movement */
         if (abs_delta_y > SLIDER_SWIPE_THRESHOLD && abs_delta_y > abs_delta_x * 2) {
             /* Cancel slider drag - restore original value */
-            LOG_INF("Vertical swipe detected on slider - cancelling drag");
+            LOG_DBG("Vertical swipe on slider - cancelling drag");
             lv_slider_set_value(slider, slider_drag_state.start_value, LV_ANIM_OFF);
             slider_drag_state.current_value = slider_drag_state.start_value;
             slider_drag_state.drag_cancelled = true;
@@ -2259,7 +2272,7 @@ static void ds_custom_slider_drag_cb(lv_event_t *e) {
             if (!was_cancelled) {
                 /* Trigger final value changed event with correct value */
                 lv_obj_send_event(slider, LV_EVENT_VALUE_CHANGED, NULL);
-                LOG_INF("Slider drag end: final_value=%d", (int)slider_drag_state.current_value);
+                LOG_DBG("Slider drag end: val=%d", (int)slider_drag_state.current_value);
             } else {
                 LOG_DBG("Slider drag cancelled (swipe)");
             }
@@ -3842,11 +3855,10 @@ static void pw_reset_game(void) {
  */
 static void ensure_lvgl_indev_registered(void) {
     if (!lvgl_indev_registered) {
-        LOG_INF("Registering LVGL input device for touch interactions...");
         int ret = touch_handler_register_lvgl_indev();
         if (ret == 0) {
             lvgl_indev_registered = true;
-            LOG_INF("LVGL input device registered successfully");
+            LOG_DBG("LVGL indev registered");
         } else {
             LOG_ERR("Failed to register LVGL input device: %d", ret);
         }
@@ -3899,8 +3911,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         return;
     }
 
-    LOG_INF("[MAIN THREAD] Processing swipe: direction=%d, current_screen=%d",
-            dir, current_screen);
+    LOG_DBG("Processing swipe: dir=%d, screen=%d", dir, current_screen);
 
     /* Set transition flag to protect against concurrent operations */
     transition_in_progress = true;
@@ -3909,7 +3920,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
     case SWIPE_DIRECTION_DOWN:
         /* Main → Display Settings OR Keyboard Select → Main */
         if (current_screen == SCREEN_MAIN) {
-            LOG_INF(">>> Transitioning: MAIN -> DISPLAY_SETTINGS");
+            LOG_DBG("MAIN -> DISPLAY_SETTINGS");
             destroy_main_screen_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_hex(0x0A0A0A), 0);
@@ -3917,32 +3928,29 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             create_display_settings_widgets();
             ensure_lvgl_indev_registered();  /* Register for slider/switch touch */
             current_screen = SCREEN_DISPLAY_SETTINGS;
-            LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_KEYBOARD_SELECT) {
-            LOG_INF(">>> Transitioning: KEYBOARD_SELECT -> MAIN");
+            LOG_DBG("KEYBOARD_SELECT -> MAIN");
             destroy_keyboard_select_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
-            LOG_INF(">>> Transition complete");
         }
         break;
 
     case SWIPE_DIRECTION_UP:
         /* Display Settings → Main OR Main → Keyboard Select */
         if (current_screen == SCREEN_DISPLAY_SETTINGS) {
-            LOG_INF(">>> Transitioning: DISPLAY_SETTINGS -> MAIN");
+            LOG_DBG("DISPLAY_SETTINGS -> MAIN");
             destroy_display_settings_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
-            LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_MAIN) {
-            LOG_INF(">>> Transitioning: MAIN -> KEYBOARD_SELECT");
+            LOG_DBG("MAIN -> KEYBOARD_SELECT");
             destroy_main_screen_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_hex(0x0A0A0A), 0);
@@ -3950,14 +3958,13 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             create_keyboard_select_widgets();
             ensure_lvgl_indev_registered();  /* Register for keyboard entry touch */
             current_screen = SCREEN_KEYBOARD_SELECT;
-            LOG_INF(">>> Transition complete");
         }
         break;
 
     case SWIPE_DIRECTION_LEFT:
         /* Main → Pong Wars OR Quick Actions → Main */
         if (current_screen == SCREEN_MAIN) {
-            LOG_INF(">>> Transitioning: MAIN -> PONG_WARS");
+            LOG_DBG("MAIN -> PONG_WARS");
             destroy_main_screen_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
@@ -3965,37 +3972,34 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             create_pong_wars_widgets();
             ensure_lvgl_indev_registered();  /* Register for tap-to-reset */
             current_screen = SCREEN_PONG_WARS;
-            LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_SYSTEM_SETTINGS) {
-            LOG_INF(">>> Transitioning: QUICK_ACTIONS -> MAIN");
+            LOG_DBG("QUICK_ACTIONS -> MAIN");
             destroy_system_settings_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
-            LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_KEYBOARD_SELECT) {
             /* Channel decrement on left swipe */
             ks_close_channel_popup();  /* Close popup if open */
             ks_channel_decrement();
-            LOG_INF(">>> Keyboard Select: Channel decremented");
+            LOG_DBG("Channel decremented");
         }
         break;
 
     case SWIPE_DIRECTION_RIGHT:
         /* Pong Wars → Main OR Main → Quick Actions */
         if (current_screen == SCREEN_PONG_WARS) {
-            LOG_INF(">>> Transitioning: PONG_WARS -> MAIN");
+            LOG_DBG("PONG_WARS -> MAIN");
             destroy_pong_wars_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
-            LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_MAIN) {
-            LOG_INF(">>> Transitioning: MAIN -> QUICK_ACTIONS");
+            LOG_DBG("MAIN -> QUICK_ACTIONS");
             destroy_main_screen_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_hex(0x0A0A0A), 0);
@@ -4003,12 +4007,11 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             create_system_settings_widgets();
             ensure_lvgl_indev_registered();  /* Register for button touch */
             current_screen = SCREEN_SYSTEM_SETTINGS;
-            LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_KEYBOARD_SELECT) {
             /* Channel increment on right swipe */
             ks_close_channel_popup();  /* Close popup if open */
             ks_channel_increment();
-            LOG_INF(">>> Keyboard Select: Channel incremented");
+            LOG_DBG("Channel incremented");
         }
         break;
 
@@ -4041,8 +4044,7 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
-    LOG_INF("[ISR] Swipe event received: direction=%d (queuing for main thread)",
-            ev->direction);
+    LOG_DBG("Swipe event queued: dir=%d", ev->direction);
 
     /* Just set the flag - processing happens in LVGL timer (main thread) */
     pending_swipe = ev->direction;
