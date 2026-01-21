@@ -243,7 +243,7 @@ int zmk_widget_system_settings_init(struct zmk_widget_system_settings *widget, l
 
     // Version label (below title)
     lv_obj_t *version_label = lv_label_create(widget->obj);
-    lv_label_set_text(version_label, "v2.1.0");
+    lv_label_set_text(version_label, "v2.2a");
     lv_obj_set_style_text_color(version_label, lv_color_hex(0x888888), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(version_label, &lv_font_montserrat_12, LV_STATE_DEFAULT);
     lv_obj_align(version_label, LV_ALIGN_TOP_MID, 0, 40);

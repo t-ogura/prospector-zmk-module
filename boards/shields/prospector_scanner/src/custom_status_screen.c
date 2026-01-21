@@ -2570,7 +2570,7 @@ static void create_system_settings_widgets(void) {
     ss_version_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(ss_version_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ss_version_label, lv_color_hex(0x808080), 0);
-    lv_label_set_text(ss_version_label, "Prospector Scanner v2.1.0");
+    lv_label_set_text(ss_version_label, "Prospector Scanner v2.2a");
     lv_obj_align(ss_version_label, LV_ALIGN_TOP_MID, 0, 52);
 
     /* Bootloader button (blue) - position matches original system_settings_widget.c */
