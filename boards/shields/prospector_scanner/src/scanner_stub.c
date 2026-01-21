@@ -10,6 +10,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
 #include <zmk/status_advertisement.h>
+#include <zmk/status_scanner.h>
 #include <lvgl.h>
 
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
@@ -55,6 +56,8 @@ struct keyboard_state {
 
 static struct keyboard_state keyboards[MAX_KEYBOARDS];
 static int selected_keyboard = 0;
+static uint8_t selected_keyboard_ble_addr[6] = {0};  /* BLE address for reliable matching */
+static bool selected_keyboard_addr_valid = false;     /* True when BLE address is set */
 static struct k_mutex data_mutex;
 static bool mutex_initialized = false;
 
@@ -180,7 +183,39 @@ static void schedule_display_update(void);
 void scanner_set_selected_keyboard(int index) {
     if (index >= 0 && index < MAX_KEYBOARDS) {
         selected_keyboard = index;
-        LOG_INF("Selected keyboard changed to slot %d", index);
+
+        /* Get BLE address from status_scanner.c (the authoritative source)
+         * This ensures we match by BLE address even if indices differ between arrays */
+        struct zmk_keyboard_status *kb = zmk_status_scanner_get_keyboard(index);
+        if (kb && kb->active) {
+            memcpy(selected_keyboard_ble_addr, kb->ble_addr, 6);
+            selected_keyboard_addr_valid = true;
+            LOG_INF("Selected keyboard slot %d: %s (BLE=%02X:%02X:%02X:%02X:%02X:%02X, ch=%d)",
+                    index, kb->ble_name,
+                    kb->ble_addr[5], kb->ble_addr[4], kb->ble_addr[3],
+                    kb->ble_addr[2], kb->ble_addr[1], kb->ble_addr[0],
+                    kb->data.channel);
+        } else {
+            /* Fallback: try scanner_stub's local array */
+            if (k_mutex_lock(&data_mutex, K_MSEC(5)) == 0) {
+                if (keyboards[index].active) {
+                    memcpy(selected_keyboard_ble_addr, keyboards[index].ble_addr, 6);
+                    selected_keyboard_addr_valid = true;
+                    LOG_INF("Selected keyboard slot %d (from local): %s (BLE=%02X:%02X:%02X:%02X:%02X:%02X)",
+                            index, keyboards[index].name,
+                            keyboards[index].ble_addr[5], keyboards[index].ble_addr[4],
+                            keyboards[index].ble_addr[3], keyboards[index].ble_addr[2],
+                            keyboards[index].ble_addr[1], keyboards[index].ble_addr[0]);
+                } else {
+                    LOG_WRN("Selected keyboard slot %d is NOT ACTIVE!", index);
+                    selected_keyboard_addr_valid = false;
+                }
+                k_mutex_unlock(&data_mutex);
+            } else {
+                LOG_WRN("Selected keyboard slot %d (couldn't verify)", index);
+                selected_keyboard_addr_valid = false;
+            }
+        }
         /* Immediately update display with new keyboard data */
         schedule_display_update();
     }
@@ -451,8 +486,26 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
     k_mutex_unlock(&data_mutex);
     msgs_sent++;
 
+    /* Check if this advertisement is from the selected keyboard
+     * Use BLE address matching for reliability (indices may differ between arrays) */
+    bool is_selected = false;
+    if (selected_keyboard_addr_valid && ble_addr != NULL) {
+        /* Primary: Match by BLE address */
+        is_selected = (memcmp(ble_addr, selected_keyboard_ble_addr, 6) == 0);
+    } else {
+        /* Fallback: Match by index (may be unreliable if arrays are out of sync) */
+        is_selected = (index == selected_keyboard);
+    }
+
+    LOG_DBG("ADV: idx=%d, sel=%d, BLE match=%s, ch=%d",
+            index, selected_keyboard,
+            is_selected ? "YES" : "NO",
+            adv_data->channel);
+
     /* Count advertisement reception for rate calculation */
-    if (index == selected_keyboard) {
+    if (is_selected) {
+        /* Update selected_keyboard index to match local array for display_update_work_handler */
+        selected_keyboard = index;
         atomic_inc(&adv_receive_count);
         schedule_display_update();
     }

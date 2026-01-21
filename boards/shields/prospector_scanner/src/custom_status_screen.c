@@ -116,6 +116,7 @@ void display_update_connection(bool usb_rdy, bool ble_conn, bool ble_bond, int p
 void display_update_modifiers(uint8_t mods);
 void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3);
 void display_update_scanner_battery(int level);
+void display_update_sync_version(void);  /* v2.2.0: Update v1/v2 version badge */
 
 /* Custom slider state for inverted drag handling */
 /* Due to 180° touch panel rotation, LVGL X decreases when user drags right */
@@ -256,10 +257,18 @@ static const char *battery_names_4[] = {"L", "R", "A1", "A2"};
 
 /* Signal status */
 static lv_obj_t *channel_label = NULL;
-static lv_obj_t *rx_title_label = NULL;
+static lv_obj_t *sync_version_label = NULL;  /* v1/v2 version badge (replaces rx_title_label) */
 static lv_obj_t *rssi_bar = NULL;
 static lv_obj_t *rssi_label = NULL;
 static lv_obj_t *rate_label = NULL;
+
+/* Sync version display colors */
+#define COLOR_V1_GRAY    0x9E9E9E
+#define COLOR_V2_CYAN    0x80DEEA
+
+/* Sync version blink animation state */
+static lv_timer_t *sync_blink_timer = NULL;
+static bool sync_blink_visible = true;
 
 /* ========== Display Settings Screen Widgets (NO CONTAINER) ========== */
 static lv_obj_t *ds_title_label = NULL;
@@ -324,6 +333,7 @@ struct ks_keyboard_entry {
     lv_obj_t *rssi_bar;      /* Signal strength bar */
     lv_obj_t *rssi_label;    /* RSSI dBm value */
     lv_obj_t *channel_badge; /* Channel number badge */
+    lv_obj_t *version_badge; /* v1/v2 protocol version badge (v2.2.0) */
     int keyboard_index;      /* Index in scanner's keyboard array */
 };
 static struct ks_keyboard_entry ks_entries[KS_MAX_KEYBOARDS] = {0};
@@ -493,6 +503,7 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
             display_update_connection(false, false, false, 0);
             display_update_modifiers(0);
             display_update_keyboard_battery_4(0, 0, 0, 0);
+            display_update_sync_version();  /* Reset v1/v2 badge */
 
             /* Clear last keyboard name so next keyboard triggers battery reposition */
             last_keyboard_name[0] = '\0';
@@ -572,6 +583,9 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
             }
             lv_label_set_text(rate_label, buf);
         }
+
+        /* Update sync version display (v1/v2) along with signal update */
+        display_update_sync_version();
     }
 
     /* Check for pending scanner battery update */
@@ -789,17 +803,26 @@ lv_obj_t *zmk_display_status_screen(void) {
     /* ===== 8. Signal Status (BOTTOM, y=220) ===== */
     LOG_INF("[INIT] Creating signal status...");
 
+    /* Sync version badge (v1/v2) - leftmost position */
+    sync_version_label = lv_label_create(screen);
+    lv_obj_set_style_text_font(sync_version_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
+    lv_label_set_text(sync_version_label, "v1");  /* Default to v1 (Legacy) */
+    /* Badge styling - rounded background */
+    lv_obj_set_style_bg_color(sync_version_label, lv_color_hex(0x2A2A2A), 0);
+    lv_obj_set_style_bg_opa(sync_version_label, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(sync_version_label, 4, 0);
+    lv_obj_set_style_pad_left(sync_version_label, 4, 0);
+    lv_obj_set_style_pad_right(sync_version_label, 4, 0);
+    lv_obj_set_style_pad_top(sync_version_label, 1, 0);
+    lv_obj_set_style_pad_bottom(sync_version_label, 1, 0);
+    lv_obj_set_pos(sync_version_label, 58, 218);
+
     channel_label = lv_label_create(screen);
     lv_obj_set_style_text_font(channel_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(channel_label, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_label_set_text(channel_label, "Ch:0");
-    lv_obj_set_pos(channel_label, 62, 219);  /* 5px down, 5px left */
-
-    rx_title_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(rx_title_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(rx_title_label, lv_color_make(0x80, 0x80, 0x80), 0);
-    lv_label_set_text(rx_title_label, "RX:");
-    lv_obj_set_pos(rx_title_label, 102, 219);  /* 5px down, 5px left */
+    lv_obj_set_pos(channel_label, 85, 219);
 
     rssi_bar = lv_bar_create(screen);
     lv_obj_set_size(rssi_bar, 30, 8);
@@ -1723,6 +1746,124 @@ void display_update_signal(int8_t rssi_val, float rate) {
     }
 }
 
+/* ========== Sync Version Display (v2.2.0) ========== */
+
+/**
+ * @brief Blink timer callback for SYNCING state
+ *
+ * Creates a blinking effect by toggling opacity every 500ms.
+ */
+static void sync_blink_timer_cb(lv_timer_t *timer) {
+    if (!sync_version_label) return;
+
+    sync_blink_visible = !sync_blink_visible;
+    lv_obj_set_style_opa(sync_version_label,
+                         sync_blink_visible ? LV_OPA_COVER : LV_OPA_50, 0);
+}
+
+/**
+ * @brief Start sync blink animation
+ */
+static void start_sync_blink(void) {
+    if (!sync_blink_timer) {
+        sync_blink_timer = lv_timer_create(sync_blink_timer_cb, 500, NULL);
+        sync_blink_visible = true;
+    }
+}
+
+/**
+ * @brief Stop sync blink animation
+ */
+static void stop_sync_blink(void) {
+    if (sync_blink_timer) {
+        lv_timer_del(sync_blink_timer);
+        sync_blink_timer = NULL;
+    }
+    /* Restore full opacity */
+    if (sync_version_label) {
+        lv_obj_set_style_opa(sync_version_label, LV_OPA_COVER, 0);
+    }
+    sync_blink_visible = true;
+}
+
+/**
+ * @brief Update sync version display (v1/v2)
+ *
+ * Called from scanner_stub.c when keyboard data is updated.
+ * Determines display based on:
+ * - Keyboard's has_periodic flag (v2 capability)
+ * - Current sync state (SYNCING shows blink, FALLBACK shows v1) - only when PERIODIC_SYNC enabled
+ */
+void display_update_sync_version(void) {
+    if (!sync_version_label) return;
+
+    /* Get selected keyboard from scanner_stub.c (user's actual selection) */
+    int selected_idx = scanner_get_selected_keyboard();
+    if (selected_idx < 0) {
+        /* No keyboard selected - show v1 in gray */
+        stop_sync_blink();
+        lv_label_set_text(sync_version_label, "v1");
+        lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
+        return;
+    }
+
+    struct zmk_keyboard_status *kb = zmk_status_scanner_get_keyboard(selected_idx);
+    if (!kb || !kb->active) {
+        /* Keyboard not active - show v1 in gray */
+        stop_sync_blink();
+        lv_label_set_text(sync_version_label, "v1");
+        lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
+        return;
+    }
+
+    if (!kb->has_periodic) {
+        /* v1 keyboard (no Periodic support) */
+        stop_sync_blink();
+        lv_label_set_text(sync_version_label, "v1");
+        lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
+    } else {
+        /* v2 keyboard (has Periodic support) */
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+        sync_state_t state = zmk_status_scanner_get_sync_state();
+        switch (state) {
+        case SYNC_STATE_SYNCING:
+            /* Sync in progress - blink v2 in cyan */
+            lv_label_set_text(sync_version_label, "v2");
+            lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V2_CYAN), 0);
+            start_sync_blink();
+            break;
+
+        case SYNC_STATE_SYNCED:
+            /* Periodic sync active - solid v2 in cyan */
+            stop_sync_blink();
+            lv_label_set_text(sync_version_label, "v2");
+            lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V2_CYAN), 0);
+            break;
+
+        case SYNC_STATE_FALLBACK:
+            /* Sync failed, using Legacy - show v1 in gray */
+            stop_sync_blink();
+            lv_label_set_text(sync_version_label, "v1");
+            lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
+            break;
+
+        case SYNC_STATE_NONE:
+        default:
+            /* No sync state - just show v2 capability */
+            stop_sync_blink();
+            lv_label_set_text(sync_version_label, "v2");
+            lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V2_CYAN), 0);
+            break;
+        }
+#else
+        /* Periodic sync not enabled on scanner - just show v2 capability */
+        stop_sync_blink();
+        lv_label_set_text(sync_version_label, "v2");
+        lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V2_CYAN), 0);
+#endif
+    }
+}
+
 /* ========== Screen Transition Functions ========== */
 
 static void destroy_main_screen_widgets(void) {
@@ -1744,10 +1885,13 @@ static void destroy_main_screen_widgets(void) {
         }
     }
 
+    /* Stop sync blink timer before deleting widgets */
+    stop_sync_blink();
+
     if (rate_label) { lv_obj_del(rate_label); rate_label = NULL; }
     if (rssi_label) { lv_obj_del(rssi_label); rssi_label = NULL; }
     if (rssi_bar) { lv_obj_del(rssi_bar); rssi_bar = NULL; }
-    if (rx_title_label) { lv_obj_del(rx_title_label); rx_title_label = NULL; }
+    if (sync_version_label) { lv_obj_del(sync_version_label); sync_version_label = NULL; }
     if (channel_label) { lv_obj_del(channel_label); channel_label = NULL; }
     /* Keyboard battery - delete all 4 slots */
     for (int i = 0; i < MAX_KB_BATTERIES; i++) {
@@ -1926,17 +2070,26 @@ static void create_main_screen_widgets(void) {
         lv_obj_set_style_opa(kb_bat_nc_label[i], (i < 2) ? 255 : 0, 0);
     }
 
+    /* Sync version badge (v1/v2) - leftmost position */
+    sync_version_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(sync_version_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
+    lv_label_set_text(sync_version_label, "v1");  /* Default to v1 (Legacy) */
+    /* Badge styling - rounded background */
+    lv_obj_set_style_bg_color(sync_version_label, lv_color_hex(0x2A2A2A), 0);
+    lv_obj_set_style_bg_opa(sync_version_label, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(sync_version_label, 4, 0);
+    lv_obj_set_style_pad_left(sync_version_label, 4, 0);
+    lv_obj_set_style_pad_right(sync_version_label, 4, 0);
+    lv_obj_set_style_pad_top(sync_version_label, 1, 0);
+    lv_obj_set_style_pad_bottom(sync_version_label, 1, 0);
+    lv_obj_set_pos(sync_version_label, 58, 218);
+
     channel_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(channel_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(channel_label, lv_color_make(0x80, 0x80, 0x80), 0);
     lv_label_set_text(channel_label, "Ch:0");
-    lv_obj_set_pos(channel_label, 62, 219);  /* 5px down, 5px left */
-
-    rx_title_label = lv_label_create(screen_obj);
-    lv_obj_set_style_text_font(rx_title_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(rx_title_label, lv_color_make(0x80, 0x80, 0x80), 0);
-    lv_label_set_text(rx_title_label, "RX:");
-    lv_obj_set_pos(rx_title_label, 102, 219);  /* 5px down, 5px left */
+    lv_obj_set_pos(channel_label, 85, 219);
 
     rssi_bar = lv_bar_create(screen_obj);
     lv_obj_set_size(rssi_bar, 30, 8);
@@ -2692,7 +2845,8 @@ static void ks_badge_tap_cb(lv_event_t *e);
 
 /* Create a single keyboard entry at absolute position */
 static void ks_create_entry(int entry_idx, int y_pos, int keyboard_index,
-                            const char *name, int8_t rssi, uint8_t channel) {
+                            const char *name, int8_t rssi, uint8_t channel,
+                            bool has_periodic) {
     if (entry_idx >= KS_MAX_KEYBOARDS) return;
 
     struct ks_keyboard_entry *entry = &ks_entries[entry_idx];
@@ -2776,7 +2930,16 @@ static void ks_create_entry(int entry_idx, int y_pos, int keyboard_index,
     lv_obj_set_style_text_font(entry->name_label, &lv_font_montserrat_16, 0);
     lv_obj_align(entry->name_label, LV_ALIGN_LEFT_MID, left_offset + 92, 0);
 
-    LOG_DBG("Created keyboard entry %d: %s (rssi=%d, ch=%d)", entry_idx, name, rssi, channel);
+    /* Version badge (v1/v2) - right side of container */
+    entry->version_badge = lv_label_create(entry->container);
+    lv_label_set_text(entry->version_badge, has_periodic ? "v2" : "v1");
+    lv_obj_set_style_text_color(entry->version_badge,
+                                lv_color_hex(has_periodic ? COLOR_V2_CYAN : COLOR_V1_GRAY), 0);
+    lv_obj_set_style_text_font(entry->version_badge, &lv_font_montserrat_12, 0);
+    lv_obj_align(entry->version_badge, LV_ALIGN_RIGHT_MID, -8, 0);
+
+    LOG_DBG("Created keyboard entry %d: %s (rssi=%d, ch=%d, v%d)",
+            entry_idx, name, rssi, channel, has_periodic ? 2 : 1);
 }
 
 /* Destroy a single keyboard entry */
@@ -2789,6 +2952,7 @@ static void ks_destroy_entry(struct ks_keyboard_entry *entry) {
     entry->rssi_label = NULL;
     entry->name_label = NULL;
     entry->channel_badge = NULL;
+    entry->version_badge = NULL;
     entry->keyboard_index = -1;
 }
 
@@ -3080,7 +3244,8 @@ static void ks_update_entries(void) {
 
             const char *name = kbd->ble_name[0] ? kbd->ble_name : "Unknown";
             uint8_t channel = kbd->data.channel;  /* Get keyboard's channel */
-            ks_create_entry(i, y_pos + (i * spacing), kbd_idx, name, kbd->rssi, channel);
+            ks_create_entry(i, y_pos + (i * spacing), kbd_idx, name, kbd->rssi, channel,
+                            kbd->has_periodic);
         }
         ks_entry_count = active_count;
     } else {
@@ -3107,6 +3272,13 @@ static void ks_update_entries(void) {
             char rssi_buf[16];
             snprintf(rssi_buf, sizeof(rssi_buf), "%ddBm", kbd->rssi);
             lv_label_set_text(entry->rssi_label, rssi_buf);
+
+            /* Update version badge */
+            if (entry->version_badge) {
+                lv_label_set_text(entry->version_badge, kbd->has_periodic ? "v2" : "v1");
+                lv_obj_set_style_text_color(entry->version_badge,
+                                            lv_color_hex(kbd->has_periodic ? COLOR_V2_CYAN : COLOR_V1_GRAY), 0);
+            }
 
             /* Update selection styling */
             bool is_selected = (entry->keyboard_index == ks_selected_keyboard);

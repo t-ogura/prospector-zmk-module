@@ -298,6 +298,10 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     keyboards[index].ble_addr_type = addr->type;
 
     // Detect v2 keyboard (Periodic Advertising support) from HAS_PERIODIC flag
+    // Debug: Log status_flags value to diagnose v2 detection issues
+    LOG_DBG("📊 Keyboard status_flags=0x%02X (HAS_PERIODIC bit=%d)",
+            adv_data->status_flags, (adv_data->status_flags & ZMK_STATUS_FLAG_HAS_PERIODIC) ? 1 : 0);
+
     bool has_periodic = (adv_data->status_flags & ZMK_STATUS_FLAG_HAS_PERIODIC) != 0;
     if (has_periodic != keyboards[index].has_periodic) {
         keyboards[index].has_periodic = has_periodic;
