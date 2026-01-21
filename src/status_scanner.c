@@ -469,32 +469,37 @@ static struct {
 
 static void store_device_name(const bt_addr_le_t *addr, const char *name) {
     uint32_t now = k_uptime_get_32();
-    bool name_updated = false;
-    
+
     // Find or create slot for this address
     for (int i = 0; i < 5; i++) {
         if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0 ||
             (now - temp_device_names[i].timestamp) > 5000) { // Expire after 5 seconds
-            
-            // Check if we're updating an existing entry with the same address
-            bool is_update = (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0);
-            
+
             bt_addr_le_copy(&temp_device_names[i].addr, addr);
             strncpy(temp_device_names[i].name, name, sizeof(temp_device_names[i].name) - 1);
             temp_device_names[i].name[sizeof(temp_device_names[i].name) - 1] = '\0';
             temp_device_names[i].timestamp = now;
-            
-            if (is_update) {
-                name_updated = true;
-                LOG_DBG("Device name updated: %s", name);
-
-                // Note: We don't immediately update keyboard entries here since
-                // zmk_keyboard_status doesn't store the BLE address.
-                // The name will be updated when process_advertisement_with_name() is called
-                // and get_device_name() returns the updated name from temp_device_names cache.
-            }
             break;
         }
+    }
+
+    // Also update keyboard entry directly if we have one with this BLE address
+    // This fixes the issue where SCAN_RSP (with name) arrives after ADV (with data)
+    // and the keyboard already has "Unknown" as its name
+    if (strcmp(name, "Unknown") != 0) {
+        int kb_index = find_keyboard_by_ble_addr(addr);
+        if (kb_index >= 0 && keyboards[kb_index].active) {
+            // Only update if current name is empty or "Unknown"
+            if (keyboards[kb_index].ble_name[0] == '\0' ||
+                strcmp(keyboards[kb_index].ble_name, "Unknown") == 0) {
+                strncpy(keyboards[kb_index].ble_name, name, sizeof(keyboards[kb_index].ble_name) - 1);
+                keyboards[kb_index].ble_name[sizeof(keyboards[kb_index].ble_name) - 1] = '\0';
+                LOG_INF("Updated keyboard name from SCAN_RSP: %s (slot %d)", name, kb_index);
+            }
+        }
+
+        // Also update scanner_stub's local array (for main screen display)
+        scanner_update_keyboard_name_by_addr(addr->a.val, name);
     }
 }
 

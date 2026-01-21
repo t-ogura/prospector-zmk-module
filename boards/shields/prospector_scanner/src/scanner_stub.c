@@ -203,6 +203,31 @@ int scanner_get_active_keyboard_count(void) {
     return count;
 }
 
+/* Update keyboard name by BLE address - called from status_scanner.c when SCAN_RSP arrives */
+void scanner_update_keyboard_name_by_addr(const uint8_t *ble_addr, const char *name) {
+    if (!mutex_initialized || !ble_addr || !name) return;
+
+    if (k_mutex_lock(&data_mutex, K_MSEC(5)) != 0) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active && memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
+            /* Only update if current name is empty or generic */
+            if (keyboards[i].name[0] == '\0' ||
+                strncmp(keyboards[i].name, "Keyboard ", 9) == 0 ||
+                strcmp(keyboards[i].name, "Unknown") == 0) {
+                strncpy(keyboards[i].name, name, MAX_NAME_LEN - 1);
+                keyboards[i].name[MAX_NAME_LEN - 1] = '\0';
+                LOG_INF("scanner_stub: Updated keyboard name: %s (slot %d)", name, i);
+            }
+            break;
+        }
+    }
+
+    k_mutex_unlock(&data_mutex);
+}
+
 int scanner_get_selected_keyboard(void) {
     return selected_keyboard;
 }

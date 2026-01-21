@@ -90,3 +90,14 @@ void scanner_set_selected_keyboard(int index);
  * @return true if valid address available, false otherwise
  */
 bool scanner_get_selected_keyboard_addr(uint8_t *ble_addr_out);
+
+/**
+ * @brief Update keyboard name by BLE address
+ *
+ * Called from status_scanner.c when SCAN_RSP with device name arrives.
+ * Updates the local keyboard array entry if name is currently Unknown.
+ *
+ * @param ble_addr BLE MAC address (6 bytes)
+ * @param name Device name to set
+ */
+void scanner_update_keyboard_name_by_addr(const uint8_t *ble_addr, const char *name);
