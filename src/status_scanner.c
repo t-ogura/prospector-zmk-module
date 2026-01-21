@@ -1013,10 +1013,25 @@ static int start_periodic_sync(int keyboard_index) {
         return -ENOTSUP;
     }
 
+    // Try to get SID from cache one more time before attempting sync
+    // (Extended Scanning might have discovered it since keyboard was first seen)
+    bt_addr_le_t addr_check;
+    memcpy(addr_check.a.val, kb->ble_addr, 6);
+    addr_check.type = kb->ble_addr_type;
+    int cached_sid = get_cached_sid(&addr_check);
+    if (cached_sid >= 0 && kb->sid != (uint8_t)cached_sid) {
+        LOG_INF("📡 SID updated from cache just before sync: %d -> %d", kb->sid, cached_sid);
+        kb->sid = (uint8_t)cached_sid;
+    }
+
     // Check if SID has been discovered from Extended Scanning
-    // SID=0 might be valid, but we log a warning to help debug issues
     LOG_INF("📡 Starting Periodic sync: keyboard=%d, SID=%d, has_periodic=%d",
             keyboard_index, kb->sid, kb->has_periodic);
+
+    // SID=0 might be valid, but log a warning if it wasn't discovered via Extended Scanning
+    if (kb->sid == 0) {
+        LOG_WRN("📡 SID is 0 - may not have been discovered from Extended Scanning yet");
+    }
 
     // Register callbacks if not done yet
     if (!sync_callbacks_registered) {

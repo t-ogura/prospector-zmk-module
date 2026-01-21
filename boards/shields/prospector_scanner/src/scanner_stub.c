@@ -253,11 +253,11 @@ void scanner_set_selected_keyboard(int index) {
         if (kb && kb->active) {
             memcpy(selected_keyboard_ble_addr, kb->ble_addr, 6);
             selected_keyboard_addr_valid = true;
-            LOG_INF("Selected keyboard slot %d: %s (BLE=%02X:%02X:%02X:%02X:%02X:%02X, ch=%d)",
+            LOG_INF("Selected keyboard slot %d: %s (BLE=%02X:%02X:%02X:%02X:%02X:%02X, ch=%d, v%s)",
                     index, kb->ble_name,
                     kb->ble_addr[5], kb->ble_addr[4], kb->ble_addr[3],
                     kb->ble_addr[2], kb->ble_addr[1], kb->ble_addr[0],
-                    kb->data.channel);
+                    kb->data.channel, kb->has_periodic ? "2" : "1");
         } else {
             /* Fallback: try scanner_stub's local array */
             if (k_mutex_lock(&data_mutex, K_MSEC(5)) == 0) {
@@ -279,6 +279,18 @@ void scanner_set_selected_keyboard(int index) {
                 selected_keyboard_addr_valid = false;
             }
         }
+
+        /* Initiate Periodic Sync if this is a v2 keyboard (v2.2.0) */
+        /* This also updates selected_keyboard_index in status_scanner.c */
+        int sync_result = zmk_status_scanner_select_keyboard(index);
+        if (sync_result == 0) {
+            LOG_INF("📡 Periodic sync initiation requested for keyboard %d", index);
+        } else if (sync_result == -ENOTSUP) {
+            LOG_INF("📡 Keyboard %d is v1 - using Legacy mode", index);
+        } else {
+            LOG_WRN("📡 Periodic sync failed for keyboard %d: %d", index, sync_result);
+        }
+
         /* Immediately update display with new keyboard data */
         schedule_display_update();
     }
