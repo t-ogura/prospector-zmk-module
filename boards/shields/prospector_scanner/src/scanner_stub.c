@@ -402,8 +402,15 @@ static void display_update_work_handler(struct k_work *work) {
     /* Keyboard data available - clear no_keyboards flag */
     pending_data.no_keyboards = false;
 
-    LOG_INF("Pending display update: %s, Layer=%d, Battery=%d%%",
-            name, data.active_layer, data.battery_level);
+    /* Only log when data actually changes to reduce spam */
+    static uint8_t last_layer = 0xFF;
+    static uint8_t last_bat = 0xFF;
+    if (data.active_layer != last_layer || data.battery_level != last_bat) {
+        LOG_INF("Display update: %s, Layer=%d, Battery=%d%%",
+                name, data.active_layer, data.battery_level);
+        last_layer = data.active_layer;
+        last_bat = data.battery_level;
+    }
 
     /* Store data in pending structure - NO LVGL calls here! */
     strncpy(pending_data.device_name, name, MAX_NAME_LEN - 1);

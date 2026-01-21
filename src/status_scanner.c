@@ -518,14 +518,6 @@ static const char* get_device_name(const bt_addr_le_t *addr) {
 
 static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                          struct net_buf_simple *buf) {
-    static int scan_count = 0;
-    scan_count++;
-    
-    // Log every 100th scan to avoid spam (or use LOG_DBG for detailed debugging)
-    if (scan_count % 100 == 1) {
-        LOG_INF("BLE scan #%d (RSSI: %d)", scan_count, rssi);
-    }
-    
     if (!scanning) {
         return;
     }
@@ -866,29 +858,21 @@ int zmk_status_scanner_get_primary_keyboard(void) {
 // Both use same identity address, so we cache SID by address
 static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
                                 struct net_buf_simple *buf) {
-    // Debug: Log ALL packets to see what we're receiving
-    static uint32_t ext_scan_count = 0;
-    ext_scan_count++;
-
-    // Log every 100th packet to see if callback is being called
-    if (ext_scan_count % 100 == 1) {
-        LOG_INF("📡 EXT_SCAN[%u]: adv_type=%d, interval=%d, sid=%d, addr=%02X:%02X:..:%02X",
-                ext_scan_count, info->adv_type, info->interval, info->sid,
-                info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[0]);
-    }
-
     // Only interested in Extended ADV with periodic info (interval != 0)
     if (info->interval == 0) {
-        return;  // Not a periodic advertiser
+        return;  // Not a periodic advertiser - skip silently
     }
 
-    // Cache the SID for this address (regardless of payload content)
-    // The periodic advertising set may not have Prospector data in Extended ADV,
-    // but it shares the same identity address as the legacy advertising set
-    LOG_INF("📡 EXT_ADV: Periodic advertiser detected! addr=%02X:%02X:%02X:%02X:%02X:%02X SID=%d, Interval=%dms",
-            info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[3],
-            info->addr->a.val[2], info->addr->a.val[1], info->addr->a.val[0],
-            info->sid, info->interval * 5 / 4);
+    // Counter for periodic advertiser detection (reduce spam)
+    static uint32_t periodic_adv_count = 0;
+    periodic_adv_count++;
+
+    // Log first detection and then every 50th to reduce spam
+    if (periodic_adv_count == 1 || periodic_adv_count % 50 == 0) {
+        LOG_INF("📡 EXT_ADV[%u]: Periodic advertiser SID=%d, Interval=%dms, addr=%02X:%02X:..:%02X",
+                periodic_adv_count, info->sid, info->interval * 5 / 4,
+                info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[0]);
+    }
 
     // Cache the SID for later use when we receive Prospector data from legacy ADV
     cache_periodic_sid(info->addr, info->sid);
@@ -942,45 +926,84 @@ static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
     scanner_trigger_high_priority_update();
 }
 
+// Counter for periodic receive logging (reduce spam)
+static uint32_t per_adv_recv_count = 0;
+
 static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
                             const struct bt_le_per_adv_sync_recv_info *info,
                             struct net_buf_simple *buf) {
-    // Parse Periodic ADV data - same format as Legacy
-    if (buf->len >= sizeof(struct zmk_status_adv_data)) {
-        // Check for manufacturer data header
-        if (buf->len > 2) {
-            uint8_t len = net_buf_simple_pull_u8(buf);
-            uint8_t type = net_buf_simple_pull_u8(buf);
+    per_adv_recv_count++;
 
-            if (type == BT_DATA_MANUFACTURER_DATA && len >= sizeof(struct zmk_status_adv_data)) {
-                const struct zmk_status_adv_data *data =
-                    (const struct zmk_status_adv_data *)buf->data;
+    // Log first few receives and then every 100th to confirm data is arriving
+    if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
+        LOG_INF("📡 PER_RECV[%u]: len=%d, rssi=%d, first_bytes=%02X %02X %02X %02X",
+                per_adv_recv_count, buf->len, info->rssi,
+                buf->len > 0 ? buf->data[0] : 0,
+                buf->len > 1 ? buf->data[1] : 0,
+                buf->len > 2 ? buf->data[2] : 0,
+                buf->len > 3 ? buf->data[3] : 0);
+    }
 
-                // Verify Prospector signature
-                if (data->manufacturer_id[0] == 0xFF && data->manufacturer_id[1] == 0xFF &&
-                    data->service_uuid[0] == 0xAB && data->service_uuid[1] == 0xCD) {
+    // Periodic ADV data includes AD structure: [len][type][data...]
+    if (buf->len < 3) {
+        LOG_WRN("📡 PER_RECV: Buffer too short: %d bytes", buf->len);
+        return;
+    }
 
-                    // Update selected keyboard with Periodic data
-                    if (selected_keyboard_index >= 0 &&
-                        selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+    uint8_t ad_len = net_buf_simple_pull_u8(buf);
+    uint8_t ad_type = net_buf_simple_pull_u8(buf);
 
-                        // Acquire mutex for keyboard update
-                        if (scanner_lock(K_MSEC(5)) == 0) {
-                            keyboards[selected_keyboard_index].last_seen = k_uptime_get_32();
-                            keyboards[selected_keyboard_index].rssi = info->rssi;
-                            memcpy(&keyboards[selected_keyboard_index].data, data,
-                                   sizeof(struct zmk_status_adv_data));
-                            scanner_unlock();
+    // Check for manufacturer data type
+    if (ad_type != BT_DATA_MANUFACTURER_DATA) {
+        if (per_adv_recv_count <= 5) {
+            LOG_WRN("📡 PER_RECV: Unexpected AD type: 0x%02X (expected 0xFF)", ad_type);
+        }
+        return;
+    }
 
-                            LOG_DBG("📡 Periodic data: Layer=%d, Bat=%d%%, RSSI=%d",
-                                    data->active_layer, data->battery_level, info->rssi);
+    // Data length = ad_len - 1 (type byte already pulled)
+    uint8_t data_len = ad_len - 1;
+    if (data_len < sizeof(struct zmk_status_adv_data) || buf->len < data_len) {
+        if (per_adv_recv_count <= 5) {
+            LOG_WRN("📡 PER_RECV: Data too short: ad_len=%d, data_len=%d, buf_remaining=%d",
+                    ad_len, data_len, buf->len);
+        }
+        return;
+    }
 
-                            // Trigger high-priority update for responsive display
-                            scanner_trigger_high_priority_update();
-                        }
-                    }
-                }
+    const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf->data;
+
+    // Verify Prospector signature
+    if (data->manufacturer_id[0] != 0xFF || data->manufacturer_id[1] != 0xFF ||
+        data->service_uuid[0] != 0xAB || data->service_uuid[1] != 0xCD) {
+        if (per_adv_recv_count <= 5) {
+            LOG_WRN("📡 PER_RECV: Invalid signature: %02X %02X %02X %02X",
+                    data->manufacturer_id[0], data->manufacturer_id[1],
+                    data->service_uuid[0], data->service_uuid[1]);
+        }
+        return;
+    }
+
+    // Update selected keyboard with Periodic data
+    if (selected_keyboard_index >= 0 &&
+        selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+
+        // Acquire mutex for keyboard update
+        if (scanner_lock(K_MSEC(5)) == 0) {
+            keyboards[selected_keyboard_index].last_seen = k_uptime_get_32();
+            keyboards[selected_keyboard_index].rssi = info->rssi;
+            memcpy(&keyboards[selected_keyboard_index].data, data,
+                   sizeof(struct zmk_status_adv_data));
+            scanner_unlock();
+
+            // Log periodically to confirm Periodic data is being used
+            if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
+                LOG_INF("📡 PER_DATA[%u]: Layer=%d, Bat=%d%%, RSSI=%d ✓",
+                        per_adv_recv_count, data->active_layer, data->battery_level, info->rssi);
             }
+
+            // Trigger high-priority update for responsive display
+            scanner_trigger_high_priority_update();
         }
     }
 }
