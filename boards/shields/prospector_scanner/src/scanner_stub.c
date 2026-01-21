@@ -157,6 +157,36 @@ bool scanner_get_keyboard_data(int index, struct zmk_status_adv_data *data,
     return result;
 }
 
+/* Get keyboard data by BLE address - fixes index mismatch between status_scanner and local array */
+bool scanner_get_keyboard_data_by_addr(const uint8_t *ble_addr, struct zmk_status_adv_data *data,
+                                        int8_t *rssi, char *name, size_t name_len, int *found_index) {
+    if (!mutex_initialized || !ble_addr) {
+        return false;
+    }
+
+    if (k_mutex_lock(&data_mutex, K_MSEC(10)) != 0) {
+        return false;
+    }
+
+    bool result = false;
+    for (int i = 0; i < MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active && memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
+            if (data) *data = keyboards[i].data;
+            if (rssi) *rssi = keyboards[i].rssi;
+            if (name && name_len > 0) {
+                strncpy(name, keyboards[i].name, name_len - 1);
+                name[name_len - 1] = '\0';
+            }
+            if (found_index) *found_index = i;
+            result = true;
+            break;
+        }
+    }
+
+    k_mutex_unlock(&data_mutex);
+    return result;
+}
+
 int scanner_get_active_keyboard_count(void) {
     if (!mutex_initialized) return 0;
 
@@ -175,6 +205,14 @@ int scanner_get_active_keyboard_count(void) {
 
 int scanner_get_selected_keyboard(void) {
     return selected_keyboard;
+}
+
+bool scanner_get_selected_keyboard_addr(uint8_t *ble_addr_out) {
+    if (!selected_keyboard_addr_valid || !ble_addr_out) {
+        return false;
+    }
+    memcpy(ble_addr_out, selected_keyboard_ble_addr, 6);
+    return true;
 }
 
 /* Forward declaration */
@@ -269,8 +307,26 @@ static void display_update_work_handler(struct k_work *work) {
     struct zmk_status_adv_data data;
     int8_t rssi;
     char name[MAX_NAME_LEN];
+    int local_index = -1;
+    bool keyboard_found = false;
 
-    if (!scanner_get_keyboard_data(selected_keyboard, &data, &rssi, name, sizeof(name))) {
+    /* Primary: Look up by BLE address (fixes index mismatch between arrays) */
+    if (selected_keyboard_addr_valid) {
+        keyboard_found = scanner_get_keyboard_data_by_addr(
+            selected_keyboard_ble_addr, &data, &rssi, name, sizeof(name), &local_index);
+        if (keyboard_found) {
+            /* Update selected_keyboard to local array index for consistency */
+            selected_keyboard = local_index;
+            LOG_DBG("Keyboard found by BLE addr at local index %d", local_index);
+        }
+    }
+
+    /* Fallback: Look up by index (for backward compatibility) */
+    if (!keyboard_found) {
+        keyboard_found = scanner_get_keyboard_data(selected_keyboard, &data, &rssi, name, sizeof(name));
+    }
+
+    if (!keyboard_found) {
         /* Check if any keyboard is active */
         int active_count = scanner_get_active_keyboard_count();
         if (active_count == 0) {

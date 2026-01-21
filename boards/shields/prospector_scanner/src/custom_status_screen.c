@@ -34,6 +34,7 @@
 #include "fonts.h"  /* NerdFont declarations */
 #include "touch_handler.h"  /* For LVGL input device registration */
 #include "brightness_control.h"  /* For auto brightness sensor control */
+#include "scanner_stub.h"  /* For scanner_get_selected_keyboard_addr() */
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
 
@@ -1797,17 +1798,19 @@ static void stop_sync_blink(void) {
 void display_update_sync_version(void) {
     if (!sync_version_label) return;
 
-    /* Get selected keyboard from scanner_stub.c (user's actual selection) */
-    int selected_idx = scanner_get_selected_keyboard();
-    if (selected_idx < 0) {
-        /* No keyboard selected - show v1 in gray */
+    /* Get selected keyboard BLE address from scanner_stub.c
+     * This fixes the index mismatch between scanner_stub and status_scanner arrays */
+    uint8_t selected_ble_addr[6];
+    if (!scanner_get_selected_keyboard_addr(selected_ble_addr)) {
+        /* No valid keyboard selected - show v1 in gray */
         stop_sync_blink();
         lv_label_set_text(sync_version_label, "v1");
         lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
         return;
     }
 
-    struct zmk_keyboard_status *kb = zmk_status_scanner_get_keyboard(selected_idx);
+    /* Look up keyboard by BLE address in status_scanner's array */
+    struct zmk_keyboard_status *kb = zmk_status_scanner_get_keyboard_by_addr(selected_ble_addr);
     if (!kb || !kb->active) {
         /* Keyboard not active - show v1 in gray */
         stop_sync_blink();
@@ -3249,17 +3252,16 @@ static void ks_update_entries(void) {
         }
         ks_entry_count = active_count;
     } else {
-        /* Just update existing entries */
-        int entry_idx = 0;
-        for (int i = 0; i < CONFIG_PROSPECTOR_MAX_KEYBOARDS && entry_idx < ks_entry_count; i++) {
-            struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
-            if (!kbd || !kbd->active) continue;
-
+        /* Just update existing entries - use stored keyboard_index for correct mapping */
+        for (int entry_idx = 0; entry_idx < ks_entry_count; entry_idx++) {
             struct ks_keyboard_entry *entry = &ks_entries[entry_idx];
-            if (!entry->container) {
-                entry_idx++;
-                continue;
-            }
+            if (!entry->container) continue;
+
+            /* Use stored keyboard_index instead of iterating all keyboards
+             * This fixes the channel filter bug where wrong keyboard data was shown */
+            int kbd_idx = entry->keyboard_index;
+            struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(kbd_idx);
+            if (!kbd || !kbd->active) continue;
 
             /* Update name */
             const char *name = kbd->ble_name[0] ? kbd->ble_name : "Unknown";
@@ -3291,8 +3293,6 @@ static void ks_update_entries(void) {
                 lv_obj_set_style_border_color(entry->container, lv_color_hex(0x303030), 0);
                 lv_obj_set_style_border_width(entry->container, 1, 0);
             }
-
-            entry_idx++;
         }
     }
 }

@@ -100,11 +100,19 @@ int zmk_status_scanner_register_callback(zmk_status_scanner_callback_t callback)
 
 /**
  * @brief Get keyboard status by index
- * 
+ *
  * @param index Keyboard index (0 to ZMK_STATUS_SCANNER_MAX_KEYBOARDS-1)
  * @return Pointer to keyboard status, NULL if invalid index
  */
 struct zmk_keyboard_status *zmk_status_scanner_get_keyboard(int index);
+
+/**
+ * @brief Get keyboard status by BLE address
+ *
+ * @param ble_addr BLE MAC address (6 bytes)
+ * @return Pointer to keyboard status, NULL if not found
+ */
+struct zmk_keyboard_status *zmk_status_scanner_get_keyboard_by_addr(const uint8_t *ble_addr);
 
 /**
  * @brief Get the number of active keyboards

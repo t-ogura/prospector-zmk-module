@@ -795,6 +795,20 @@ struct zmk_keyboard_status *zmk_status_scanner_get_keyboard(int index) {
     return keyboards[index].active ? &keyboards[index] : NULL;
 }
 
+/* Get keyboard by BLE address - fixes index mismatch between scanner_stub and status_scanner */
+struct zmk_keyboard_status *zmk_status_scanner_get_keyboard_by_addr(const uint8_t *ble_addr) {
+    if (!ble_addr) {
+        return NULL;
+    }
+
+    for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active && memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
+            return &keyboards[i];
+        }
+    }
+    return NULL;
+}
+
 int zmk_status_scanner_get_active_count(void) {
     int count = 0;
     uint32_t now = k_uptime_get_32();
