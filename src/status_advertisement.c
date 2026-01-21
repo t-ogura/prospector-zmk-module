@@ -106,7 +106,9 @@ static struct bt_le_ext_adv *per_adv_set = NULL;
 static bool per_adv_started = false;
 
 // Convert milliseconds to BLE periodic advertising interval units (1.25ms per unit)
-#define MS_TO_PER_ADV_INTERVAL(ms) ((ms) * 10 / 125)
+// Formula: ms / 1.25 = ms * 4 / 5 (or ms * 1000 / 1250 for precision)
+// Example: 30ms -> 30 * 4 / 5 = 24 units
+#define MS_TO_PER_ADV_INTERVAL(ms) ((ms) * 4 / 5)
 
 // Periodic Advertising parameters
 static struct bt_le_per_adv_param per_adv_param = {
@@ -856,9 +858,15 @@ static int start_periodic_advertising(void) {
     }
 
     // Set Periodic Advertising parameters
+    // Log interval values for debugging
+    LOG_INF("📡 Setting periodic params: interval_min=%d, interval_max=%d (%.1fms)",
+            per_adv_param.interval_min, per_adv_param.interval_max,
+            per_adv_param.interval_min * 1.25f);
+
     err = bt_le_per_adv_set_param(per_adv_set, &per_adv_param);
     if (err) {
-        LOG_ERR("❌ Failed to set periodic adv params: %d", err);
+        LOG_ERR("❌ Failed to set periodic adv params: %d (interval=%d units, %.1fms)",
+                err, per_adv_param.interval_min, per_adv_param.interval_min * 1.25f);
         return err;
     }
 

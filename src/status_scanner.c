@@ -18,6 +18,67 @@
 // Periodic Sync support (v2.2.0)
 #if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
 #include <zephyr/bluetooth/gap.h>
+
+// Extended Scanning callback for SID discovery
+// bt_le_scan_cb_register() provides bt_le_scan_recv_info with SID field
+static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
+                                struct net_buf_simple *buf);
+
+static struct bt_le_scan_cb extended_scan_callbacks = {
+    .recv = extended_scan_recv,
+};
+
+static bool extended_scan_cb_registered = false;
+
+// Cache for discovered SIDs from periodic advertisers
+// Maps BLE address -> SID (since periodic and legacy ADV use same identity address)
+#define PERIODIC_ADDR_CACHE_SIZE 5
+static struct {
+    bt_addr_le_t addr;
+    uint8_t sid;
+    uint32_t timestamp;
+    bool valid;
+} periodic_addr_cache[PERIODIC_ADDR_CACHE_SIZE];
+
+// Note: Can't use LOG_INF here - defined before LOG_MODULE_DECLARE
+// Logging will be done by caller in extended_scan_recv
+static void cache_periodic_sid(const bt_addr_le_t *addr, uint8_t sid) {
+    uint32_t now = k_uptime_get_32();
+    int oldest_idx = 0;
+    uint32_t oldest_time = UINT32_MAX;
+
+    // Find existing entry or oldest slot
+    for (int i = 0; i < PERIODIC_ADDR_CACHE_SIZE; i++) {
+        if (periodic_addr_cache[i].valid &&
+            bt_addr_le_cmp(&periodic_addr_cache[i].addr, addr) == 0) {
+            // Update existing entry
+            periodic_addr_cache[i].sid = sid;
+            periodic_addr_cache[i].timestamp = now;
+            return;
+        }
+        if (!periodic_addr_cache[i].valid ||
+            periodic_addr_cache[i].timestamp < oldest_time) {
+            oldest_time = periodic_addr_cache[i].timestamp;
+            oldest_idx = i;
+        }
+    }
+
+    // Add new entry
+    bt_addr_le_copy(&periodic_addr_cache[oldest_idx].addr, addr);
+    periodic_addr_cache[oldest_idx].sid = sid;
+    periodic_addr_cache[oldest_idx].timestamp = now;
+    periodic_addr_cache[oldest_idx].valid = true;
+}
+
+static int get_cached_sid(const bt_addr_le_t *addr) {
+    for (int i = 0; i < PERIODIC_ADDR_CACHE_SIZE; i++) {
+        if (periodic_addr_cache[i].valid &&
+            bt_addr_le_cmp(&periodic_addr_cache[i].addr, addr) == 0) {
+            return periodic_addr_cache[i].sid;
+        }
+    }
+    return -1;  // Not found
+}
 #endif
 
 // Scanner stub functions for thread-safe display updates
@@ -240,13 +301,24 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     bool has_periodic = (adv_data->status_flags & ZMK_STATUS_FLAG_HAS_PERIODIC) != 0;
     if (has_periodic != keyboards[index].has_periodic) {
         keyboards[index].has_periodic = has_periodic;
-        // TODO: SID extraction requires Extended ADV scan callback
-        // For now, SID is set to 0 and will be updated when we implement extended scanning
-        keyboards[index].sid = 0;
-        LOG_INF("🔄 Keyboard %s supports Periodic ADV: %s",
+        LOG_INF("🔄 Keyboard %s supports Periodic ADV: %s (flags=0x%02X)",
                 keyboards[index].ble_name[0] ? keyboards[index].ble_name : "Unknown",
-                has_periodic ? "YES (v2)" : "NO (v1)");
+                has_periodic ? "YES (v2)" : "NO (v1)",
+                adv_data->status_flags);
     }
+
+    // Check SID cache for this address (populated by Extended Scanning)
+    // The periodic ADV set uses same identity address as legacy ADV
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+    if (has_periodic) {
+        int cached_sid = get_cached_sid(addr);
+        if (cached_sid >= 0 && keyboards[index].sid != (uint8_t)cached_sid) {
+            LOG_INF("📡 Keyboard %d SID from cache: %d -> %d",
+                    index, keyboards[index].sid, cached_sid);
+            keyboards[index].sid = (uint8_t)cached_sid;
+        }
+    }
+#endif
 
     // Update name: always set if empty, otherwise only update if real name (not "Unknown")
     if (keyboards[index].ble_name[0] == '\0') {
@@ -642,7 +714,17 @@ int zmk_status_scanner_start(void) {
     if (scanning) {
         return 0;
     }
-    
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+    // Register Extended Scan callback for SID discovery
+    // This must be done BEFORE bt_le_scan_start()
+    if (!extended_scan_cb_registered) {
+        bt_le_scan_cb_register(&extended_scan_callbacks);
+        extended_scan_cb_registered = true;
+        LOG_INF("📡 Extended scan callback registered for SID discovery");
+    }
+#endif
+
     // Use 100% duty cycle for immediate response (USB powered, no battery concern)
     // interval = window = 30ms means continuous scanning with no gaps
     struct bt_le_scan_param scan_param = {
@@ -651,13 +733,13 @@ int zmk_status_scanner_start(void) {
         .interval = BT_GAP_SCAN_FAST_WINDOW,  // 30ms (was 60ms)
         .window = BT_GAP_SCAN_FAST_WINDOW,    // 30ms (100% duty cycle)
     };
-    
+
     int err = bt_le_scan_start(&scan_param, scan_callback);
     if (err) {
         LOG_ERR("Failed to start scanning: %d", err);
         return err;
     }
-    
+
     scanning = true;
 
     // Only schedule timeout work if timeout is enabled (non-zero)
@@ -743,6 +825,58 @@ int zmk_status_scanner_get_primary_keyboard(void) {
     
     return primary;
 }
+
+// ============================================================================
+// Extended Scanning for SID Discovery (v2.2.0)
+// ============================================================================
+
+#if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
+
+// Extended scan callback to discover SID from periodic advertisers
+// Called for ALL scan results - we filter for Extended ADV with periodic info
+// NOTE: Keyboard sends TWO advertising sets:
+//   1. Legacy Extended ADV (adv_set): Has Prospector data, interval=0
+//   2. Periodic Extended ADV (per_adv_set): No Prospector data, interval>0, has SID
+// Both use same identity address, so we cache SID by address
+static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
+                                struct net_buf_simple *buf) {
+    // Debug: Log ALL packets to see what we're receiving
+    static uint32_t ext_scan_count = 0;
+    ext_scan_count++;
+
+    // Log every 100th packet to see if callback is being called
+    if (ext_scan_count % 100 == 1) {
+        LOG_INF("📡 EXT_SCAN[%u]: adv_type=%d, interval=%d, sid=%d, addr=%02X:%02X:..:%02X",
+                ext_scan_count, info->adv_type, info->interval, info->sid,
+                info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[0]);
+    }
+
+    // Only interested in Extended ADV with periodic info (interval != 0)
+    if (info->interval == 0) {
+        return;  // Not a periodic advertiser
+    }
+
+    // Cache the SID for this address (regardless of payload content)
+    // The periodic advertising set may not have Prospector data in Extended ADV,
+    // but it shares the same identity address as the legacy advertising set
+    LOG_INF("📡 EXT_ADV: Periodic advertiser detected! addr=%02X:%02X:%02X:%02X:%02X:%02X SID=%d, Interval=%dms",
+            info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[3],
+            info->addr->a.val[2], info->addr->a.val[1], info->addr->a.val[0],
+            info->sid, info->interval * 5 / 4);
+
+    // Cache the SID for later use when we receive Prospector data from legacy ADV
+    cache_periodic_sid(info->addr, info->sid);
+
+    // Also try to update existing keyboard entry if we already know this address
+    int index = find_keyboard_by_ble_addr(info->addr);
+    if (index >= 0 && keyboards[index].sid != info->sid) {
+        LOG_INF("📡 Keyboard %d SID updated: %d -> %d",
+                index, keyboards[index].sid, info->sid);
+        keyboards[index].sid = info->sid;
+    }
+}
+
+#endif // CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC
 
 // ============================================================================
 // Periodic Sync Implementation (v2.2.0)
@@ -853,6 +987,11 @@ static int start_periodic_sync(int keyboard_index) {
         return -ENOTSUP;
     }
 
+    // Check if SID has been discovered from Extended Scanning
+    // SID=0 might be valid, but we log a warning to help debug issues
+    LOG_INF("📡 Starting Periodic sync: keyboard=%d, SID=%d, has_periodic=%d",
+            keyboard_index, kb->sid, kb->has_periodic);
+
     // Register callbacks if not done yet
     if (!sync_callbacks_registered) {
         bt_le_per_adv_sync_cb_register(&sync_callbacks);
@@ -875,15 +1014,21 @@ static int start_periodic_sync(int keyboard_index) {
     };
     bt_addr_le_copy(&sync_param.addr, &addr);
 
+    LOG_INF("📡 bt_le_per_adv_sync_create: SID=%d, addr=%02X:%02X:%02X:%02X:%02X:%02X (type=%d), timeout=%dms",
+            sync_param.sid,
+            addr.a.val[5], addr.a.val[4], addr.a.val[3],
+            addr.a.val[2], addr.a.val[1], addr.a.val[0],
+            addr.type, SYNC_TIMEOUT_MS);
+
     int err = bt_le_per_adv_sync_create(&sync_param, &per_sync);
     if (err) {
-        LOG_ERR("❌ Failed to create periodic sync: %d", err);
+        LOG_ERR("❌ bt_le_per_adv_sync_create failed: err=%d, SID=%d", err, sync_param.sid);
         current_sync_state = SYNC_STATE_FALLBACK;
         return err;
     }
 
     current_sync_state = SYNC_STATE_SYNCING;
-    LOG_INF("📡 Periodic sync initiated for keyboard %d", keyboard_index);
+    LOG_INF("✅ Periodic sync create returned 0 - waiting for synced callback (SID=%d)", kb->sid);
     return 0;
 }
 

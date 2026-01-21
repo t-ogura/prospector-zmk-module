@@ -15,6 +15,7 @@ config ZMK_STATUS_ADVERTISEMENT
     default n
     depends on ZMK_BLE
     select BT_EXT_ADV
+    select BT_CTLR_ADV_EXT if BT_CTLR
     help
       Enable broadcasting of keyboard status information via BLE Advertisement.
       This allows external devices to receive status updates without establishing
@@ -99,6 +100,7 @@ config ZMK_STATUS_ADV_PERIODIC
     default n
     depends on ZMK_STATUS_ADVERTISEMENT
     depends on BT_PER_ADV
+    select BT_CTLR_ADV_PERIODIC if BT_CTLR
     help
       Enable Periodic Advertising in addition to Legacy/Extended Advertising.
       This provides more stable and lower-latency status updates for
@@ -180,6 +182,8 @@ config PROSPECTOR_SCANNER_PERIODIC_SYNC
     default y
     depends on PROSPECTOR_MODE_SCANNER
     depends on BT_PER_ADV_SYNC
+    select BT_CTLR_SCAN_EXT if BT_CTLR
+    select BT_CTLR_SYNC_PERIODIC if BT_CTLR
     help
       Enable the scanner to sync with keyboards using Periodic Advertising
       for improved latency and stability.
