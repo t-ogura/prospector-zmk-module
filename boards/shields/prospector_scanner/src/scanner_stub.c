@@ -557,9 +557,21 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
         keyboards[index].ble_addr_type = ble_addr_type;
     }
 
+    /* Update name: Only overwrite if we have a real name (not "Unknown")
+     * This prevents flickering when ADV packet arrives before SCAN_RSP */
     if (device_name && device_name[0] != '\0') {
-        strncpy(keyboards[index].name, device_name, MAX_NAME_LEN - 1);
-        keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
+        if (keyboards[index].name[0] == '\0') {
+            /* First time - set whatever we have */
+            strncpy(keyboards[index].name, device_name, MAX_NAME_LEN - 1);
+            keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
+        } else if (strcmp(device_name, "Unknown") != 0 &&
+                   strcmp(keyboards[index].name, device_name) != 0) {
+            /* Real name received - update from Unknown/generic to actual name */
+            strncpy(keyboards[index].name, device_name, MAX_NAME_LEN - 1);
+            keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
+            LOG_INF("Updated keyboard name: %s (slot %d)", device_name, index);
+        }
+        /* If device_name is "Unknown" but we already have a real name, don't overwrite */
     } else if (keyboards[index].name[0] == '\0') {
         snprintf(keyboards[index].name, MAX_NAME_LEN, "Keyboard %d", index);
     }
