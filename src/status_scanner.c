@@ -588,10 +588,13 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                     uint8_t keyboard_channel = data->channel;
 
                     // Accept if:
-                    // - Scanner channel is 0 (accept all)
-                    // - Keyboard channel is 0 (broadcast to all)
-                    // - Channels match
+                    // - Scanner channel is 0 (accept all - legacy)
+                    // - Scanner channel is 10 (CHANNEL_ALL - show all keyboards)
+                    // - Keyboard channel is 0 (broadcast to all scanners)
+                    // - Channels match exactly
+                    #define CHANNEL_ALL_VALUE 10
                     bool channel_match = (scanner_channel == 0 ||
+                                        scanner_channel == CHANNEL_ALL_VALUE ||
                                         keyboard_channel == 0 ||
                                         scanner_channel == keyboard_channel);
 

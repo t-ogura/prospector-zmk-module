@@ -1852,17 +1852,19 @@ void display_update_sync_version(void) {
 
         case SYNC_STATE_NONE:
         default:
-            /* No sync state - just show v2 capability */
+            /* No sync established yet - show v1 since we're using Legacy ADV
+             * Even though keyboard supports v2, scanner hasn't synced to periodic yet */
             stop_sync_blink();
-            lv_label_set_text(sync_version_label, "v2");
-            lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V2_CYAN), 0);
+            lv_label_set_text(sync_version_label, "v1");
+            lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
             break;
         }
 #else
-        /* Periodic sync not enabled on scanner - just show v2 capability */
+        /* Periodic sync not enabled on scanner - show v1 since we're using Legacy ADV
+         * Even though keyboard supports v2, scanner can't receive periodic */
         stop_sync_blink();
-        lv_label_set_text(sync_version_label, "v2");
-        lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V2_CYAN), 0);
+        lv_label_set_text(sync_version_label, "v1");
+        lv_obj_set_style_text_color(sync_version_label, lv_color_hex(COLOR_V1_GRAY), 0);
 #endif
     }
 }
