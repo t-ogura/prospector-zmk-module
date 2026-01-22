@@ -14,6 +14,7 @@
 
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
+#include <zmk/periodic_adv_protocol.h>
 
 // Periodic Sync support (v2.2.0)
 #if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
@@ -900,6 +901,13 @@ static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
     LOG_INF("✅ Periodic sync established! Interval: %d ms", info->interval * 125 / 100);
     current_sync_state = SYNC_STATE_SYNCED;
     sync_retry_count = 0;
+
+    // Mark keyboard as periodically synced
+    if (selected_keyboard_index >= 0 &&
+        selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+        keyboards[selected_keyboard_index].periodic_synced = true;
+    }
+
     // Notify UI to update sync icon
     scanner_trigger_high_priority_update();
 }
@@ -908,6 +916,12 @@ static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
                                   const struct bt_le_per_adv_sync_term_info *info) {
     LOG_INF("⚠️ Periodic sync terminated (reason: %d)", info->reason);
     per_sync = NULL;
+
+    // Clear periodic_synced flag
+    if (selected_keyboard_index >= 0 &&
+        selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+        keyboards[selected_keyboard_index].periodic_synced = false;
+    }
 
     // If we were synced, try to retry
     if (current_sync_state == SYNC_STATE_SYNCING) {
@@ -929,6 +943,107 @@ static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
 // Counter for periodic receive logging (reduce spam)
 static uint32_t per_adv_recv_count = 0;
 
+/**
+ * @brief Process v2.2.0 Dynamic Packet
+ */
+static void process_dynamic_packet(const struct periodic_dynamic_packet *pkt, int8_t rssi) {
+    if (selected_keyboard_index < 0 ||
+        selected_keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+        return;
+    }
+
+    if (scanner_lock(K_MSEC(5)) != 0) {
+        return;
+    }
+
+    struct zmk_keyboard_status *kb = &keyboards[selected_keyboard_index];
+    kb->last_seen = k_uptime_get_32();
+    kb->rssi = rssi;
+    kb->periodic_synced = true;
+
+    // Update legacy data structure for compatibility
+    kb->data.active_layer = pkt->active_layer;
+    kb->data.modifier_flags = pkt->modifier_flags;
+    kb->data.battery_level = pkt->battery_level;
+    memcpy(kb->data.peripheral_battery, pkt->peripheral_battery, 3);
+    kb->data.profile_slot = pkt->profile_slot;
+    kb->data.connection_count = pkt->connection_count;
+    kb->data.wpm_value = pkt->wpm_value;
+
+    // Map status_flags from v2.2.0 to legacy format
+    uint8_t legacy_flags = 0;
+    if (pkt->status_flags & STATUS_FLAG_USB_CONNECTED) legacy_flags |= ZMK_STATUS_FLAG_USB_CONNECTED;
+    if (pkt->status_flags & STATUS_FLAG_USB_HID_READY) legacy_flags |= ZMK_STATUS_FLAG_USB_HID_READY;
+    if (pkt->status_flags & STATUS_FLAG_BLE_CONNECTED) legacy_flags |= ZMK_STATUS_FLAG_BLE_CONNECTED;
+    if (pkt->status_flags & STATUS_FLAG_BLE_BONDED) legacy_flags |= ZMK_STATUS_FLAG_BLE_BONDED;
+    legacy_flags |= ZMK_STATUS_FLAG_HAS_PERIODIC;  // Mark as v2 keyboard
+    kb->data.status_flags = legacy_flags;
+
+    // Update layer name in legacy format
+    strncpy(kb->data.layer_name, pkt->current_layer_name, sizeof(kb->data.layer_name) - 1);
+    kb->data.layer_name[sizeof(kb->data.layer_name) - 1] = '\0';
+
+    // Update v2.2.0 extended fields
+    kb->indicator_flags = pkt->indicator_flags;
+    kb->ble_profile_flags = pkt->ble_profile_flags;
+
+    scanner_unlock();
+
+    // Log periodically
+    if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
+        LOG_INF("📡 v2.2 DYNAMIC[%u]: Layer=%d '%s', Bat=%d%%, RSSI=%d ✓",
+                per_adv_recv_count, pkt->active_layer, pkt->current_layer_name,
+                pkt->battery_level, rssi);
+    }
+
+    scanner_trigger_high_priority_update();
+}
+
+/**
+ * @brief Process v2.2.0 Static Packet
+ */
+static void process_static_packet(const struct periodic_static_packet *pkt, int8_t rssi) {
+    if (selected_keyboard_index < 0 ||
+        selected_keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+        return;
+    }
+
+    if (scanner_lock(K_MSEC(5)) != 0) {
+        return;
+    }
+
+    struct zmk_keyboard_status *kb = &keyboards[selected_keyboard_index];
+
+    // Update v2.2.0 static data
+    kb->layer_count = pkt->layer_count;
+    kb->device_features = pkt->device_features;
+    kb->firmware_version = pkt->firmware_version;
+    memcpy(kb->peripheral_rssi, pkt->peripheral_rssi, 3);
+
+    // Copy layer names
+    for (int i = 0; i < 10 && i < pkt->layer_count; i++) {
+        strncpy(kb->layer_names[i], pkt->layer_names[i], 7);
+        kb->layer_names[i][7] = '\0';
+    }
+
+    // Copy keyboard name
+    strncpy(kb->keyboard_name, pkt->keyboard_name, sizeof(kb->keyboard_name) - 1);
+    kb->keyboard_name[sizeof(kb->keyboard_name) - 1] = '\0';
+
+    // Also update BLE name if empty
+    if (kb->ble_name[0] == '\0' || strcmp(kb->ble_name, "Unknown") == 0) {
+        strncpy(kb->ble_name, pkt->keyboard_name, sizeof(kb->ble_name) - 1);
+        kb->ble_name[sizeof(kb->ble_name) - 1] = '\0';
+    }
+
+    scanner_unlock();
+
+    LOG_INF("📡 v2.2 STATIC: '%s', %d layers, features=0x%02X, fw=v%d.%d",
+            pkt->keyboard_name, pkt->layer_count, pkt->device_features,
+            FW_VERSION_MAJOR(pkt->firmware_version),
+            FW_VERSION_MINOR(pkt->firmware_version));
+}
+
 static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
                             const struct bt_le_per_adv_sync_recv_info *info,
                             struct net_buf_simple *buf) {
@@ -936,12 +1051,13 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
 
     // Log first few receives and then every 100th to confirm data is arriving
     if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
-        LOG_INF("📡 PER_RECV[%u]: len=%d, rssi=%d, first_bytes=%02X %02X %02X %02X",
+        LOG_INF("📡 PER_RECV[%u]: len=%d, rssi=%d, first_bytes=%02X %02X %02X %02X %02X",
                 per_adv_recv_count, buf->len, info->rssi,
                 buf->len > 0 ? buf->data[0] : 0,
                 buf->len > 1 ? buf->data[1] : 0,
                 buf->len > 2 ? buf->data[2] : 0,
-                buf->len > 3 ? buf->data[3] : 0);
+                buf->len > 3 ? buf->data[3] : 0,
+                buf->len > 4 ? buf->data[4] : 0);
     }
 
     // Periodic ADV data includes AD structure: [len][type][data...]
@@ -963,7 +1079,7 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
 
     // Data length = ad_len - 1 (type byte already pulled)
     uint8_t data_len = ad_len - 1;
-    if (data_len < sizeof(struct zmk_status_adv_data) || buf->len < data_len) {
+    if (data_len < 5 || buf->len < data_len) {
         if (per_adv_recv_count <= 5) {
             LOG_WRN("📡 PER_RECV: Data too short: ad_len=%d, data_len=%d, buf_remaining=%d",
                     ad_len, data_len, buf->len);
@@ -971,40 +1087,68 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
         return;
     }
 
-    const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)buf->data;
+    // Check Prospector signature (first 4 bytes)
+    const uint8_t *raw = buf->data;
+    uint8_t sig0 = raw[0];
+    uint8_t sig1 = raw[1];
+    uint8_t uuid0 = raw[2];
+    uint8_t uuid1 = raw[3];
 
-    // Verify Prospector signature
-    if (data->manufacturer_id[0] != 0xFF || data->manufacturer_id[1] != 0xFF ||
-        data->service_uuid[0] != 0xAB || data->service_uuid[1] != 0xCD) {
-        if (per_adv_recv_count <= 5) {
-            LOG_WRN("📡 PER_RECV: Invalid signature: %02X %02X %02X %02X",
-                    data->manufacturer_id[0], data->manufacturer_id[1],
-                    data->service_uuid[0], data->service_uuid[1]);
+    // Check for v2.2.0 signature: FF FF AB CE
+    if (sig0 == PROSPECTOR_SIGNATURE_0 && sig1 == PROSPECTOR_SIGNATURE_1 &&
+        uuid0 == PROSPECTOR_SERVICE_UUID_0 && uuid1 == PROSPECTOR_SERVICE_UUID_1) {
+
+        // v2.2.0 Periodic packet
+        uint8_t packet_type = raw[4];
+
+        if (packet_type == PERIODIC_PACKET_TYPE_DYNAMIC &&
+            data_len >= sizeof(struct periodic_dynamic_packet)) {
+            const struct periodic_dynamic_packet *pkt =
+                (const struct periodic_dynamic_packet *)raw;
+            process_dynamic_packet(pkt, info->rssi);
+        } else if (packet_type == PERIODIC_PACKET_TYPE_STATIC &&
+                   data_len >= sizeof(struct periodic_static_packet)) {
+            const struct periodic_static_packet *pkt =
+                (const struct periodic_static_packet *)raw;
+            process_static_packet(pkt, info->rssi);
+        } else {
+            if (per_adv_recv_count <= 5) {
+                LOG_WRN("📡 PER_RECV: Unknown packet_type=0x%02X, len=%d", packet_type, data_len);
+            }
         }
         return;
     }
 
-    // Update selected keyboard with Periodic data
-    if (selected_keyboard_index >= 0 &&
-        selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+    // Check for Legacy v1 signature: FF FF AB CD
+    if (sig0 == 0xFF && sig1 == 0xFF && uuid0 == 0xAB && uuid1 == 0xCD) {
+        // Legacy packet (shouldn't happen via Periodic, but handle it)
+        if (data_len >= sizeof(struct zmk_status_adv_data)) {
+            const struct zmk_status_adv_data *data = (const struct zmk_status_adv_data *)raw;
 
-        // Acquire mutex for keyboard update
-        if (scanner_lock(K_MSEC(5)) == 0) {
-            keyboards[selected_keyboard_index].last_seen = k_uptime_get_32();
-            keyboards[selected_keyboard_index].rssi = info->rssi;
-            memcpy(&keyboards[selected_keyboard_index].data, data,
-                   sizeof(struct zmk_status_adv_data));
-            scanner_unlock();
+            if (selected_keyboard_index >= 0 &&
+                selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+                if (scanner_lock(K_MSEC(5)) == 0) {
+                    keyboards[selected_keyboard_index].last_seen = k_uptime_get_32();
+                    keyboards[selected_keyboard_index].rssi = info->rssi;
+                    memcpy(&keyboards[selected_keyboard_index].data, data,
+                           sizeof(struct zmk_status_adv_data));
+                    scanner_unlock();
 
-            // Log periodically to confirm Periodic data is being used
-            if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
-                LOG_INF("📡 PER_DATA[%u]: Layer=%d, Bat=%d%%, RSSI=%d ✓",
-                        per_adv_recv_count, data->active_layer, data->battery_level, info->rssi);
+                    if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
+                        LOG_INF("📡 v1 LEGACY[%u]: Layer=%d, Bat=%d%%, RSSI=%d",
+                                per_adv_recv_count, data->active_layer, data->battery_level, info->rssi);
+                    }
+                    scanner_trigger_high_priority_update();
+                }
             }
-
-            // Trigger high-priority update for responsive display
-            scanner_trigger_high_priority_update();
         }
+        return;
+    }
+
+    // Unknown signature
+    if (per_adv_recv_count <= 5) {
+        LOG_WRN("📡 PER_RECV: Unknown signature: %02X %02X %02X %02X",
+                sig0, sig1, uuid0, uuid1);
     }
 }
 

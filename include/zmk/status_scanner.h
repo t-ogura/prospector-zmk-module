@@ -35,7 +35,7 @@ typedef enum {
 struct zmk_keyboard_status {
     bool active;                           // Whether this slot is active
     uint32_t last_seen;                    // Timestamp of last advertisement
-    struct zmk_status_adv_data data;       // Latest status data
+    struct zmk_status_adv_data data;       // Latest status data (Legacy v1)
     int8_t rssi;                          // Signal strength
     char ble_name[32];                     // BLE device name from advertisement
     uint8_t ble_addr[6];                   // BLE MAC address for unique identification
@@ -44,6 +44,17 @@ struct zmk_keyboard_status {
     // Periodic Advertising support (v2.2.0)
     uint8_t sid;                           // Advertising Set ID (for Periodic sync)
     bool has_periodic;                     // Keyboard supports Periodic Advertising
+    bool periodic_synced;                  // Periodic sync is active
+
+    // v2.2.0 Extended data (from Periodic packets)
+    char layer_names[10][8];               // Layer names (up to 10)
+    uint8_t layer_count;                   // Number of layers
+    int8_t peripheral_rssi[3];             // Peripheral RSSI values
+    uint8_t device_features;               // Device features bitmap
+    uint16_t firmware_version;             // Firmware version
+    char keyboard_name[24];                // Full keyboard name
+    uint8_t indicator_flags;               // Caps/Num/Scroll Lock status
+    uint16_t ble_profile_flags;            // BLE profile status
 };
 
 /**

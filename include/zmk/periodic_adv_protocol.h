@@ -25,17 +25,37 @@ extern "C" {
 #endif
 
 /*============================================================================
+ * Prospector Signature (for packet identification)
+ *============================================================================*/
+
+/**
+ * @brief Prospector packet signature
+ *
+ * All Prospector packets start with this 4-byte signature:
+ * - manufacturer_id: 0xFF 0xFF (BLE SIG unassigned)
+ * - service_uuid: 0xAB 0xCE (Prospector v2.2.0 Periodic)
+ *
+ * Legacy packets use 0xAB 0xCD, so scanners can differentiate:
+ * - 0xAB 0xCD = Legacy v1 (26-byte status_adv_data)
+ * - 0xAB 0xCE = v2.2.0 Periodic (dynamic/static packets)
+ */
+#define PROSPECTOR_SIGNATURE_0        0xFF
+#define PROSPECTOR_SIGNATURE_1        0xFF
+#define PROSPECTOR_SERVICE_UUID_0     0xAB
+#define PROSPECTOR_SERVICE_UUID_1     0xCE  /* 0xCE = v2.2.0, 0xCD = Legacy */
+
+/*============================================================================
  * Packet Types
  *============================================================================*/
 
-#define PERIODIC_PACKET_TYPE_DYNAMIC  0x00
-#define PERIODIC_PACKET_TYPE_STATIC   0x01
+#define PERIODIC_PACKET_TYPE_DYNAMIC  0x01
+#define PERIODIC_PACKET_TYPE_STATIC   0x02
 
 /*============================================================================
- * Dynamic Packet (36 bytes, 30ms interval)
+ * Dynamic Packet (40 bytes, 30ms interval)
  *============================================================================*/
 
-#define DYNAMIC_PACKET_SIZE           36
+#define DYNAMIC_PACKET_SIZE           40
 #define LAYER_NAME_MAX_LEN            8
 
 /**
@@ -84,7 +104,7 @@ extern "C" {
 #define PERIPHERAL_STATUS_2_CONNECTED (1 << 2)
 
 /**
- * @brief Dynamic packet structure (36 bytes)
+ * @brief Dynamic packet structure (40 bytes)
  *
  * Contains high-frequency data that changes often:
  * - Active layer and name
@@ -92,9 +112,18 @@ extern "C" {
  * - WPM
  * - Battery levels
  * - Pointer movement
+ *
+ * Starts with 4-byte Prospector signature for identification.
  */
 struct periodic_dynamic_packet {
-    uint8_t  packet_type;           /* 0x00 */
+    /* Prospector signature (4 bytes) */
+    uint8_t  manufacturer_id[2];    /* 0xFF 0xFF */
+    uint8_t  service_uuid[2];       /* 0xAB 0xCE (v2.2.0) */
+
+    /* Packet identification */
+    uint8_t  packet_type;           /* PERIODIC_PACKET_TYPE_DYNAMIC (0x01) */
+
+    /* Core status data */
     uint8_t  active_layer;
     uint8_t  modifier_flags;
     uint8_t  status_flags;
@@ -107,24 +136,28 @@ struct periodic_dynamic_packet {
     uint16_t ble_profile_flags;
     uint16_t sequence_number;
     char     current_layer_name[LAYER_NAME_MAX_LEN];
+
+    /* Pointer/trackball data */
     int16_t  pointer_dx;
     int16_t  pointer_dy;
     int8_t   scroll_v;
     int8_t   scroll_h;
     uint8_t  pointer_buttons;
+
+    /* Additional status */
     uint8_t  idle_seconds_div4;
     uint8_t  indicator_flags;
     uint8_t  reserved[3];
 } __packed;
 
 _Static_assert(sizeof(struct periodic_dynamic_packet) == DYNAMIC_PACKET_SIZE,
-               "Dynamic packet must be exactly 36 bytes");
+               "Dynamic packet must be exactly 40 bytes");
 
 /*============================================================================
- * Static Packet (128 bytes, 5 second interval)
+ * Static Packet (132 bytes, 5 second interval)
  *============================================================================*/
 
-#define STATIC_PACKET_SIZE            128
+#define STATIC_PACKET_SIZE            132
 #define STATIC_LAYER_COUNT            10
 #define KEYBOARD_NAME_MAX_LEN         24
 
@@ -144,34 +177,51 @@ _Static_assert(sizeof(struct periodic_dynamic_packet) == DYNAMIC_PACKET_SIZE,
 #define DEVICE_FEATURE_BACKLIGHT      (1 << 5)
 
 /**
- * @brief Static packet structure (128 bytes)
+ * @brief Static packet structure (132 bytes)
  *
  * Contains low-frequency data that rarely changes:
  * - Keyboard name and ID
  * - Layer names (up to 10 layers)
  * - Device features
  * - Peripheral RSSI
+ *
+ * Starts with 4-byte Prospector signature for identification.
  */
 struct periodic_static_packet {
-    uint8_t  packet_type;           /* 0x01 */
+    /* Prospector signature (4 bytes) */
+    uint8_t  manufacturer_id[2];    /* 0xFF 0xFF */
+    uint8_t  service_uuid[2];       /* 0xAB 0xCE (v2.2.0) */
+
+    /* Packet identification */
+    uint8_t  packet_type;           /* PERIODIC_PACKET_TYPE_STATIC (0x02) */
     uint8_t  static_version;        /* Currently: 1 */
+
+    /* Keyboard identity */
     uint32_t keyboard_id;
     uint8_t  layer_count;
     uint8_t  device_role;
     char     keyboard_name[KEYBOARD_NAME_MAX_LEN];
+
+    /* Firmware info */
     uint16_t firmware_version;      /* (major << 8) | minor */
     uint8_t  device_features;
     uint8_t  reserved_header;
+
+    /* Layer names (10 layers × 8 chars = 80 bytes) */
     char     layer_names[STATIC_LAYER_COUNT][LAYER_NAME_MAX_LEN];
+
+    /* Statistics */
     uint32_t total_keypress;
     uint16_t boot_count;
     uint16_t zephyr_version;        /* (major << 8) | minor */
+
+    /* Peripheral info */
     int8_t   peripheral_rssi[3];    /* dBm, 0x7F = invalid */
     uint8_t  reserved;
 } __packed;
 
 _Static_assert(sizeof(struct periodic_static_packet) == STATIC_PACKET_SIZE,
-               "Static packet must be exactly 128 bytes");
+               "Static packet must be exactly 132 bytes");
 
 /*============================================================================
  * Helper Macros

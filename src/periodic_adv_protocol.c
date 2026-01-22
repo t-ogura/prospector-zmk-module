@@ -187,6 +187,12 @@ int periodic_adv_build_dynamic_packet(struct periodic_dynamic_packet *packet) {
 
     memset(packet, 0, sizeof(*packet));
 
+    /* Prospector signature (v2.2.0) */
+    packet->manufacturer_id[0] = PROSPECTOR_SIGNATURE_0;
+    packet->manufacturer_id[1] = PROSPECTOR_SIGNATURE_1;
+    packet->service_uuid[0] = PROSPECTOR_SERVICE_UUID_0;
+    packet->service_uuid[1] = PROSPECTOR_SERVICE_UUID_1;
+
     /* Packet type */
     packet->packet_type = PERIODIC_PACKET_TYPE_DYNAMIC;
 
@@ -343,6 +349,12 @@ int periodic_adv_build_static_packet(struct periodic_static_packet *packet) {
 
     memset(packet, 0, sizeof(*packet));
 
+    /* Prospector signature (v2.2.0) */
+    packet->manufacturer_id[0] = PROSPECTOR_SIGNATURE_0;
+    packet->manufacturer_id[1] = PROSPECTOR_SIGNATURE_1;
+    packet->service_uuid[0] = PROSPECTOR_SERVICE_UUID_0;
+    packet->service_uuid[1] = PROSPECTOR_SERVICE_UUID_1;
+
     /* Packet type and version */
     packet->packet_type = PERIODIC_PACKET_TYPE_STATIC;
     packet->static_version = PERIODIC_ADV_STATIC_VERSION;
@@ -419,7 +431,7 @@ static void update_periodic_advertising_data(bool send_static) {
         if (err) {
             LOG_WRN("Failed to set static periodic data: %d", err);
         } else {
-            LOG_DBG("Static packet sent (128 bytes)");
+            LOG_DBG("Static packet sent (%d bytes)", STATIC_PACKET_SIZE);
         }
 
         static_update_requested = false;
@@ -437,8 +449,8 @@ static void update_periodic_advertising_data(bool send_static) {
         if (err) {
             LOG_WRN("Failed to set dynamic periodic data: %d", err);
         } else {
-            LOG_DBG("Dynamic packet sent (36 bytes, seq=%d, layer=%d)",
-                    dynamic_packet.sequence_number, dynamic_packet.active_layer);
+            LOG_DBG("Dynamic packet sent (%d bytes, seq=%d, layer=%d)",
+                    DYNAMIC_PACKET_SIZE, dynamic_packet.sequence_number, dynamic_packet.active_layer);
         }
     }
 }
