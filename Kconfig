@@ -115,17 +115,46 @@ config ZMK_STATUS_ADV_PERIODIC
       older scanners.
 
 config ZMK_STATUS_ADV_PERIODIC_INTERVAL_MS
-    int "Periodic advertising interval in milliseconds"
+    int "Periodic advertising interval in milliseconds (DEPRECATED)"
     range 8 82000
     default 30
     depends on ZMK_STATUS_ADV_PERIODIC
     help
+      DEPRECATED: Use PROSPECTOR_DYNAMIC_PACKET_INTERVAL_MS instead.
+      This option is kept for backward compatibility.
+
       Interval for periodic advertising updates.
       Lower values = lower latency but higher power consumption.
       Recommended: 20-50ms for active mode.
 
       Note: Actual interval is rounded to 1.25ms units (BLE spec).
       8ms is the minimum allowed by BLE 5.0 specification.
+
+config PROSPECTOR_DYNAMIC_PACKET_INTERVAL_MS
+    int "Dynamic packet interval in milliseconds"
+    range 10 1000
+    default 30
+    depends on ZMK_STATUS_ADV_PERIODIC
+    help
+      Interval for dynamic packet transmission via Periodic Advertising.
+      Dynamic packets contain high-frequency data: layer, modifiers, WPM, pointer.
+
+      Lower values = lower latency but higher power consumption.
+      Recommended: 20-50ms for responsive status updates.
+      Default: 30ms (33Hz update rate)
+
+config PROSPECTOR_STATIC_PACKET_INTERVAL_MS
+    int "Static packet interval in milliseconds"
+    range 1000 60000
+    default 5000
+    depends on ZMK_STATUS_ADV_PERIODIC
+    help
+      Interval for static packet transmission via Periodic Advertising.
+      Static packets contain low-frequency data: layer names, keyboard name, RSSI.
+
+      These packets are sent at sync establishment and periodically afterwards.
+      Lower values provide faster initial data availability but use more bandwidth.
+      Default: 5000ms (5 seconds)
 
 config ZMK_STATUS_ADV_CENTRAL_SIDE
     string "Physical side of central device in split keyboard"

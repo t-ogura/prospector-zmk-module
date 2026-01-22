@@ -10,6 +10,11 @@ if(CONFIG_ZMK_STATUS_ADVERTISEMENT)
         target_sources(app PRIVATE src/status_advertisement.c)
 endif()
 
+# Add Periodic Advertising Protocol v2.2.0 support
+if(CONFIG_ZMK_STATUS_ADV_PERIODIC)
+        target_sources(app PRIVATE src/periodic_adv_protocol.c)
+endif()
+
 # Add scanner mode support
 if(CONFIG_PROSPECTOR_MODE_SCANNER)
         target_sources(app PRIVATE src/status_scanner.c)

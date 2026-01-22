@@ -36,7 +36,7 @@
 // Custom WPM implementation to avoid ZMK WPM compatibility issues
 static uint32_t key_press_count = 0;
 static uint32_t wpm_start_time = 0;
-static uint8_t current_wpm = 0;
+uint8_t current_wpm = 0;  /* Exported for periodic_adv_protocol.c */
 // Circular buffer for rolling window implementation
 #define WPM_HISTORY_SIZE 60  // 60 seconds of history at 1-second resolution
 static uint8_t wpm_key_history[WPM_HISTORY_SIZE] = {0};  // Keys per second
@@ -101,26 +101,30 @@ static int adv_error_count = 0;  // Error counter for retry logic
 #define ADV_MAX_ERRORS_BEFORE_RESET 3
 
 // Periodic Advertising support (v2.2.0)
+// Now uses periodic_adv_protocol.c for dynamic/static packet implementation
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_PERIODIC)
-static struct bt_le_ext_adv *per_adv_set = NULL;
-static bool per_adv_started = false;
+#include <zmk/periodic_adv_protocol.h>
 
-// Convert milliseconds to BLE periodic advertising interval units (1.25ms per unit)
-// Formula: ms / 1.25 = ms * 4 / 5 (or ms * 1000 / 1250 for precision)
-// Example: 30ms -> 30 * 4 / 5 = 24 units
-#define MS_TO_PER_ADV_INTERVAL(ms) ((ms) * 4 / 5)
+static bool per_adv_started = false;  // Local tracking for startup sequence
 
-// Periodic Advertising parameters
-static struct bt_le_per_adv_param per_adv_param = {
-    .interval_min = MS_TO_PER_ADV_INTERVAL(CONFIG_ZMK_STATUS_ADV_PERIODIC_INTERVAL_MS),
-    .interval_max = MS_TO_PER_ADV_INTERVAL(CONFIG_ZMK_STATUS_ADV_PERIODIC_INTERVAL_MS),
-    .options = 0,
-};
+// Legacy support - delegate to new protocol implementation
+static int start_periodic_advertising(void) {
+    int err = periodic_adv_protocol_start();
+    if (err == 0) {
+        per_adv_started = true;
+    }
+    return err;
+}
 
-// Forward declarations for Periodic Advertising functions
-static int start_periodic_advertising(void);
-static void update_periodic_data(void);
-static void stop_periodic_advertising(void);
+static void update_periodic_data(void) {
+    // Dynamic packets are now handled by periodic_adv_protocol.c work handler
+    // This function is kept for backward compatibility but does nothing
+}
+
+static void stop_periodic_advertising(void) {
+    periodic_adv_protocol_stop();
+    per_adv_started = false;
+}
 #endif // CONFIG_ZMK_STATUS_ADV_PERIODIC
 
 // Adaptive update intervals based on activity - using Kconfig values for flexibility
@@ -149,7 +153,7 @@ static atomic_t burst_remaining = ATOMIC_INIT(0);
 
 // Peripheral battery tracking for split keyboards
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-static uint8_t peripheral_batteries[3] = {0, 0, 0}; // Up to 3 peripheral devices
+uint8_t peripheral_batteries[3] = {0, 0, 0};  /* Exported for periodic_adv_protocol.c */
 static int peripheral_battery_listener(const zmk_event_t *eh);
 
 ZMK_LISTENER(prospector_peripheral_battery, peripheral_battery_listener);
@@ -826,116 +830,6 @@ static void start_custom_advertising(void) {
     }
 }
 
-// ============================================================================
-// Periodic Advertising Support (v2.2.0)
-// ============================================================================
-#if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_PERIODIC)
-
-static int start_periodic_advertising(void) {
-    int err;
-
-    // Skip on peripheral devices (same as legacy advertising)
-#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    return 0;
-#endif
-
-    // Create Extended Advertising Set for Periodic (separate from legacy)
-    if (!per_adv_set) {
-        // Extended Advertising parameters for Periodic ADV carrier
-        // Must be non-connectable, non-scannable for Periodic ADV
-        static const struct bt_le_adv_param ext_adv_param = BT_LE_ADV_PARAM_INIT(
-            BT_LE_ADV_OPT_EXT_ADV | BT_LE_ADV_OPT_USE_IDENTITY,
-            BT_GAP_ADV_FAST_INT_MIN_2,
-            BT_GAP_ADV_FAST_INT_MAX_2,
-            NULL);
-
-        err = bt_le_ext_adv_create(&ext_adv_param, NULL, &per_adv_set);
-        if (err) {
-            LOG_ERR("❌ Failed to create periodic ext adv set: %d", err);
-            return err;
-        }
-        LOG_INF("✅ Periodic Extended Advertising set created");
-    }
-
-    // Set Periodic Advertising parameters
-    // Log interval values for debugging
-    LOG_INF("📡 Setting periodic params: interval_min=%d, interval_max=%d (%.1fms)",
-            per_adv_param.interval_min, per_adv_param.interval_max,
-            per_adv_param.interval_min * 1.25f);
-
-    err = bt_le_per_adv_set_param(per_adv_set, &per_adv_param);
-    if (err) {
-        LOG_ERR("❌ Failed to set periodic adv params: %d (interval=%d units, %.1fms)",
-                err, per_adv_param.interval_min, per_adv_param.interval_min * 1.25f);
-        return err;
-    }
-
-    // Set initial periodic data (uses same manufacturer_data as legacy)
-    struct bt_data per_ad[] = {
-        BT_DATA(BT_DATA_MANUFACTURER_DATA,
-                (uint8_t*)&manufacturer_data,
-                sizeof(manufacturer_data)),
-    };
-
-    err = bt_le_per_adv_set_data(per_adv_set, per_ad, ARRAY_SIZE(per_ad));
-    if (err) {
-        LOG_ERR("❌ Failed to set periodic adv data: %d", err);
-        return err;
-    }
-
-    // Start Extended Advertising (carrier for SyncInfo)
-    err = bt_le_ext_adv_start(per_adv_set, BT_LE_EXT_ADV_START_DEFAULT);
-    if (err && err != -EALREADY) {
-        LOG_ERR("❌ Failed to start periodic ext adv: %d", err);
-        return err;
-    }
-
-    // Start Periodic Advertising
-    err = bt_le_per_adv_start(per_adv_set);
-    if (err && err != -EALREADY) {
-        LOG_ERR("❌ Failed to start periodic adv: %d", err);
-        return err;
-    }
-
-    per_adv_started = true;
-    LOG_INF("✅ Periodic Advertising started (interval: %dms)",
-            CONFIG_ZMK_STATUS_ADV_PERIODIC_INTERVAL_MS);
-    return 0;
-}
-
-static void update_periodic_data(void) {
-    if (!per_adv_set || !per_adv_started) {
-        return;
-    }
-
-    // manufacturer_data is already updated by build_manufacturer_payload()
-    struct bt_data per_ad[] = {
-        BT_DATA(BT_DATA_MANUFACTURER_DATA,
-                (uint8_t*)&manufacturer_data,
-                sizeof(manufacturer_data)),
-    };
-
-    int err = bt_le_per_adv_set_data(per_adv_set, per_ad, ARRAY_SIZE(per_ad));
-    if (err) {
-        LOG_WRN("⚠️ Failed to update periodic data: %d", err);
-    } else {
-        LOG_DBG("✅ Periodic data updated");
-    }
-}
-
-static void stop_periodic_advertising(void) {
-    if (per_adv_set) {
-        bt_le_per_adv_stop(per_adv_set);
-        bt_le_ext_adv_stop(per_adv_set);
-        bt_le_ext_adv_delete(per_adv_set);
-        per_adv_set = NULL;
-        per_adv_started = false;
-        LOG_INF("💤 Periodic Advertising stopped");
-    }
-}
-
-#endif // CONFIG_ZMK_STATUS_ADV_PERIODIC
-
 static void adv_work_handler(struct k_work *work) {
     // If adv_set is NULL (after sleep wake or error), recreate it
     if (!adv_set) {
@@ -1061,12 +955,14 @@ static int init_prospector_status(const struct device *dev) {
     k_work_schedule(&adv_work, K_SECONDS(1)); // Original working timing
     LOG_INF("Prospector: Started custom advertising with original working timing");
 
-    // Start Periodic Advertising (v2.2.0)
+    // Initialize Periodic Advertising Protocol (v2.2.0)
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_PERIODIC)
+    periodic_adv_protocol_init();
     // Delay Periodic ADV start to ensure BLE stack is fully ready
     // Will be started after first legacy ADV update
-    LOG_INF("📡 Periodic Advertising enabled (interval: %dms)",
-            CONFIG_ZMK_STATUS_ADV_PERIODIC_INTERVAL_MS);
+    LOG_INF("📡 Periodic Advertising enabled (dynamic: %dms, static: %dms)",
+            CONFIG_PROSPECTOR_DYNAMIC_PACKET_INTERVAL_MS,
+            CONFIG_PROSPECTOR_STATIC_PACKET_INTERVAL_MS);
 #endif
 
     return 0;
