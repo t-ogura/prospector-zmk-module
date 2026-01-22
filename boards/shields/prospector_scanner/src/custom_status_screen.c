@@ -35,6 +35,7 @@
 #include "touch_handler.h"  /* For LVGL input device registration */
 #include "brightness_control.h"  /* For auto brightness sensor control */
 #include "scanner_stub.h"  /* For scanner_get_selected_keyboard_addr() */
+#include "prospector_layouts.h"  /* Carrefinho-inspired display layouts */
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
 
@@ -80,7 +81,7 @@ enum screen_state {
     SCREEN_DISPLAY_SETTINGS,
     SCREEN_SYSTEM_SETTINGS,
     SCREEN_KEYBOARD_SELECT,
-    SCREEN_PONG_WARS,
+    SCREEN_PROSPECTOR_DISPLAY,  /* Carrefinho-inspired layouts (Classic/Field/Operator/Radii) */
 };
 
 static enum screen_state current_screen = SCREEN_MAIN;
@@ -89,8 +90,9 @@ static lv_obj_t *screen_obj = NULL;
 /* Transition protection flag - checked by work queues */
 volatile bool transition_in_progress = false;
 
-/* Pong Wars active flag - stops all background display updates */
-volatile bool pong_wars_active = false;
+/* Display active flags - stop background display updates */
+volatile bool prospector_display_active = false;
+volatile bool pong_wars_active = false;  /* Kept for legacy Pong Wars code */
 
 /* Pending swipe direction - set by ISR listener, processed by LVGL timer */
 static volatile enum swipe_direction pending_swipe = SWIPE_DIRECTION_NONE;
@@ -109,8 +111,9 @@ static void destroy_system_settings_widgets(void);
 static void create_system_settings_widgets(void);
 static void destroy_keyboard_select_widgets(void);
 static void create_keyboard_select_widgets(void);
-static void destroy_pong_wars_widgets(void);
-static void create_pong_wars_widgets(void);
+static void destroy_prospector_display_widgets(void);
+static void create_prospector_display_widgets(void);
+static void update_prospector_display(const struct pending_display_data *data);
 static void swipe_process_timer_cb(lv_timer_t *timer);
 
 /* Display update functions - called from pending_update_timer_cb */
@@ -492,8 +495,8 @@ static void pending_update_work_handler(struct k_work *work) {
     /* Reschedule immediately for next update check */
     k_work_schedule_for_queue(zmk_display_work_q(), &pending_update_work, K_MSEC(10));
 
-    /* Only process updates on main screen */
-    if (current_screen != SCREEN_MAIN) {
+    /* Process updates for main screen or Prospector Display */
+    if (current_screen != SCREEN_MAIN && current_screen != SCREEN_PROSPECTOR_DISPLAY) {
         return;
     }
 
@@ -502,67 +505,75 @@ static void pending_update_work_handler(struct k_work *work) {
     if (scanner_get_pending_update(&data)) {
         /* Check if all keyboards have timed out */
         if (data.no_keyboards) {
-            LOG_INF("All keyboards timed out - returning to Scanning... state");
+            if (current_screen == SCREEN_MAIN) {
+                LOG_INF("All keyboards timed out - returning to Scanning... state");
 
-            /* Reset display to initial "Scanning..." state */
-            display_update_device_name("Scanning...");
-            display_update_layer(0);
-            display_update_wpm(0);
-            display_update_connection(false, false, false, 0);
-            display_update_modifiers(0);
-            display_update_keyboard_battery_4(0, 0, 0, 0);
-            display_update_sync_version();  /* Reset v1/v2 badge */
+                /* Reset display to initial "Scanning..." state */
+                display_update_device_name("Scanning...");
+                display_update_layer(0);
+                display_update_wpm(0);
+                display_update_connection(false, false, false, 0);
+                display_update_modifiers(0);
+                display_update_keyboard_battery_4(0, 0, 0, 0);
+                display_update_sync_version();  /* Reset v1/v2 badge */
 
-            /* Clear last keyboard name so next keyboard triggers battery reposition */
-            last_keyboard_name[0] = '\0';
-            active_battery_count = -1;
+                /* Clear last keyboard name so next keyboard triggers battery reposition */
+                last_keyboard_name[0] = '\0';
+                active_battery_count = -1;
 
-            /* Apply timeout brightness if configured */
+                /* Apply timeout brightness if configured */
 #ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS
-            if (CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS > 0) {
-                set_pwm_brightness(CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
-                LOG_INF("Timeout brightness set to %d%%", CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
-            }
+                if (CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS > 0) {
+                    set_pwm_brightness(CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
+                    LOG_INF("Timeout brightness set to %d%%", CONFIG_PROSPECTOR_SCANNER_TIMEOUT_BRIGHTNESS);
+                }
 #endif
+            }
             return;
         }
 
-        /* Detect keyboard change - reset battery count to force full reposition */
-        if (strcmp(last_keyboard_name, data.device_name) != 0) {
-            LOG_INF("Keyboard changed: %s -> %s, resetting battery layout",
-                    last_keyboard_name, data.device_name);
-            strncpy(last_keyboard_name, data.device_name, MAX_NAME_LEN - 1);
-            last_keyboard_name[MAX_NAME_LEN - 1] = '\0';
-            active_battery_count = -1;  /* Force reposition on next battery update */
+        /* Route updates to appropriate screen */
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            /* Update Prospector Display with keyboard data */
+            update_prospector_display(&data);
+        } else if (current_screen == SCREEN_MAIN) {
+            /* Detect keyboard change - reset battery count to force full reposition */
+            if (strcmp(last_keyboard_name, data.device_name) != 0) {
+                LOG_INF("Keyboard changed: %s -> %s, resetting battery layout",
+                        last_keyboard_name, data.device_name);
+                strncpy(last_keyboard_name, data.device_name, MAX_NAME_LEN - 1);
+                last_keyboard_name[MAX_NAME_LEN - 1] = '\0';
+                active_battery_count = -1;  /* Force reposition on next battery update */
 
-            /* Restore normal brightness when keyboard activity resumes */
+                /* Restore normal brightness when keyboard activity resumes */
 #ifdef CONFIG_PROSPECTOR_FIXED_BRIGHTNESS
-            set_pwm_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
-            LOG_INF("Brightness restored to %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                set_pwm_brightness(CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
+                LOG_INF("Brightness restored to %d%%", CONFIG_PROSPECTOR_FIXED_BRIGHTNESS);
 #endif
-        }
+            }
 
-        /* Process all updates in main thread - safe to call LVGL */
-        /* Debug: Log when timer processes layer change */
-        static int last_timer_layer = -1;
-        if (data.layer != last_timer_layer) {
-            LOG_INF("⚡ TIMER UPDATE: Layer=%d (was %d)", data.layer, last_timer_layer);
-            last_timer_layer = data.layer;
-        }
+            /* Process all updates in main thread - safe to call LVGL */
+            /* Debug: Log when timer processes layer change */
+            static int last_timer_layer = -1;
+            if (data.layer != last_timer_layer) {
+                LOG_INF("⚡ TIMER UPDATE: Layer=%d (was %d)", data.layer, last_timer_layer);
+                last_timer_layer = data.layer;
+            }
 
-        display_update_device_name(data.device_name);
-        display_update_layer(data.layer);
-        display_update_wpm(data.wpm);
-        display_update_connection(data.usb_ready, data.ble_connected,
-                                  data.ble_bonded, data.profile);
-        display_update_modifiers(data.modifiers);
+            display_update_device_name(data.device_name);
+            display_update_layer(data.layer);
+            display_update_wpm(data.wpm);
+            display_update_connection(data.usb_ready, data.ble_connected,
+                                      data.ble_bonded, data.profile);
+            display_update_modifiers(data.modifiers);
 
-        /* Battery update */
-        if (data.bat[1] == 0 && data.bat[2] == 0 && data.bat[3] == 0) {
-            display_update_keyboard_battery_4(data.bat[0], 0, 0, 0);
-        } else {
-            display_update_keyboard_battery_4(data.bat[0], data.bat[1],
-                                              data.bat[2], data.bat[3]);
+            /* Battery update */
+            if (data.bat[1] == 0 && data.bat[2] == 0 && data.bat[3] == 0) {
+                display_update_keyboard_battery_4(data.bat[0], 0, 0, 0);
+            } else {
+                display_update_keyboard_battery_4(data.bat[0], data.bat[1],
+                                                  data.bat[2], data.bat[3]);
+            }
         }
     }
 
@@ -3869,6 +3880,72 @@ static void ensure_lvgl_indev_registered(void) {
 static inline void ensure_lvgl_indev_registered(void) {}
 #endif
 
+/* ========== Prospector Display (Carrefinho-inspired layouts) ========== */
+/*
+ * These layouts are inspired by carrefinho's feat/new-status-screens branch:
+ * https://github.com/carrefinho/prospector-zmk-module/tree/feat/new-status-screens
+ *
+ * Original design by carrefinho, adapted for scanner mode with Periodic ADV data.
+ * License: MIT (same as prospector-zmk-module)
+ */
+
+static void destroy_prospector_display_widgets(void) {
+    /* Resume background display updates */
+    prospector_display_active = false;
+
+    /* Destroy layouts module */
+    prospector_layouts_destroy();
+
+    LOG_INF("Prospector Display destroyed");
+}
+
+static void create_prospector_display_widgets(void) {
+    LOG_INF("Creating Prospector Display...");
+
+    /* Initialize layouts with current screen as parent */
+    prospector_layouts_init(screen_obj);
+
+    /* Stop background display updates during Prospector Display */
+    prospector_display_active = true;
+
+    LOG_INF("Prospector Display created (%s layout)", prospector_layouts_get_name(prospector_layouts_get_style()));
+}
+
+/* Update Prospector Display with current keyboard data */
+static void update_prospector_display(const struct pending_display_data *data) {
+    if (!prospector_display_active || current_screen != SCREEN_PROSPECTOR_DISPLAY) {
+        return;
+    }
+
+    /* Convert pending_display_data to prospector_keyboard_data */
+    struct prospector_keyboard_data kb_data = {0};
+
+    /* Dynamic data */
+    kb_data.active_layer = data->layer;
+    if (data->layer >= 0 && data->layer < 10) {
+        /* Layer name would come from Periodic ADV static packet */
+        snprintf(kb_data.current_layer_name, sizeof(kb_data.current_layer_name),
+                 "Layer%d", data->layer);
+    }
+    kb_data.modifier_flags = data->modifiers;
+    kb_data.wpm_value = data->wpm;
+    kb_data.battery_level = (data->bat[0] >= 0) ? data->bat[0] : 0;
+    kb_data.peripheral_battery[0] = (data->bat[1] >= 0) ? data->bat[1] : 0;
+    kb_data.peripheral_battery[1] = (data->bat[2] >= 0) ? data->bat[2] : 0;
+    kb_data.peripheral_battery[2] = (data->bat[3] >= 0) ? data->bat[3] : 0;
+    kb_data.profile_slot = data->profile;
+    kb_data.ble_connected = data->ble_connected;
+    kb_data.usb_connected = data->usb_ready;
+    kb_data.has_dynamic_data = true;
+
+    /* Static data (from device name) */
+    strncpy(kb_data.keyboard_name, data->device_name, sizeof(kb_data.keyboard_name) - 1);
+    kb_data.has_static_data = (data->device_name[0] != '\0');
+
+    /* Update layouts */
+    prospector_layouts_update(&kb_data);
+}
+
 /**
  * Process pending swipe in main thread context (LVGL timer callback)
  * This ensures all LVGL operations are thread-safe.
@@ -3918,7 +3995,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
 
     switch (dir) {
     case SWIPE_DIRECTION_DOWN:
-        /* Main → Display Settings OR Keyboard Select → Main */
+        /* Main → Display Settings OR Keyboard Select → Main OR Prospector: next layout */
         if (current_screen == SCREEN_MAIN) {
             LOG_DBG("MAIN -> DISPLAY_SETTINGS");
             destroy_main_screen_widgets();
@@ -3936,11 +4013,15 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
+        } else if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            /* Cycle to next layout within Prospector Display */
+            LOG_DBG("PROSPECTOR_DISPLAY: next layout");
+            prospector_layouts_next();
         }
         break;
 
     case SWIPE_DIRECTION_UP:
-        /* Display Settings → Main OR Main → Keyboard Select */
+        /* Display Settings → Main OR Main → Keyboard Select OR Prospector: prev layout */
         if (current_screen == SCREEN_DISPLAY_SETTINGS) {
             LOG_DBG("DISPLAY_SETTINGS -> MAIN");
             destroy_display_settings_widgets();
@@ -3958,20 +4039,23 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             create_keyboard_select_widgets();
             ensure_lvgl_indev_registered();  /* Register for keyboard entry touch */
             current_screen = SCREEN_KEYBOARD_SELECT;
+        } else if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            /* Cycle to previous layout within Prospector Display */
+            LOG_DBG("PROSPECTOR_DISPLAY: prev layout");
+            prospector_layouts_prev();
         }
         break;
 
     case SWIPE_DIRECTION_LEFT:
-        /* Main → Pong Wars OR Quick Actions → Main */
+        /* Main → Prospector Display OR Quick Actions → Main */
         if (current_screen == SCREEN_MAIN) {
-            LOG_DBG("MAIN -> PONG_WARS");
+            LOG_DBG("MAIN -> PROSPECTOR_DISPLAY");
             destroy_main_screen_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);
-            create_pong_wars_widgets();
-            ensure_lvgl_indev_registered();  /* Register for tap-to-reset */
-            current_screen = SCREEN_PONG_WARS;
+            create_prospector_display_widgets();
+            current_screen = SCREEN_PROSPECTOR_DISPLAY;
         } else if (current_screen == SCREEN_SYSTEM_SETTINGS) {
             LOG_DBG("QUICK_ACTIONS -> MAIN");
             destroy_system_settings_widgets();
@@ -3989,10 +4073,10 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         break;
 
     case SWIPE_DIRECTION_RIGHT:
-        /* Pong Wars → Main OR Main → Quick Actions */
-        if (current_screen == SCREEN_PONG_WARS) {
-            LOG_DBG("PONG_WARS -> MAIN");
-            destroy_pong_wars_widgets();
+        /* Prospector Display → Main OR Main → Quick Actions */
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            LOG_DBG("PROSPECTOR_DISPLAY -> MAIN");
+            destroy_prospector_display_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);

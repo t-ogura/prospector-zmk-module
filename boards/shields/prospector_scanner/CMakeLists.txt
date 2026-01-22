@@ -24,6 +24,9 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
     # System settings widget (Bootloader, Reset, Channel selector)
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/system_settings_widget.c)
 
+    # Prospector layouts (carrefinho-inspired display styles)
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/prospector_layouts.c)
+
     # NerdFont for modifier icons
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/fonts/NerdFonts_Regular_40.c)
 endif()
