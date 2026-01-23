@@ -62,10 +62,17 @@ static int64_t last_swipe_time = 0;
 // Flag to prevent duplicate events (hardware gesture + software detection)
 static bool swipe_already_raised = false;
 
+// Double tap detection
+#define DOUBLE_TAP_MAX_INTERVAL_MS 400  // Max time between taps
+#define DOUBLE_TAP_MAX_MOVE 30          // Max pixel movement allowed
+static int64_t last_tap_time = 0;
+static int16_t last_tap_x = 0;
+static int16_t last_tap_y = 0;
+
 // Helper function to raise swipe gesture event (thread-safe)
 // Uses ZMK event system - listener runs in main thread, safe for LVGL
 static void raise_swipe_event(enum swipe_direction direction) {
-    const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT"};
+    const char *dir_name[] = {"UP", "DOWN", "LEFT", "RIGHT", "DOUBLE_TAP"};
 
     // Cooldown check - prevent rapid consecutive swipes that cause freeze
     int64_t now = k_uptime_get();
@@ -213,6 +220,25 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
                     } else if (abs_dx > abs_dy && abs_dx > SWIPE_THRESHOLD) {
                         LOG_DBG("SW SWIPE: %s (dx=%d)", dx > 0 ? "RIGHT" : "LEFT", dx);
                         raise_swipe_event(dx > 0 ? SWIPE_DIRECTION_RIGHT : SWIPE_DIRECTION_LEFT);
+                    } else {
+                        // Small movement - check for double tap
+                        int64_t now = k_uptime_get();
+                        int16_t tap_dx = current_x - last_tap_x;
+                        int16_t tap_dy = current_y - last_tap_y;
+                        int16_t tap_dist = (tap_dx < 0 ? -tap_dx : tap_dx) +
+                                           (tap_dy < 0 ? -tap_dy : tap_dy);
+
+                        if ((now - last_tap_time) < DOUBLE_TAP_MAX_INTERVAL_MS &&
+                            tap_dist < DOUBLE_TAP_MAX_MOVE) {
+                            LOG_DBG("DOUBLE TAP detected at (%d, %d)", current_x, current_y);
+                            raise_swipe_event(SWIPE_DIRECTION_DOUBLE_TAP);
+                            last_tap_time = 0;  // Reset to prevent triple-tap
+                        } else {
+                            // Record this tap for potential double-tap
+                            last_tap_time = now;
+                            last_tap_x = current_x;
+                            last_tap_y = current_y;
+                        }
                     }
                 }
 

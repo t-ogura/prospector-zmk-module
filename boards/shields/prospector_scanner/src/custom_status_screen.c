@@ -36,6 +36,8 @@
 #include "brightness_control.h"  /* For auto brightness sensor control */
 #include "scanner_stub.h"  /* For scanner_get_selected_keyboard_addr() */
 #include "prospector_layouts.h"  /* Carrefinho-inspired display layouts */
+#include "radii_layout.h"        /* For radii_layout_cycle_palette() */
+#include "operator_layout.h"     /* For operator_layout_cycle_palette() */
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
 
@@ -3935,6 +3937,7 @@ static void update_prospector_display(const struct pending_display_data *data) {
     kb_data.peripheral_battery[2] = (data->bat[3] >= 0) ? data->bat[3] : 0;
     kb_data.profile_slot = data->profile;
     kb_data.ble_connected = data->ble_connected;
+    kb_data.ble_bonded = data->ble_bonded;
     kb_data.usb_connected = data->usb_ready;
     kb_data.has_dynamic_data = true;
 
@@ -4099,6 +4102,24 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         }
         break;
 
+    case SWIPE_DIRECTION_DOUBLE_TAP:
+        /* Double tap - cycle color palette when on Prospector Display */
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            prospector_layout_t layout = prospector_layouts_get_style();
+            if (layout == PROSPECTOR_LAYOUT_RADII) {
+                LOG_INF("DOUBLE_TAP: Cycling Radii color palette");
+                radii_layout_cycle_palette();
+                LOG_INF("New palette: %s", radii_layout_get_palette_name());
+            } else if (layout == PROSPECTOR_LAYOUT_OPERATOR) {
+                LOG_INF("DOUBLE_TAP: Cycling Operator color palette");
+                operator_layout_cycle_palette();
+                LOG_INF("New palette: %s", operator_layout_get_palette_name());
+            }
+        } else {
+            LOG_DBG("Double tap ignored - not on Prospector Display");
+        }
+        break;
+
     default:
         LOG_DBG("Swipe direction not handled for current screen: dir=%d, screen=%d",
                 dir, current_screen);
@@ -4138,3 +4159,9 @@ static int swipe_gesture_listener(const zmk_event_t *eh) {
 
 ZMK_LISTENER(swipe_gesture, swipe_gesture_listener);
 ZMK_SUBSCRIPTION(swipe_gesture, zmk_swipe_gesture_event);
+
+/* ========== Public Getters for Layout Integration ========== */
+
+uint8_t display_settings_get_max_layers(void) {
+    return ds_max_layers;
+}

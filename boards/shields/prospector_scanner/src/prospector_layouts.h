@@ -51,6 +51,7 @@ struct prospector_keyboard_data {
     uint8_t connection_count;
     uint8_t indicator_flags;
     bool ble_connected;
+    bool ble_bonded;
     bool usb_connected;
 
     /* Static data (from static packet) */
