@@ -597,8 +597,12 @@ static void build_manufacturer_payload(void) {
 #endif
 
     // Periodic Advertising flag (v2.2.0)
+    // Only set flag if Periodic ADV will actually be started
+    // (Split peripherals don't run Periodic ADV - only Central or standalone)
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_PERIODIC)
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     flags |= ZMK_STATUS_FLAG_HAS_PERIODIC;
+#endif
 #endif
 
     manufacturer_data.status_flags = flags;

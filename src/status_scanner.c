@@ -117,7 +117,8 @@ static struct k_work_delayable sync_retry_work;
 
 #define SYNC_TIMEOUT_MS      10000   // 10 seconds sync timeout
 #define SYNC_RETRY_DELAY_MS  3000    // 3 seconds retry delay
-#define SYNC_MAX_RETRIES     1       // Retry once before fallback
+#define SYNC_MAX_RETRIES     3       // Retry 3 times before fallback (increased for SID discovery)
+#define SID_DISCOVERY_WAIT_MS 1500   // Wait for Extended Scanning to discover SID
 
 // Forward declarations for Periodic sync functions
 static int start_periodic_sync(int keyboard_index);
@@ -306,10 +307,12 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     bool has_periodic = (adv_data->status_flags & ZMK_STATUS_FLAG_HAS_PERIODIC) != 0;
     if (has_periodic != keyboards[index].has_periodic) {
         keyboards[index].has_periodic = has_periodic;
-        LOG_INF("🔄 Keyboard %s supports Periodic ADV: %s (flags=0x%02X)",
+        LOG_INF("🔄 Keyboard %s supports Periodic ADV: %s (flags=0x%02X, addr=%02X:%02X:%02X:%02X:%02X:%02X)",
                 keyboards[index].ble_name[0] ? keyboards[index].ble_name : "Unknown",
                 has_periodic ? "YES (v2)" : "NO (v1)",
-                adv_data->status_flags);
+                adv_data->status_flags,
+                addr->a.val[5], addr->a.val[4], addr->a.val[3],
+                addr->a.val[2], addr->a.val[1], addr->a.val[0]);
     }
 
     // Check SID cache for this address (populated by Extended Scanning)
@@ -859,12 +862,33 @@ int zmk_status_scanner_get_primary_keyboard(void) {
 // Both use same identity address, so we cache SID by address
 static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
                                 struct net_buf_simple *buf) {
-    // Only interested in Extended ADV with periodic info (interval != 0)
-    if (info->interval == 0) {
-        return;  // Not a periodic advertiser - skip silently
+    // Debug: Log ALL Extended ADV packets to diagnose SID discovery issue
+    static uint32_t total_ext_adv_count = 0;
+    static uint32_t extended_adv_count = 0;
+    total_ext_adv_count++;
+
+    // Check if this is Extended ADV (sid != 255) or Legacy ADV (sid == 255)
+    bool is_extended = (info->sid != 0xFF);
+    if (is_extended) {
+        extended_adv_count++;
     }
 
-    // Counter for periodic advertiser detection (reduce spam)
+    // Log every 100th packet, and always log Extended ADV packets
+    if (total_ext_adv_count == 1 || total_ext_adv_count % 100 == 0 || is_extended) {
+        LOG_INF("📡 SCAN[%u]: %s sid=%d interval=%d addr=%02X:%02X:..:%02X (ext_count=%u)",
+                total_ext_adv_count,
+                is_extended ? "EXT_ADV" : "LEGACY",
+                info->sid, info->interval,
+                info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[0],
+                extended_adv_count);
+    }
+
+    // Only interested in Extended ADV with periodic info (interval != 0)
+    if (info->interval == 0) {
+        return;  // Not a periodic advertiser - skip
+    }
+
+    // Counter for periodic advertiser detection
     static uint32_t periodic_adv_count = 0;
     periodic_adv_count++;
 
@@ -881,9 +905,20 @@ static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
     // Also try to update existing keyboard entry if we already know this address
     int index = find_keyboard_by_ble_addr(info->addr);
     if (index >= 0 && keyboards[index].sid != info->sid) {
-        LOG_INF("📡 Keyboard %d SID updated: %d -> %d",
-                index, keyboards[index].sid, info->sid);
+        uint8_t old_sid = keyboards[index].sid;
         keyboards[index].sid = info->sid;
+        LOG_INF("📡 Keyboard %d SID updated: %d -> %d",
+                index, old_sid, info->sid);
+
+        // If this is the selected keyboard and we're syncing with wrong SID, restart sync
+        if (index == selected_keyboard_index &&
+            current_sync_state == SYNC_STATE_SYNCING) {
+            LOG_INF("📡 Selected keyboard SID discovered - restarting sync with correct SID=%d",
+                    info->sid);
+            // Cancel pending retry and restart immediately
+            k_work_cancel_delayable(&sync_retry_work);
+            start_periodic_sync(index);
+        }
     }
 }
 
@@ -914,7 +949,9 @@ static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
 
 static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
                                   const struct bt_le_per_adv_sync_term_info *info) {
-    LOG_INF("⚠️ Periodic sync terminated (reason: %d)", info->reason);
+    // Reason codes: 0=local request, others=sync lost/timeout
+    LOG_INF("⚠️ Periodic sync TERMINATED: reason=%d (0=local, 0x3E=timeout), retry_count=%d/%d",
+            info->reason, sync_retry_count, SYNC_MAX_RETRIES);
     per_sync = NULL;
 
     // Clear periodic_synced flag
@@ -1195,9 +1232,19 @@ static int start_periodic_sync(int keyboard_index) {
     LOG_INF("📡 Starting Periodic sync: keyboard=%d, SID=%d, has_periodic=%d",
             keyboard_index, kb->sid, kb->has_periodic);
 
-    // SID=0 might be valid, but log a warning if it wasn't discovered via Extended Scanning
+    // If SID is 0 (not discovered yet) on first attempt, wait for Extended Scanning
+    if (kb->sid == 0 && sync_retry_count == 0) {
+        LOG_INF("📡 SID not discovered yet - waiting %dms for Extended Scanning",
+                SID_DISCOVERY_WAIT_MS);
+        current_sync_state = SYNC_STATE_SYNCING;  // Show syncing state in UI
+        sync_retry_count++;  // Count this as first attempt
+        k_work_schedule(&sync_retry_work, K_MSEC(SID_DISCOVERY_WAIT_MS));
+        return 0;  // Will retry after delay
+    }
+
+    // Log SID status
     if (kb->sid == 0) {
-        LOG_WRN("📡 SID is 0 - may not have been discovered from Extended Scanning yet");
+        LOG_WRN("📡 SID is still 0 after waiting - proceeding with sync attempt");
     }
 
     // Register callbacks if not done yet

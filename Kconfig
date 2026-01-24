@@ -25,6 +25,10 @@ config BT_EXT_ADV_MAX_ADV_SET
     default 3 if ZMK_STATUS_ADV_PERIODIC
     default 2 if ZMK_STATUS_ADVERTISEMENT
 
+# Periodic Advertising requires larger data buffer for static/dynamic packets
+config BT_CTLR_ADV_DATA_LEN_MAX
+    default 191 if ZMK_STATUS_ADV_PERIODIC
+
 config ZMK_STATUS_ADV_INTERVAL_MS
     int "Status advertisement interval in milliseconds"
     range 100 10000

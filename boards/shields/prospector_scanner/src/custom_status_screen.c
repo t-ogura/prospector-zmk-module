@@ -3236,7 +3236,9 @@ static void ks_update_entries(void) {
     /* Auto-select first keyboard if none selected */
     if (ks_selected_keyboard < 0 && active_count > 0) {
         ks_selected_keyboard = active_keyboards[0];
-        LOG_INF("Auto-selected keyboard index %d", ks_selected_keyboard);
+        LOG_INF("Auto-selected keyboard index %d - triggering periodic sync", ks_selected_keyboard);
+        /* Trigger periodic sync for v2 keyboards (same as manual selection) */
+        scanner_set_selected_keyboard(ks_selected_keyboard);
     }
 
     /* Check if selected keyboard is still active */
@@ -3250,7 +3252,10 @@ static void ks_update_entries(void) {
         }
         if (!found) {
             ks_selected_keyboard = active_keyboards[0];
-            LOG_INF("Selected keyboard lost, switched to index %d", ks_selected_keyboard);
+            LOG_INF("Selected keyboard lost, switched to index %d - triggering periodic sync",
+                    ks_selected_keyboard);
+            /* Trigger periodic sync for the new keyboard */
+            scanner_set_selected_keyboard(ks_selected_keyboard);
         }
     }
 

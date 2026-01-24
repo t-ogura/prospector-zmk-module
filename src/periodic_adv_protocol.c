@@ -499,9 +499,11 @@ int periodic_adv_protocol_init(void) {
 int periodic_adv_protocol_start(void) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     /* Skip on peripheral devices */
+    LOG_INF("📡 Periodic ADV skipped - this is a split peripheral");
     return 0;
 #endif
 
+    LOG_INF("📡 Starting Periodic ADV setup...");
     int err;
 
     /* Create Extended Advertising Set for Periodic ADV */
