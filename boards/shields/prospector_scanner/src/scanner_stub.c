@@ -72,6 +72,7 @@ struct pending_display_data {
 
     /* Cached data for LVGL update */
     char device_name[MAX_NAME_LEN];
+    char layer_name[8];    /* Layer name from Periodic ADV (v2.2.0) */
     int layer;
     int wpm;
     bool usb_ready;
@@ -416,6 +417,27 @@ static void display_update_work_handler(struct k_work *work) {
     strncpy(pending_data.device_name, name, MAX_NAME_LEN - 1);
     pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
     pending_data.layer = data.active_layer;
+
+    /* Layer name: try to get from status_scanner.c (has Periodic ADV layer_names) */
+    pending_data.layer_name[0] = '\0';  /* Default: empty */
+    if (selected_keyboard_addr_valid) {
+        struct zmk_keyboard_status *kb = zmk_status_scanner_get_keyboard_by_addr(selected_keyboard_ble_addr);
+        if (kb && kb->layer_count > 0) {
+            int layer_idx = data.active_layer;
+            if (layer_idx >= 0 && layer_idx < kb->layer_count &&
+                kb->layer_names[layer_idx][0] != '\0') {
+                strncpy(pending_data.layer_name, kb->layer_names[layer_idx],
+                        sizeof(pending_data.layer_name) - 1);
+                pending_data.layer_name[sizeof(pending_data.layer_name) - 1] = '\0';
+            }
+        }
+    }
+    /* Fallback to legacy layer name if no Periodic ADV name */
+    if (pending_data.layer_name[0] == '\0' && data.layer_name[0] != '\0') {
+        strncpy(pending_data.layer_name, data.layer_name, sizeof(pending_data.layer_name) - 1);
+        pending_data.layer_name[sizeof(pending_data.layer_name) - 1] = '\0';
+    }
+
     pending_data.wpm = data.wpm_value;
     pending_data.usb_ready = (data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
     pending_data.ble_connected = (data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
@@ -537,6 +559,22 @@ void scanner_trigger_high_priority_update(void) {
     strncpy(pending_data.device_name, kb->ble_name, MAX_NAME_LEN - 1);
     pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
     pending_data.layer = kb->data.active_layer;
+
+    /* Layer name: prefer Periodic ADV layer_names, fallback to legacy layer_name */
+    int layer_idx = kb->data.active_layer;
+    if (kb->layer_count > 0 && layer_idx >= 0 && layer_idx < kb->layer_count &&
+        kb->layer_names[layer_idx][0] != '\0') {
+        /* Use layer name from Periodic ADV static packet */
+        strncpy(pending_data.layer_name, kb->layer_names[layer_idx], sizeof(pending_data.layer_name) - 1);
+    } else if (kb->data.layer_name[0] != '\0') {
+        /* Fallback to legacy layer name (4 chars max) */
+        strncpy(pending_data.layer_name, kb->data.layer_name, sizeof(pending_data.layer_name) - 1);
+    } else {
+        /* No layer name available - will use default in display */
+        pending_data.layer_name[0] = '\0';
+    }
+    pending_data.layer_name[sizeof(pending_data.layer_name) - 1] = '\0';
+
     pending_data.wpm = kb->data.wpm_value;
     pending_data.usb_ready = (kb->data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
     pending_data.ble_connected = (kb->data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;

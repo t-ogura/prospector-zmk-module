@@ -49,6 +49,7 @@ struct pending_display_data {
     volatile bool signal_update_pending;  /* Signal widget updates separately (1Hz) */
     volatile bool no_keyboards;           /* True when all keyboards timed out */
     char device_name[MAX_NAME_LEN];
+    char layer_name[8];    /* Layer name from Periodic ADV (v2.2.0) */
     int layer;
     int wpm;
     bool usb_ready;
@@ -3929,8 +3930,11 @@ static void update_prospector_display(const struct pending_display_data *data) {
 
     /* Dynamic data */
     kb_data.active_layer = data->layer;
-    if (data->layer >= 0 && data->layer < 10) {
-        /* Layer name would come from Periodic ADV static packet */
+    /* Use layer name from Periodic ADV if available, otherwise format as Layer%d */
+    if (data->layer_name[0] != '\0') {
+        strncpy(kb_data.current_layer_name, data->layer_name, sizeof(kb_data.current_layer_name) - 1);
+        kb_data.current_layer_name[sizeof(kb_data.current_layer_name) - 1] = '\0';
+    } else if (data->layer >= 0 && data->layer < 10) {
         snprintf(kb_data.current_layer_name, sizeof(kb_data.current_layer_name),
                  "Layer%d", data->layer);
     }
