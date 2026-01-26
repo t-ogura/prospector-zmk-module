@@ -1,0 +1,5 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+config SHIELD_SCANNER_POCKET
+    def_bool $(shields_list_contains,scanner_pocket)

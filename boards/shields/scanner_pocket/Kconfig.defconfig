@@ -1,0 +1,81 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+if SHIELD_SCANNER_POCKET
+
+config ZMK_KEYBOARD_NAME
+    default "ScanPocket"
+
+# ===== ディスプレイ基本設定 =====
+config ZMK_DISPLAY
+    default y
+
+config DISPLAY
+    default y
+
+config SPI
+    default y
+
+# ===== LVGL モノクロ設定 (LS013B7DH05: 144x168, 1bit) =====
+config LVGL
+    default y
+
+config LV_Z_VDB_SIZE
+    default 100
+
+config LV_DPI_DEF
+    default 161
+
+config LV_Z_BITS_PER_PIXEL
+    default 1
+
+choice LV_COLOR_DEPTH
+    default LV_COLOR_DEPTH_1
+endchoice
+
+config LV_Z_MEM_POOL_SIZE
+    default 4096
+
+# ===== LVGL ウィジェット =====
+choice ZMK_DISPLAY_STATUS_SCREEN
+    default ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+endchoice
+
+config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+    select LV_USE_LABEL
+    select LV_USE_IMG
+    select LV_USE_CANVAS
+
+choice ZMK_DISPLAY_WORK_QUEUE
+    default ZMK_DISPLAY_WORK_QUEUE_DEDICATED
+endchoice
+
+config ZMK_DISPLAY_DEDICATED_THREAD_STACK_SIZE
+    default 2048
+
+# ===== スキャナー機能 =====
+config PROSPECTOR_MODE_SCANNER
+    default y
+
+config BT_OBSERVER
+    default y
+
+# Scanner Pocket has no touch panel (Memory LCD only)
+config PROSPECTOR_TOUCH_ENABLED
+    default n
+
+# ===== 省電力設定 =====
+# Memory LCD は常時表示でも超低消費電力（60μW）
+config ZMK_DISPLAY_BLANK_ON_IDLE
+    default n
+
+# ===== Scanner Pocket 固有設定 =====
+config SCANNER_POCKET_WIDGET_STATUS
+    bool "Scanner Pocket status widget"
+    default y
+    select LV_USE_LABEL
+    select LV_USE_IMG
+    help
+      Enable the Scanner Pocket status widget for monochrome display.
+
+endif # SHIELD_SCANNER_POCKET
