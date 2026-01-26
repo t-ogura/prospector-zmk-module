@@ -119,11 +119,21 @@ static struct k_work_delayable sync_retry_work;
 #define SYNC_RETRY_DELAY_MS  3000    // 3 seconds retry delay
 #define SYNC_MAX_RETRIES     3       // Retry 3 times before fallback (increased for SID discovery)
 #define SID_DISCOVERY_WAIT_MS 1500   // Wait for Extended Scanning to discover SID
+#define SID_DATA_TIMEOUT_MS  2000    // Wait for data after sync before trying next SID
+#define MAX_SID_TO_TRY       3       // Try SID 0, 1, 2 (keyboard typically uses 0 or 1)
 
 // Forward declarations for Periodic sync functions
 static int start_periodic_sync(int keyboard_index);
+static int start_periodic_sync_with_sid(int keyboard_index, uint8_t sid);
 static void stop_periodic_sync(void);
 static void sync_retry_work_handler(struct k_work *work);
+static void sid_data_timeout_handler(struct k_work *work);
+
+// SID cycling state
+static uint8_t current_sync_sid = 0;       // Currently attempting/synced SID
+static uint8_t sid_attempts_count = 0;     // Number of SIDs tried this session
+static uint32_t last_periodic_data_time = 0;  // Time of last received periodic data
+static struct k_work_delayable sid_data_timeout_work;
 #endif // CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC
 
 static void scanner_mutex_init(void) {
@@ -933,12 +943,12 @@ static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
 // Periodic sync callbacks
 static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
                                     struct bt_le_per_adv_sync_synced_info *info) {
-    LOG_INF("✅ Periodic sync established! Interval: %d ms, sync=%p, per_sync=%p",
-            info->interval * 125 / 100, (void*)sync, (void*)per_sync);
+    LOG_INF("✅ Periodic sync established! Interval: %d ms, sync=%p, per_sync=%p, SID=%d",
+            info->interval * 125 / 100, (void*)sync, (void*)per_sync, current_sync_sid);
     current_sync_state = SYNC_STATE_SYNCED;
     sync_retry_count = 0;
 
-    // Mark keyboard as periodically synced
+    // Mark keyboard as periodically synced (temporarily - will be confirmed when data arrives)
     if (selected_keyboard_index >= 0 &&
         selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         keyboards[selected_keyboard_index].periodic_synced = true;
@@ -970,6 +980,13 @@ static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
         LOG_WRN("Failed to get sync info: %d", info_err);
     }
 
+    // Start timeout to check if we receive any data on this SID
+    // If no data arrives within SID_DATA_TIMEOUT_MS, we'll try the next SID
+    last_periodic_data_time = 0;  // Reset - no data received yet
+    k_work_schedule(&sid_data_timeout_work, K_MSEC(SID_DATA_TIMEOUT_MS));
+    LOG_INF("📡 Started SID data timeout (%dms) - waiting for periodic data on SID=%d",
+            SID_DATA_TIMEOUT_MS, current_sync_sid);
+
     // Notify UI to update sync icon
     scanner_trigger_high_priority_update();
 }
@@ -977,9 +994,12 @@ static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
 static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
                                   const struct bt_le_per_adv_sync_term_info *info) {
     // Reason codes: 0=local request, others=sync lost/timeout
-    LOG_INF("⚠️ Periodic sync TERMINATED: reason=%d (0=local, 0x3E=timeout), retry_count=%d/%d",
-            info->reason, sync_retry_count, SYNC_MAX_RETRIES);
+    LOG_INF("⚠️ Periodic sync TERMINATED: reason=%d (0=local, 0x3E=timeout), SID=%d, retry=%d/%d",
+            info->reason, current_sync_sid, sync_retry_count, SYNC_MAX_RETRIES);
     per_sync = NULL;
+
+    // Cancel SID data timeout since sync terminated
+    k_work_cancel_delayable(&sid_data_timeout_work);
 
     // Clear periodic_synced flag
     if (selected_keyboard_index >= 0 &&
@@ -990,15 +1010,29 @@ static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
     // Log sync termination for debugging
     LOG_INF("📡 Sync terminated, scanning still active: %d", scanning);
 
-    // If we were synced, try to retry
-    if (current_sync_state == SYNC_STATE_SYNCING) {
+    // Handle based on termination reason
+    if (info->reason == 0) {
+        // Local request (e.g., stop_periodic_sync called) - don't retry
+        current_sync_state = SYNC_STATE_NONE;
+    } else if (current_sync_state == SYNC_STATE_SYNCING ||
+               current_sync_state == SYNC_STATE_SYNCED) {
+        // Sync lost or timed out - try retrying or cycling SID
         if (sync_retry_count < SYNC_MAX_RETRIES) {
             LOG_INF("📡 Scheduling sync retry in %dms", SYNC_RETRY_DELAY_MS);
             k_work_schedule(&sync_retry_work, K_MSEC(SYNC_RETRY_DELAY_MS));
+        } else if (sid_attempts_count < MAX_SID_TO_TRY) {
+            // Try next SID
+            uint8_t next_sid = (current_sync_sid + 1) % MAX_SID_TO_TRY;
+            LOG_INF("📡 Sync failed, trying next SID: %d -> %d", current_sync_sid, next_sid);
+            sid_attempts_count++;
+            if (selected_keyboard_index >= 0) {
+                start_periodic_sync_with_sid(selected_keyboard_index, next_sid);
+            }
         } else {
             LOG_INF("📡 Max retries reached, falling back to Legacy");
             current_sync_state = SYNC_STATE_FALLBACK;
             sync_retry_count = 0;
+            sid_attempts_count = 0;
         }
     } else {
         current_sync_state = SYNC_STATE_NONE;
@@ -1119,10 +1153,29 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
                             struct net_buf_simple *buf) {
     per_adv_recv_count++;
 
-    // DEBUG: Unconditional log to verify callback is being called
-    // Remove this after debugging is complete
-    LOG_INF("!!! PER_ADV_CB !!! count=%u, len=%d, sync=%p, per_sync=%p",
-            per_adv_recv_count, buf->len, (void*)sync, (void*)per_sync);
+    // Record that we received data - this cancels the SID cycling timeout
+    uint32_t now = k_uptime_get_32();
+    if (last_periodic_data_time == 0) {
+        // First data received on this SID - cancel timeout and confirm this is the right SID
+        k_work_cancel_delayable(&sid_data_timeout_work);
+        LOG_INF("🎉 First periodic data received on SID=%d - this is the correct SID!",
+                current_sync_sid);
+
+        // Store this SID for future reference
+        if (selected_keyboard_index >= 0 &&
+            selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+            keyboards[selected_keyboard_index].sid = current_sync_sid;
+            LOG_INF("📡 Stored confirmed SID=%d for keyboard %d",
+                    current_sync_sid, selected_keyboard_index);
+        }
+    }
+    last_periodic_data_time = now;
+
+    // DEBUG: Log first few receives and then every 100th
+    if (per_adv_recv_count <= 5 || per_adv_recv_count % 100 == 0) {
+        LOG_INF("📡 PER_ADV_CB[%u]: len=%d, sync=%p, SID=%d",
+                per_adv_recv_count, buf->len, (void*)sync, current_sync_sid);
+    }
 
     // Log first few receives and then every 100th to confirm data is arriving
     if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
@@ -1253,6 +1306,120 @@ static void sync_retry_work_handler(struct k_work *work) {
     }
 }
 
+/**
+ * @brief Handler called when no data is received after sync establishment
+ *
+ * This indicates we synced to the wrong SID (e.g., Legacy ADV set instead of Periodic ADV set).
+ * Try the next SID (0 -> 1 -> 2 -> fallback to Legacy mode).
+ */
+static void sid_data_timeout_handler(struct k_work *work) {
+    LOG_INF("⚠️ SID data timeout! No periodic data received on SID=%d after %dms",
+            current_sync_sid, SID_DATA_TIMEOUT_MS);
+
+    // Check if we've exhausted all SID attempts
+    sid_attempts_count++;
+    if (sid_attempts_count >= MAX_SID_TO_TRY) {
+        LOG_INF("❌ Exhausted all %d SID attempts (0-%d), falling back to Legacy mode",
+                MAX_SID_TO_TRY, MAX_SID_TO_TRY - 1);
+        stop_periodic_sync();
+        current_sync_state = SYNC_STATE_FALLBACK;
+        sid_attempts_count = 0;
+
+        // Clear periodic_synced flag since we're falling back
+        if (selected_keyboard_index >= 0 &&
+            selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+            keyboards[selected_keyboard_index].periodic_synced = false;
+        }
+
+        scanner_trigger_high_priority_update();
+        return;
+    }
+
+    // Try the next SID
+    uint8_t next_sid = (current_sync_sid + 1) % MAX_SID_TO_TRY;
+    LOG_INF("📡 Trying next SID: %d -> %d (attempt %d/%d)",
+            current_sync_sid, next_sid, sid_attempts_count + 1, MAX_SID_TO_TRY);
+
+    // Stop current sync and start with new SID
+    stop_periodic_sync();
+
+    if (selected_keyboard_index >= 0) {
+        start_periodic_sync_with_sid(selected_keyboard_index, next_sid);
+    }
+}
+
+/**
+ * @brief Start periodic sync with a specific SID
+ *
+ * This is the core function for establishing periodic sync.
+ * It's called directly for SID cycling (when we need to try different SIDs).
+ */
+static int start_periodic_sync_with_sid(int keyboard_index, uint8_t sid) {
+    if (keyboard_index < 0 || keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
+        return -EINVAL;
+    }
+
+    struct zmk_keyboard_status *kb = &keyboards[keyboard_index];
+    if (!kb->active || !kb->has_periodic) {
+        LOG_DBG("📡 Keyboard %d not eligible for Periodic sync", keyboard_index);
+        current_sync_state = SYNC_STATE_NONE;
+        return -ENOTSUP;
+    }
+
+    // Register callbacks if not done yet
+    if (!sync_callbacks_registered) {
+        bt_le_per_adv_sync_cb_register(&sync_callbacks);
+        sync_callbacks_registered = true;
+    }
+
+    // Stop existing sync if any (don't reset sid_attempts_count here)
+    if (per_sync) {
+        bt_le_per_adv_sync_delete(per_sync);
+        per_sync = NULL;
+    }
+    k_work_cancel_delayable(&sync_retry_work);
+    k_work_cancel_delayable(&sid_data_timeout_work);
+
+    // Build sync parameters
+    bt_addr_le_t addr;
+    memcpy(addr.a.val, kb->ble_addr, 6);
+    addr.type = kb->ble_addr_type;
+
+    struct bt_le_per_adv_sync_param sync_param = {
+        .options = 0,
+        .sid = sid,
+        .skip = 0,
+        .timeout = SYNC_TIMEOUT_MS / 10,  // In 10ms units
+    };
+    bt_addr_le_copy(&sync_param.addr, &addr);
+
+    current_sync_sid = sid;  // Track which SID we're attempting
+
+    LOG_INF("📡 bt_le_per_adv_sync_create: SID=%d, addr=%02X:%02X:%02X:%02X:%02X:%02X (type=%d), timeout=%dms",
+            sync_param.sid,
+            addr.a.val[5], addr.a.val[4], addr.a.val[3],
+            addr.a.val[2], addr.a.val[1], addr.a.val[0],
+            addr.type, SYNC_TIMEOUT_MS);
+
+    int err = bt_le_per_adv_sync_create(&sync_param, &per_sync);
+    if (err) {
+        LOG_ERR("❌ bt_le_per_adv_sync_create failed: err=%d, SID=%d", err, sync_param.sid);
+        current_sync_state = SYNC_STATE_FALLBACK;
+        return err;
+    }
+
+    current_sync_state = SYNC_STATE_SYNCING;
+    LOG_INF("✅ Periodic sync create returned 0 - per_sync=%p, waiting for synced callback (SID=%d)",
+            (void*)per_sync, sid);
+    return 0;
+}
+
+/**
+ * @brief Start periodic sync using cached/discovered SID or cycling through SIDs
+ *
+ * This is the main entry point for starting periodic sync.
+ * It first tries the cached SID, then falls back to SID cycling if needed.
+ */
 static int start_periodic_sync(int keyboard_index) {
     if (keyboard_index < 0 || keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         return -EINVAL;
@@ -1276,64 +1443,28 @@ static int start_periodic_sync(int keyboard_index) {
         kb->sid = (uint8_t)cached_sid;
     }
 
-    // Check if SID has been discovered from Extended Scanning
-    LOG_INF("📡 Starting Periodic sync: keyboard=%d, SID=%d, has_periodic=%d",
-            keyboard_index, kb->sid, kb->has_periodic);
+    // Reset SID cycling state for fresh sync
+    sid_attempts_count = 0;
+    last_periodic_data_time = 0;
 
-    // If SID is 0 (not discovered yet) on first attempt, wait for Extended Scanning
-    if (kb->sid == 0 && sync_retry_count == 0) {
-        LOG_INF("📡 SID not discovered yet - waiting %dms for Extended Scanning",
-                SID_DISCOVERY_WAIT_MS);
-        current_sync_state = SYNC_STATE_SYNCING;  // Show syncing state in UI
-        sync_retry_count++;  // Count this as first attempt
-        k_work_schedule(&sync_retry_work, K_MSEC(SID_DISCOVERY_WAIT_MS));
-        return 0;  // Will retry after delay
+    // Determine starting SID
+    uint8_t start_sid = kb->sid;
+
+    // If the keyboard's SID was previously confirmed (received data), use it directly
+    // Otherwise, if SID is 0 (default), we'll cycle through SIDs to find the right one
+    LOG_INF("📡 Starting Periodic sync: keyboard=%d, starting_SID=%d, has_periodic=%d",
+            keyboard_index, start_sid, kb->has_periodic);
+
+    // If SID is 0 on first attempt and we haven't discovered it yet, try waiting briefly
+    // This gives Extended Scanning a chance to discover the periodic SID
+    if (start_sid == 0 && sync_retry_count == 0) {
+        LOG_INF("📡 SID=%d (may be default) - will cycle through SIDs 0,1,2 if no data received");
     }
 
-    // Log SID status
-    if (kb->sid == 0) {
-        LOG_WRN("📡 SID is still 0 after waiting - proceeding with sync attempt");
-    }
-
-    // Register callbacks if not done yet
-    if (!sync_callbacks_registered) {
-        bt_le_per_adv_sync_cb_register(&sync_callbacks);
-        sync_callbacks_registered = true;
-    }
-
-    // Stop existing sync if any
+    // Stop existing sync and reset state
     stop_periodic_sync();
 
-    // Build sync parameters
-    bt_addr_le_t addr;
-    memcpy(addr.a.val, kb->ble_addr, 6);
-    addr.type = kb->ble_addr_type;
-
-    struct bt_le_per_adv_sync_param sync_param = {
-        .options = 0,
-        .sid = kb->sid,  // TODO: Get actual SID from Extended ADV
-        .skip = 0,
-        .timeout = SYNC_TIMEOUT_MS / 10,  // In 10ms units
-    };
-    bt_addr_le_copy(&sync_param.addr, &addr);
-
-    LOG_INF("📡 bt_le_per_adv_sync_create: SID=%d, addr=%02X:%02X:%02X:%02X:%02X:%02X (type=%d), timeout=%dms",
-            sync_param.sid,
-            addr.a.val[5], addr.a.val[4], addr.a.val[3],
-            addr.a.val[2], addr.a.val[1], addr.a.val[0],
-            addr.type, SYNC_TIMEOUT_MS);
-
-    int err = bt_le_per_adv_sync_create(&sync_param, &per_sync);
-    if (err) {
-        LOG_ERR("❌ bt_le_per_adv_sync_create failed: err=%d, SID=%d", err, sync_param.sid);
-        current_sync_state = SYNC_STATE_FALLBACK;
-        return err;
-    }
-
-    current_sync_state = SYNC_STATE_SYNCING;
-    LOG_INF("✅ Periodic sync create returned 0 - per_sync=%p, waiting for synced callback (SID=%d)",
-            (void*)per_sync, kb->sid);
-    return 0;
+    return start_periodic_sync_with_sid(keyboard_index, start_sid);
 }
 
 static void stop_periodic_sync(void) {
@@ -1343,7 +1474,10 @@ static void stop_periodic_sync(void) {
     }
     current_sync_state = SYNC_STATE_NONE;
     sync_retry_count = 0;
+    sid_attempts_count = 0;
+    last_periodic_data_time = 0;
     k_work_cancel_delayable(&sync_retry_work);
+    k_work_cancel_delayable(&sid_data_timeout_work);
 }
 
 #endif // CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC
@@ -1415,7 +1549,9 @@ static int scanner_init(const struct device *dev) {
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
     k_work_init_delayable(&sync_retry_work, sync_retry_work_handler);
-    LOG_INF("📡 Periodic Sync support enabled");
+    k_work_init_delayable(&sid_data_timeout_work, sid_data_timeout_handler);
+    LOG_INF("📡 Periodic Sync support enabled (with SID cycling: will try SID 0-%d)",
+            MAX_SID_TO_TRY - 1);
 #endif
 
     return ret;

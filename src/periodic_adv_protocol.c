@@ -463,6 +463,21 @@ static void dynamic_work_handler(struct k_work *work) {
     /* Send dynamic packet */
     update_periodic_advertising_data(false);
 
+    /* Periodic status log every 5 seconds (for debugging) */
+    static uint32_t last_status_log = 0;
+    uint32_t now = k_uptime_get_32();
+    if (now - last_status_log > 5000) {
+        last_status_log = now;
+        struct bt_le_ext_adv_info adv_info;
+        if (per_adv_set && bt_le_ext_adv_get_info(per_adv_set, &adv_info) == 0) {
+            LOG_INF("📡 PERIODIC STATUS: set=%p, started=%d, SID=%d, seq=%d",
+                    (void*)per_adv_set, per_adv_started, adv_info.id, sequence_number);
+        } else {
+            LOG_WRN("📡 PERIODIC STATUS: set=%p, started=%d, info FAILED",
+                    (void*)per_adv_set, per_adv_started);
+        }
+    }
+
     /* Schedule next dynamic update */
     k_work_schedule(&dynamic_work, K_MSEC(DYNAMIC_INTERVAL_MS));
 }
