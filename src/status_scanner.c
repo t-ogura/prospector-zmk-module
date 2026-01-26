@@ -310,29 +310,20 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
     keyboards[index].ble_addr_type = addr->type;
 
     // Detect v2 keyboard (Periodic Advertising support) from HAS_PERIODIC flag
-    // Debug: Log status_flags value to diagnose v2 detection issues
-    LOG_DBG("📊 Keyboard status_flags=0x%02X (HAS_PERIODIC bit=%d)",
-            adv_data->status_flags, (adv_data->status_flags & ZMK_STATUS_FLAG_HAS_PERIODIC) ? 1 : 0);
-
     bool has_periodic = (adv_data->status_flags & ZMK_STATUS_FLAG_HAS_PERIODIC) != 0;
     if (has_periodic != keyboards[index].has_periodic) {
         keyboards[index].has_periodic = has_periodic;
-        LOG_INF("🔄 Keyboard %s supports Periodic ADV: %s (flags=0x%02X, addr=%02X:%02X:%02X:%02X:%02X:%02X)",
-                keyboards[index].ble_name[0] ? keyboards[index].ble_name : "Unknown",
-                has_periodic ? "YES (v2)" : "NO (v1)",
-                adv_data->status_flags,
-                addr->a.val[5], addr->a.val[4], addr->a.val[3],
-                addr->a.val[2], addr->a.val[1], addr->a.val[0]);
+        if (has_periodic) {
+            LOG_INF("📡 v2 keyboard detected: %s",
+                    keyboards[index].ble_name[0] ? keyboards[index].ble_name : "Unknown");
+        }
     }
 
     // Check SID cache for this address (populated by Extended Scanning)
-    // The periodic ADV set uses same identity address as legacy ADV
 #if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
     if (has_periodic) {
         int cached_sid = get_cached_sid(addr);
         if (cached_sid >= 0 && keyboards[index].sid != (uint8_t)cached_sid) {
-            LOG_INF("📡 Keyboard %d SID from cache: %d -> %d",
-                    index, keyboards[index].sid, cached_sid);
             keyboards[index].sid = (uint8_t)cached_sid;
         }
     }
@@ -866,47 +857,21 @@ int zmk_status_scanner_get_primary_keyboard(void) {
 
 // Extended scan callback to discover SID from periodic advertisers
 // Called for ALL scan results - we filter for Extended ADV with periodic info
-// NOTE: Keyboard sends TWO advertising sets:
-//   1. Legacy Extended ADV (adv_set): Has Prospector data, interval=0
-//   2. Periodic Extended ADV (per_adv_set): No Prospector data, interval>0, has SID
-// Both use same identity address, so we cache SID by address
 static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
                                 struct net_buf_simple *buf) {
-    // Debug: Log ALL Extended ADV packets to diagnose SID discovery issue
-    static uint32_t total_ext_adv_count = 0;
-    static uint32_t extended_adv_count = 0;
-    total_ext_adv_count++;
-
-    // Check if this is Extended ADV (sid != 255) or Legacy ADV (sid == 255)
-    bool is_extended = (info->sid != 0xFF);
-    if (is_extended) {
-        extended_adv_count++;
-    }
-
-    // Log every 100th packet, and always log Extended ADV packets
-    if (total_ext_adv_count == 1 || total_ext_adv_count % 100 == 0 || is_extended) {
-        LOG_INF("📡 SCAN[%u]: %s sid=%d interval=%d addr=%02X:%02X:..:%02X (ext_count=%u)",
-                total_ext_adv_count,
-                is_extended ? "EXT_ADV" : "LEGACY",
-                info->sid, info->interval,
-                info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[0],
-                extended_adv_count);
-    }
-
     // Only interested in Extended ADV with periodic info (interval != 0)
     if (info->interval == 0) {
         return;  // Not a periodic advertiser - skip
     }
 
-    // Counter for periodic advertiser detection
+    // Counter for periodic advertiser detection (log only first detection)
     static uint32_t periodic_adv_count = 0;
     periodic_adv_count++;
 
-    // Log first detection and then every 50th to reduce spam
-    if (periodic_adv_count == 1 || periodic_adv_count % 50 == 0) {
-        LOG_INF("📡 EXT_ADV[%u]: Periodic advertiser SID=%d, Interval=%dms, addr=%02X:%02X:..:%02X",
-                periodic_adv_count, info->sid, info->interval * 5 / 4,
-                info->addr->a.val[5], info->addr->a.val[4], info->addr->a.val[0]);
+    // Log first detection only
+    if (periodic_adv_count == 1) {
+        LOG_INF("📡 Found periodic advertiser: SID=%d, Interval=%dms",
+                info->sid, info->interval * 5 / 4);
     }
 
     // Cache the SID for later use when we receive Prospector data from legacy ADV
@@ -915,17 +880,11 @@ static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
     // Also try to update existing keyboard entry if we already know this address
     int index = find_keyboard_by_ble_addr(info->addr);
     if (index >= 0 && keyboards[index].sid != info->sid) {
-        uint8_t old_sid = keyboards[index].sid;
         keyboards[index].sid = info->sid;
-        LOG_INF("📡 Keyboard %d SID updated: %d -> %d",
-                index, old_sid, info->sid);
 
         // If this is the selected keyboard and we're syncing with wrong SID, restart sync
         if (index == selected_keyboard_index &&
             current_sync_state == SYNC_STATE_SYNCING) {
-            LOG_INF("📡 Selected keyboard SID discovered - restarting sync with correct SID=%d",
-                    info->sid);
-            // Cancel pending retry and restart immediately
             k_work_cancel_delayable(&sync_retry_work);
             start_periodic_sync(index);
         }
@@ -960,32 +919,17 @@ static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
     if (recv_err == 0) {
         LOG_INF("📥 Periodic ADV receive enabled!");
     } else if (recv_err == -EALREADY) {
-        LOG_INF("📥 Periodic ADV receive already enabled");
+        LOG_DBG("📥 Periodic ADV receive already enabled");
     } else {
         LOG_ERR("❌ Failed to enable periodic ADV receive: %d", recv_err);
     }
 
-    // Keep scanning running - don't stop it
-    // The controller should be able to handle both scanning and periodic sync
-    LOG_INF("📡 Sync active, scanning continues (not stopping)");
-
-    // Query sync info for debugging
-    struct bt_le_per_adv_sync_info sync_info;
-    int info_err = bt_le_per_adv_sync_get_info(sync, &sync_info);
-    if (info_err == 0) {
-        LOG_INF("📡 Sync info: SID=%d, interval=%d units, PHY=%d, addr=%02X:%02X:..:%02X",
-                sync_info.sid, sync_info.interval, sync_info.phy,
-                sync_info.addr.a.val[5], sync_info.addr.a.val[4], sync_info.addr.a.val[0]);
-    } else {
-        LOG_WRN("Failed to get sync info: %d", info_err);
-    }
+    // NOTE: Do NOT stop scanning - we need Legacy ADV for v1 keyboards and backup
+    // The controller should handle both scanning and periodic sync simultaneously
 
     // Start timeout to check if we receive any data on this SID
-    // If no data arrives within SID_DATA_TIMEOUT_MS, we'll try the next SID
-    last_periodic_data_time = 0;  // Reset - no data received yet
+    last_periodic_data_time = 0;
     k_work_schedule(&sid_data_timeout_work, K_MSEC(SID_DATA_TIMEOUT_MS));
-    LOG_INF("📡 Started SID data timeout (%dms) - waiting for periodic data on SID=%d",
-            SID_DATA_TIMEOUT_MS, current_sync_sid);
 
     // Notify UI to update sync icon
     scanner_trigger_high_priority_update();
@@ -993,43 +937,33 @@ static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
 
 static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
                                   const struct bt_le_per_adv_sync_term_info *info) {
-    // Reason codes: 0=local request, others=sync lost/timeout
-    LOG_INF("⚠️ Periodic sync TERMINATED: reason=%d (0=local, 0x3E=timeout), SID=%d, retry=%d/%d",
-            info->reason, current_sync_sid, sync_retry_count, SYNC_MAX_RETRIES);
+    LOG_INF("⚠️ Sync terminated: reason=%d, SID=%d", info->reason, current_sync_sid);
     per_sync = NULL;
 
-    // Cancel SID data timeout since sync terminated
     k_work_cancel_delayable(&sid_data_timeout_work);
 
-    // Clear periodic_synced flag
     if (selected_keyboard_index >= 0 &&
         selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         keyboards[selected_keyboard_index].periodic_synced = false;
     }
 
-    // Log sync termination for debugging
-    LOG_INF("📡 Sync terminated, scanning still active: %d", scanning);
-
     // Handle based on termination reason
     if (info->reason == 0) {
-        // Local request (e.g., stop_periodic_sync called) - don't retry
+        // Local request - don't retry
         current_sync_state = SYNC_STATE_NONE;
     } else if (current_sync_state == SYNC_STATE_SYNCING ||
                current_sync_state == SYNC_STATE_SYNCED) {
-        // Sync lost or timed out - try retrying or cycling SID
+        // Sync lost - retry or cycle SID
         if (sync_retry_count < SYNC_MAX_RETRIES) {
-            LOG_INF("📡 Scheduling sync retry in %dms", SYNC_RETRY_DELAY_MS);
             k_work_schedule(&sync_retry_work, K_MSEC(SYNC_RETRY_DELAY_MS));
         } else if (sid_attempts_count < MAX_SID_TO_TRY) {
-            // Try next SID
             uint8_t next_sid = (current_sync_sid + 1) % MAX_SID_TO_TRY;
-            LOG_INF("📡 Sync failed, trying next SID: %d -> %d", current_sync_sid, next_sid);
             sid_attempts_count++;
             if (selected_keyboard_index >= 0) {
                 start_periodic_sync_with_sid(selected_keyboard_index, next_sid);
             }
         } else {
-            LOG_INF("📡 Max retries reached, falling back to Legacy");
+            LOG_INF("❌ Falling back to Legacy");
             current_sync_state = SYNC_STATE_FALLBACK;
             sync_retry_count = 0;
             sid_attempts_count = 0;
@@ -1048,9 +982,6 @@ static uint32_t per_adv_recv_count = 0;
  * @brief Process v2.2.0 Dynamic Packet
  */
 static void process_dynamic_packet(const struct periodic_dynamic_packet *pkt, int8_t rssi) {
-    // DEBUG: Unconditional log to verify this function is called
-    LOG_INF("!!! DYNAMIC PKT !!! layer=%d, rssi=%d", pkt->active_layer, rssi);
-
     if (selected_keyboard_index < 0 ||
         selected_keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         return;
@@ -1092,14 +1023,6 @@ static void process_dynamic_packet(const struct periodic_dynamic_packet *pkt, in
     kb->ble_profile_flags = pkt->ble_profile_flags;
 
     scanner_unlock();
-
-    // Log periodically
-    if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
-        LOG_INF("📡 v2.2 DYNAMIC[%u]: Layer=%d '%s', Bat=%d%%, RSSI=%d ✓",
-                per_adv_recv_count, pkt->active_layer, pkt->current_layer_name,
-                pkt->battery_level, rssi);
-    }
-
     scanner_trigger_high_priority_update();
 }
 
@@ -1142,10 +1065,8 @@ static void process_static_packet(const struct periodic_static_packet *pkt, int8
 
     scanner_unlock();
 
-    LOG_INF("📡 v2.2 STATIC: '%s', %d layers, features=0x%02X, fw=v%d.%d",
-            pkt->keyboard_name, pkt->layer_count, pkt->device_features,
-            FW_VERSION_MAJOR(pkt->firmware_version),
-            FW_VERSION_MINOR(pkt->firmware_version));
+    // Log static packet info (received infrequently)
+    LOG_INF("📡 v2 Static: '%s', %d layers", pkt->keyboard_name, pkt->layer_count);
 }
 
 static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
@@ -1158,39 +1079,18 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
     if (last_periodic_data_time == 0) {
         // First data received on this SID - cancel timeout and confirm this is the right SID
         k_work_cancel_delayable(&sid_data_timeout_work);
-        LOG_INF("🎉 First periodic data received on SID=%d - this is the correct SID!",
-                current_sync_sid);
+        LOG_INF("🎉 Periodic data received! SID=%d confirmed", current_sync_sid);
 
         // Store this SID for future reference
         if (selected_keyboard_index >= 0 &&
             selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
             keyboards[selected_keyboard_index].sid = current_sync_sid;
-            LOG_INF("📡 Stored confirmed SID=%d for keyboard %d",
-                    current_sync_sid, selected_keyboard_index);
         }
     }
     last_periodic_data_time = now;
 
-    // DEBUG: Log first few receives and then every 100th
-    if (per_adv_recv_count <= 5 || per_adv_recv_count % 100 == 0) {
-        LOG_INF("📡 PER_ADV_CB[%u]: len=%d, sync=%p, SID=%d",
-                per_adv_recv_count, buf->len, (void*)sync, current_sync_sid);
-    }
-
-    // Log first few receives and then every 100th to confirm data is arriving
-    if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
-        LOG_INF("📡 PER_RECV[%u]: len=%d, rssi=%d, first_bytes=%02X %02X %02X %02X %02X",
-                per_adv_recv_count, buf->len, info->rssi,
-                buf->len > 0 ? buf->data[0] : 0,
-                buf->len > 1 ? buf->data[1] : 0,
-                buf->len > 2 ? buf->data[2] : 0,
-                buf->len > 3 ? buf->data[3] : 0,
-                buf->len > 4 ? buf->data[4] : 0);
-    }
-
     // Periodic ADV data includes AD structure: [len][type][data...]
     if (buf->len < 3) {
-        LOG_WRN("📡 PER_RECV: Buffer too short: %d bytes", buf->len);
         return;
     }
 
@@ -1199,19 +1099,12 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
 
     // Check for manufacturer data type
     if (ad_type != BT_DATA_MANUFACTURER_DATA) {
-        if (per_adv_recv_count <= 5) {
-            LOG_WRN("📡 PER_RECV: Unexpected AD type: 0x%02X (expected 0xFF)", ad_type);
-        }
         return;
     }
 
     // Data length = ad_len - 1 (type byte already pulled)
     uint8_t data_len = ad_len - 1;
     if (data_len < 5 || buf->len < data_len) {
-        if (per_adv_recv_count <= 5) {
-            LOG_WRN("📡 PER_RECV: Data too short: ad_len=%d, data_len=%d, buf_remaining=%d",
-                    ad_len, data_len, buf->len);
-        }
         return;
     }
 
@@ -1229,14 +1122,6 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
         // v2.2.0 Periodic packet
         uint8_t packet_type = raw[4];
 
-        // Diagnostic: log all packet types received
-        if (per_adv_recv_count <= 10 || per_adv_recv_count % 50 == 0) {
-            LOG_INF("📡 PKT[%u]: type=0x%02X, data_len=%d (dyn=%zu, static=%zu)",
-                    per_adv_recv_count, packet_type, data_len,
-                    sizeof(struct periodic_dynamic_packet),
-                    sizeof(struct periodic_static_packet));
-        }
-
         if (packet_type == PERIODIC_PACKET_TYPE_DYNAMIC &&
             data_len >= sizeof(struct periodic_dynamic_packet)) {
             const struct periodic_dynamic_packet *pkt =
@@ -1247,12 +1132,6 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
             const struct periodic_static_packet *pkt =
                 (const struct periodic_static_packet *)raw;
             process_static_packet(pkt, info->rssi);
-        } else {
-            // Log why packet wasn't processed
-            LOG_WRN("📡 PKT SKIP: type=0x%02X, len=%d (need dyn>=%zu or static>=%zu)",
-                    packet_type, data_len,
-                    sizeof(struct periodic_dynamic_packet),
-                    sizeof(struct periodic_static_packet));
         }
         return;
     }
@@ -1271,23 +1150,12 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
                     memcpy(&keyboards[selected_keyboard_index].data, data,
                            sizeof(struct zmk_status_adv_data));
                     scanner_unlock();
-
-                    if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
-                        LOG_INF("📡 v1 LEGACY[%u]: Layer=%d, Bat=%d%%, RSSI=%d",
-                                per_adv_recv_count, data->active_layer, data->battery_level, info->rssi);
-                    }
                     scanner_trigger_high_priority_update();
                 }
             }
         }
-        return;
     }
-
-    // Unknown signature
-    if (per_adv_recv_count <= 5) {
-        LOG_WRN("📡 PER_RECV: Unknown signature: %02X %02X %02X %02X",
-                sig0, sig1, uuid0, uuid1);
-    }
+    // Unknown signatures are silently ignored
 }
 
 static struct bt_le_per_adv_sync_cb sync_callbacks = {
@@ -1313,19 +1181,16 @@ static void sync_retry_work_handler(struct k_work *work) {
  * Try the next SID (0 -> 1 -> 2 -> fallback to Legacy mode).
  */
 static void sid_data_timeout_handler(struct k_work *work) {
-    LOG_INF("⚠️ SID data timeout! No periodic data received on SID=%d after %dms",
-            current_sync_sid, SID_DATA_TIMEOUT_MS);
+    LOG_INF("⚠️ SID=%d timeout, no data received", current_sync_sid);
 
     // Check if we've exhausted all SID attempts
     sid_attempts_count++;
     if (sid_attempts_count >= MAX_SID_TO_TRY) {
-        LOG_INF("❌ Exhausted all %d SID attempts (0-%d), falling back to Legacy mode",
-                MAX_SID_TO_TRY, MAX_SID_TO_TRY - 1);
+        LOG_INF("❌ All SIDs failed, falling back to Legacy");
         stop_periodic_sync();
         current_sync_state = SYNC_STATE_FALLBACK;
         sid_attempts_count = 0;
 
-        // Clear periodic_synced flag since we're falling back
         if (selected_keyboard_index >= 0 &&
             selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
             keyboards[selected_keyboard_index].periodic_synced = false;
@@ -1337,12 +1202,9 @@ static void sid_data_timeout_handler(struct k_work *work) {
 
     // Try the next SID
     uint8_t next_sid = (current_sync_sid + 1) % MAX_SID_TO_TRY;
-    LOG_INF("📡 Trying next SID: %d -> %d (attempt %d/%d)",
-            current_sync_sid, next_sid, sid_attempts_count + 1, MAX_SID_TO_TRY);
+    LOG_INF("📡 Trying SID=%d", next_sid);
 
-    // Stop current sync and start with new SID
     stop_periodic_sync();
-
     if (selected_keyboard_index >= 0) {
         start_periodic_sync_with_sid(selected_keyboard_index, next_sid);
     }
@@ -1393,24 +1255,19 @@ static int start_periodic_sync_with_sid(int keyboard_index, uint8_t sid) {
     };
     bt_addr_le_copy(&sync_param.addr, &addr);
 
-    current_sync_sid = sid;  // Track which SID we're attempting
+    current_sync_sid = sid;
 
-    LOG_INF("📡 bt_le_per_adv_sync_create: SID=%d, addr=%02X:%02X:%02X:%02X:%02X:%02X (type=%d), timeout=%dms",
-            sync_param.sid,
-            addr.a.val[5], addr.a.val[4], addr.a.val[3],
-            addr.a.val[2], addr.a.val[1], addr.a.val[0],
-            addr.type, SYNC_TIMEOUT_MS);
+    LOG_INF("📡 Creating sync: SID=%d, addr=%02X:%02X:..:%02X",
+            sid, addr.a.val[5], addr.a.val[4], addr.a.val[0]);
 
     int err = bt_le_per_adv_sync_create(&sync_param, &per_sync);
     if (err) {
-        LOG_ERR("❌ bt_le_per_adv_sync_create failed: err=%d, SID=%d", err, sync_param.sid);
+        LOG_ERR("❌ Sync create failed: %d", err);
         current_sync_state = SYNC_STATE_FALLBACK;
         return err;
     }
 
     current_sync_state = SYNC_STATE_SYNCING;
-    LOG_INF("✅ Periodic sync create returned 0 - per_sync=%p, waiting for synced callback (SID=%d)",
-            (void*)per_sync, sid);
     return 0;
 }
 
@@ -1433,13 +1290,11 @@ static int start_periodic_sync(int keyboard_index) {
     }
 
     // Try to get SID from cache one more time before attempting sync
-    // (Extended Scanning might have discovered it since keyboard was first seen)
     bt_addr_le_t addr_check;
     memcpy(addr_check.a.val, kb->ble_addr, 6);
     addr_check.type = kb->ble_addr_type;
     int cached_sid = get_cached_sid(&addr_check);
     if (cached_sid >= 0 && kb->sid != (uint8_t)cached_sid) {
-        LOG_INF("📡 SID updated from cache just before sync: %d -> %d", kb->sid, cached_sid);
         kb->sid = (uint8_t)cached_sid;
     }
 
@@ -1450,16 +1305,7 @@ static int start_periodic_sync(int keyboard_index) {
     // Determine starting SID
     uint8_t start_sid = kb->sid;
 
-    // If the keyboard's SID was previously confirmed (received data), use it directly
-    // Otherwise, if SID is 0 (default), we'll cycle through SIDs to find the right one
-    LOG_INF("📡 Starting Periodic sync: keyboard=%d, starting_SID=%d, has_periodic=%d",
-            keyboard_index, start_sid, kb->has_periodic);
-
-    // If SID is 0 on first attempt and we haven't discovered it yet, try waiting briefly
-    // This gives Extended Scanning a chance to discover the periodic SID
-    if (start_sid == 0 && sync_retry_count == 0) {
-        LOG_INF("📡 SID=%d (may be default) - will cycle through SIDs 0,1,2 if no data received");
-    }
+    LOG_INF("📡 Starting Periodic sync: kb=%d, SID=%d", keyboard_index, start_sid);
 
     // Stop existing sync and reset state
     stop_periodic_sync();
@@ -1512,10 +1358,8 @@ int zmk_status_scanner_select_keyboard(int keyboard_index) {
     // Check if keyboard supports Periodic
     struct zmk_keyboard_status *kb = &keyboards[keyboard_index];
     if (kb->active && kb->has_periodic) {
-        LOG_INF("📡 Selected v2 keyboard %d - initiating Periodic sync", keyboard_index);
         return start_periodic_sync(keyboard_index);
     } else {
-        LOG_INF("📡 Selected v1 keyboard %d - using Legacy mode", keyboard_index);
         current_sync_state = SYNC_STATE_NONE;
         return 0;
     }
@@ -1550,8 +1394,7 @@ static int scanner_init(const struct device *dev) {
 #if IS_ENABLED(CONFIG_PROSPECTOR_SCANNER_PERIODIC_SYNC)
     k_work_init_delayable(&sync_retry_work, sync_retry_work_handler);
     k_work_init_delayable(&sid_data_timeout_work, sid_data_timeout_handler);
-    LOG_INF("📡 Periodic Sync support enabled (with SID cycling: will try SID 0-%d)",
-            MAX_SID_TO_TRY - 1);
+    LOG_INF("📡 Periodic Sync enabled");
 #endif
 
     return ret;
