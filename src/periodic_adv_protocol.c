@@ -508,8 +508,9 @@ int periodic_adv_protocol_start(void) {
 
     /* Create Extended Advertising Set for Periodic ADV */
     if (!per_adv_set) {
+        /* Use BT_LE_ADV_OPT_NO_2M to force 1M PHY for better compatibility */
         static const struct bt_le_adv_param ext_adv_param = BT_LE_ADV_PARAM_INIT(
-            BT_LE_ADV_OPT_EXT_ADV | BT_LE_ADV_OPT_USE_IDENTITY,
+            BT_LE_ADV_OPT_EXT_ADV | BT_LE_ADV_OPT_USE_IDENTITY | BT_LE_ADV_OPT_NO_2M,
             BT_GAP_ADV_FAST_INT_MIN_2,
             BT_GAP_ADV_FAST_INT_MAX_2,
             NULL);

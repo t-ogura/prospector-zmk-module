@@ -933,7 +933,8 @@ static void extended_scan_recv(const struct bt_le_scan_recv_info *info,
 // Periodic sync callbacks
 static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
                                     struct bt_le_per_adv_sync_synced_info *info) {
-    LOG_INF("✅ Periodic sync established! Interval: %d ms", info->interval * 125 / 100);
+    LOG_INF("✅ Periodic sync established! Interval: %d ms, sync=%p, per_sync=%p",
+            info->interval * 125 / 100, (void*)sync, (void*)per_sync);
     current_sync_state = SYNC_STATE_SYNCED;
     sync_retry_count = 0;
 
@@ -941,6 +942,32 @@ static void per_adv_sync_synced_cb(struct bt_le_per_adv_sync *sync,
     if (selected_keyboard_index >= 0 &&
         selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         keyboards[selected_keyboard_index].periodic_synced = true;
+    }
+
+    // CRITICAL: Enable receiving periodic advertising data
+    // Without this call, the sync is established but no data is received!
+    int recv_err = bt_le_per_adv_sync_recv_enable(sync);
+    if (recv_err == 0) {
+        LOG_INF("📥 Periodic ADV receive enabled!");
+    } else if (recv_err == -EALREADY) {
+        LOG_INF("📥 Periodic ADV receive already enabled");
+    } else {
+        LOG_ERR("❌ Failed to enable periodic ADV receive: %d", recv_err);
+    }
+
+    // Keep scanning running - don't stop it
+    // The controller should be able to handle both scanning and periodic sync
+    LOG_INF("📡 Sync active, scanning continues (not stopping)");
+
+    // Query sync info for debugging
+    struct bt_le_per_adv_sync_info sync_info;
+    int info_err = bt_le_per_adv_sync_get_info(sync, &sync_info);
+    if (info_err == 0) {
+        LOG_INF("📡 Sync info: SID=%d, interval=%d units, PHY=%d, addr=%02X:%02X:..:%02X",
+                sync_info.sid, sync_info.interval, sync_info.phy,
+                sync_info.addr.a.val[5], sync_info.addr.a.val[4], sync_info.addr.a.val[0]);
+    } else {
+        LOG_WRN("Failed to get sync info: %d", info_err);
     }
 
     // Notify UI to update sync icon
@@ -959,6 +986,9 @@ static void per_adv_sync_term_cb(struct bt_le_per_adv_sync *sync,
         selected_keyboard_index < ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         keyboards[selected_keyboard_index].periodic_synced = false;
     }
+
+    // Log sync termination for debugging
+    LOG_INF("📡 Sync terminated, scanning still active: %d", scanning);
 
     // If we were synced, try to retry
     if (current_sync_state == SYNC_STATE_SYNCING) {
@@ -984,6 +1014,9 @@ static uint32_t per_adv_recv_count = 0;
  * @brief Process v2.2.0 Dynamic Packet
  */
 static void process_dynamic_packet(const struct periodic_dynamic_packet *pkt, int8_t rssi) {
+    // DEBUG: Unconditional log to verify this function is called
+    LOG_INF("!!! DYNAMIC PKT !!! layer=%d, rssi=%d", pkt->active_layer, rssi);
+
     if (selected_keyboard_index < 0 ||
         selected_keyboard_index >= ZMK_STATUS_SCANNER_MAX_KEYBOARDS) {
         return;
@@ -1086,6 +1119,11 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
                             struct net_buf_simple *buf) {
     per_adv_recv_count++;
 
+    // DEBUG: Unconditional log to verify callback is being called
+    // Remove this after debugging is complete
+    LOG_INF("!!! PER_ADV_CB !!! count=%u, len=%d, sync=%p, per_sync=%p",
+            per_adv_recv_count, buf->len, (void*)sync, (void*)per_sync);
+
     // Log first few receives and then every 100th to confirm data is arriving
     if (per_adv_recv_count <= 3 || per_adv_recv_count % 100 == 0) {
         LOG_INF("📡 PER_RECV[%u]: len=%d, rssi=%d, first_bytes=%02X %02X %02X %02X %02X",
@@ -1138,6 +1176,14 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
         // v2.2.0 Periodic packet
         uint8_t packet_type = raw[4];
 
+        // Diagnostic: log all packet types received
+        if (per_adv_recv_count <= 10 || per_adv_recv_count % 50 == 0) {
+            LOG_INF("📡 PKT[%u]: type=0x%02X, data_len=%d (dyn=%zu, static=%zu)",
+                    per_adv_recv_count, packet_type, data_len,
+                    sizeof(struct periodic_dynamic_packet),
+                    sizeof(struct periodic_static_packet));
+        }
+
         if (packet_type == PERIODIC_PACKET_TYPE_DYNAMIC &&
             data_len >= sizeof(struct periodic_dynamic_packet)) {
             const struct periodic_dynamic_packet *pkt =
@@ -1149,9 +1195,11 @@ static void per_adv_recv_cb(struct bt_le_per_adv_sync *sync,
                 (const struct periodic_static_packet *)raw;
             process_static_packet(pkt, info->rssi);
         } else {
-            if (per_adv_recv_count <= 5) {
-                LOG_WRN("📡 PER_RECV: Unknown packet_type=0x%02X, len=%d", packet_type, data_len);
-            }
+            // Log why packet wasn't processed
+            LOG_WRN("📡 PKT SKIP: type=0x%02X, len=%d (need dyn>=%zu or static>=%zu)",
+                    packet_type, data_len,
+                    sizeof(struct periodic_dynamic_packet),
+                    sizeof(struct periodic_static_packet));
         }
         return;
     }
@@ -1283,7 +1331,8 @@ static int start_periodic_sync(int keyboard_index) {
     }
 
     current_sync_state = SYNC_STATE_SYNCING;
-    LOG_INF("✅ Periodic sync create returned 0 - waiting for synced callback (SID=%d)", kb->sid);
+    LOG_INF("✅ Periodic sync create returned 0 - per_sync=%p, waiting for synced callback (SID=%d)",
+            (void*)per_sync, kb->sid);
     return 0;
 }
 
