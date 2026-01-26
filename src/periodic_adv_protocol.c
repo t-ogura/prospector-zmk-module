@@ -569,8 +569,15 @@ int periodic_adv_protocol_start(void) {
     k_work_schedule(&dynamic_work, K_MSEC(DYNAMIC_INTERVAL_MS));
     k_work_schedule(&static_work, K_MSEC(STATIC_INTERVAL_MS));
 
-    LOG_INF("Periodic Advertising started (dynamic: %dms, static: %dms)",
-            DYNAMIC_INTERVAL_MS, STATIC_INTERVAL_MS);
+    /* Log the SID of this advertising set */
+    struct bt_le_ext_adv_info adv_info;
+    if (bt_le_ext_adv_get_info(per_adv_set, &adv_info) == 0) {
+        LOG_INF("📡 Periodic Advertising started on SID=%d (dynamic: %dms, static: %dms)",
+                adv_info.id, DYNAMIC_INTERVAL_MS, STATIC_INTERVAL_MS);
+    } else {
+        LOG_INF("Periodic Advertising started (dynamic: %dms, static: %dms)",
+                DYNAMIC_INTERVAL_MS, STATIC_INTERVAL_MS);
+    }
 
     return 0;
 }
