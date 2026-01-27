@@ -18,6 +18,11 @@ if(CONFIG_SHIELD_SCANNER_POCKET)
   zephyr_library_sources(src/pocket_display.c)
   zephyr_library_sources(src/scanner_stub.c)
 
+  # Rotated display driver for landscape mode
+  if(CONFIG_SCANNER_POCKET_LANDSCAPE)
+    zephyr_library_sources(src/ls0xx_rotated.c)
+  endif()
+
   # TODO: Add widgets as they are implemented
   # zephyr_library_sources(src/widgets/keyboard_widget.c)
   # zephyr_library_sources(src/widgets/layer_widget.c)

@@ -238,9 +238,18 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
             }
         }
     }
-    
-    // Release mutex
+
+    // Release mutex before calling notify_event (callback may take time)
     scanner_unlock();
+
+    // Notify event callback (for pocket_display.c and other listeners)
+    if (is_new) {
+        LOG_INF("New device found: %s (slot %d) - notifying callback", device_name, index);
+        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
+    } else if (high_priority_change) {
+        LOG_DBG("Device updated: %s (slot %d) - notifying callback", device_name, index);
+        notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
+    }
 
     // Trigger high-priority display update for layer/modifier/profile changes
     // This schedules a work handler with 10ms delay - safe to call from BLE callback
@@ -248,16 +257,6 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
         scanner_trigger_high_priority_update();
         LOG_DBG("⚡ High priority change: layer=%d mod=0x%02x profile=%d",
                 adv_data->active_layer, adv_data->modifier_flags, adv_data->profile_slot);
-    }
-
-    // Log for debugging (low-priority updates still handled by 1Hz periodic cycle)
-    if (is_new) {
-        const char *role_str = "UNKNOWN";
-        if (adv_data->device_role == ZMK_DEVICE_ROLE_CENTRAL) role_str = "CENTRAL";
-        else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
-        else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
-
-        LOG_INF("New %s device found: %s (slot %d)", role_str, device_name, index);
     }
 }
 

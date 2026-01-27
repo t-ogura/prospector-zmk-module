@@ -45,6 +45,7 @@ config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
     select LV_USE_LABEL
     select LV_USE_IMG
     select LV_USE_CANVAS
+    select LV_USE_BAR
 
 choice ZMK_DISPLAY_WORK_QUEUE
     default ZMK_DISPLAY_WORK_QUEUE_DEDICATED
@@ -77,5 +78,25 @@ config SCANNER_POCKET_WIDGET_STATUS
     select LV_USE_IMG
     help
       Enable the Scanner Pocket status widget for monochrome display.
+
+config SCANNER_POCKET_INVERT_COLORS
+    bool "Invert display colors (white text on black background)"
+    default y
+    help
+      When enabled, display uses black background with white text.
+      When disabled, display uses white background with black text.
+
+config SCANNER_POCKET_LANDSCAPE
+    bool "Use landscape orientation (168x144 instead of 144x168)"
+    default y
+    help
+      When enabled, display is rotated 90 degrees for landscape mode.
+      Uses custom rotated driver instead of default ls0xx driver.
+      Landscape: 168 wide x 144 tall (good for battery bars)
+      Portrait: 144 wide x 168 tall
+
+# Disable default ls0xx driver when using rotated driver
+config LS0XX
+    default n if SCANNER_POCKET_LANDSCAPE
 
 endif # SHIELD_SCANNER_POCKET
