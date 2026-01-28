@@ -13,6 +13,15 @@ if(CONFIG_SHIELD_SCANNER_POCKET)
 
   # Add include directory for local headers
   zephyr_library_include_directories(include)
+  zephyr_library_include_directories(assets)
+
+  # Custom fonts
+  zephyr_library_sources(assets/quinquefive_8.c)
+  zephyr_library_sources(assets/quinquefive_12.c)
+  zephyr_library_sources(assets/quinquefive_24.c)
+  zephyr_library_sources(assets/unscii_14.c)
+  zephyr_library_sources(assets/NerdFonts_Regular_20.c)
+  zephyr_library_sources(assets/NerdFonts_Regular_40.c)
 
   # Scanner Pocket core
   zephyr_library_sources(src/pocket_display.c)

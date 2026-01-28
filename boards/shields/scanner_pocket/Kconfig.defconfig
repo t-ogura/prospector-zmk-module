@@ -20,8 +20,16 @@ config SPI
 config LVGL
     default y
 
+# VDB (Virtual Display Buffer) - 100% full frame
 config LV_Z_VDB_SIZE
     default 100
+
+# Disable double buffering to save memory for objects
+config LV_Z_DOUBLE_VDB
+    default n
+
+# Keep monochrome conversion buffer enabled (default)
+# config LV_Z_MONOCHROME_CONVERSION_BUFFER - use default
 
 config LV_DPI_DEF
     default 161
@@ -33,8 +41,11 @@ choice LV_COLOR_DEPTH
     default LV_COLOR_DEPTH_1
 endchoice
 
+# Memory pool - need space for widget metadata, styles, rendering buffers
+# LVGL uses 8-bit colors internally, converts to 1-bit on flush
+# Testing with 128KB to support more objects
 config LV_Z_MEM_POOL_SIZE
-    default 4096
+    default 131072
 
 # ===== LVGL ウィジェット =====
 choice ZMK_DISPLAY_STATUS_SCREEN
@@ -51,8 +62,12 @@ choice ZMK_DISPLAY_WORK_QUEUE
     default ZMK_DISPLAY_WORK_QUEUE_DEDICATED
 endchoice
 
+# Increased stack sizes for stable LVGL rendering
 config ZMK_DISPLAY_DEDICATED_THREAD_STACK_SIZE
-    default 2048
+    default 8192
+
+config MAIN_STACK_SIZE
+    default 8192
 
 # ===== スキャナー機能 =====
 config PROSPECTOR_MODE_SCANNER
@@ -88,7 +103,7 @@ config SCANNER_POCKET_INVERT_COLORS
 
 config SCANNER_POCKET_LANDSCAPE
     bool "Use landscape orientation (168x144 instead of 144x168)"
-    default y
+    default y  # Custom rotated driver for landscape
     help
       When enabled, display is rotated 90 degrees for landscape mode.
       Uses custom rotated driver instead of default ls0xx driver.
