@@ -19,7 +19,7 @@
 // Include path assumes build from zmk-config-prospector
 #include "../boards/shields/prospector_scanner/src/scanner_stub.h"
 
-LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+LOG_MODULE_DECLARE(zmk, LOG_LEVEL_WRN);  /* Suppress DBG/INF logs - only WRN/ERR */
 
 // External function to trigger high-priority display update (defined in scanner_display.c)
 // Uses weak reference so it compiles even if scanner_display.c is not in the build

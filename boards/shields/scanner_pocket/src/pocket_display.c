@@ -33,9 +33,36 @@
 #include <zmk/usb.h>
 #endif
 
-LOG_MODULE_REGISTER(pocket_display, CONFIG_ZMK_LOG_LEVEL);
+#include <zephyr/drivers/gpio.h>
+
+LOG_MODULE_REGISTER(pocket_display, LOG_LEVEL_INF);
+
+/* Selected keyboard index - which keyboard's data to display on main screen */
+static int selected_keyboard_index = 0;
+
+/* ===== Navigation Button (D6 input, D3 GND) ===== */
+#define NAV_BUTTON_NODE DT_NODELABEL(nav_button)
+#if DT_NODE_EXISTS(NAV_BUTTON_NODE)
+static const struct gpio_dt_spec nav_button = GPIO_DT_SPEC_GET(NAV_BUTTON_NODE, gpios);
+static struct gpio_callback nav_button_cb_data;
+#define NAV_BUTTON_ENABLED 1
+#else
+#define NAV_BUTTON_ENABLED 0
+#endif
+
+/* ===== Button Debounce ===== */
+static volatile uint64_t last_button_press_time = 0;
+static volatile bool screen_switch_pending = false;
+#define BUTTON_DEBOUNCE_MS 200
 
 #if IS_ENABLED(CONFIG_PROSPECTOR_MODE_SCANNER) && IS_ENABLED(CONFIG_ZMK_DISPLAY)
+
+/* ===== Screen State Management ===== */
+enum screen_state {
+    SCREEN_MAIN = 0,
+    SCREEN_KEYBOARD_LIST,
+};
+static enum screen_state current_screen = SCREEN_MAIN;
 
 /* ===== Screen Dimensions ===== */
 #if IS_ENABLED(CONFIG_SCANNER_POCKET_LANDSCAPE)
@@ -259,6 +286,31 @@ static int16_t bat_bar_width[MAX_BATTERY_WIDGETS] = {0};    /* Stored bar width 
 
 static int active_battery_count = 0;
 
+/* ===== Keyboard List Screen Widgets ===== */
+#define KL_MAX_ENTRIES 5  /* Maximum keyboards to display (fits on 144px height) */
+#define KL_ENTRY_HEIGHT 12  /* Height per keyboard entry (text only) */
+#define KL_ENTRY_SPACING 4
+
+/* Simplified entry structure - no containers, just labels directly on main_screen
+ * Layout per entry: "████ KeyboardName" (RSSI as text bar + name)
+ * This reduces memory usage from 4 objects to 1 object per entry
+ */
+struct kl_entry {
+    lv_obj_t *label;       /* Combined RSSI + name label */
+    int keyboard_index;
+};
+
+static lv_obj_t *kl_title = NULL;
+static struct kl_entry kl_entries[KL_MAX_ENTRIES] = {0};
+static int kl_entry_count = 0;
+static lv_timer_t *kl_update_timer = NULL;
+
+/* Keyboard list selection state */
+static int kl_selected_index = 0;           /* Currently selected entry index */
+static uint64_t kl_last_interaction_time = 0;  /* Time of last button press */
+
+#define KL_TIMEOUT_MS 3000       /* Return to main after 3 seconds of no interaction */
+
 /* Color scheme */
 static lv_color_t bg_color;
 static lv_color_t text_color;
@@ -318,10 +370,15 @@ static struct {
 } scanner_data = {0};
 static bool scanner_data_mutex_init = false;
 
-/* Scanner callback */
+/* Scanner callback - only processes data from selected keyboard */
 static void scanner_update_callback(struct zmk_status_scanner_event_data *event_data) {
     if (!event_data || !event_data->status) {
         return;
+    }
+
+    /* Filter: only process data from the currently selected keyboard */
+    if (event_data->keyboard_index != selected_keyboard_index) {
+        return;  /* Ignore data from non-selected keyboards */
     }
 
     struct zmk_keyboard_status *status = event_data->status;
@@ -821,9 +878,327 @@ static void handle_ble_blink(void) {
     }
 }
 
+/* ===== Keyboard List Screen Functions ===== */
+
+/* Update selection highlight on keyboard list entries */
+static void kl_update_selection(void) {
+    for (int i = 0; i < kl_entry_count; i++) {
+        if (!kl_entries[i].label) continue;
+
+        if (i == kl_selected_index) {
+            /* Selected: inverted colors (black bg, white text) */
+            lv_obj_set_style_bg_color(kl_entries[i].label, text_color, 0);
+            lv_obj_set_style_bg_opa(kl_entries[i].label, LV_OPA_COVER, 0);
+            lv_obj_set_style_text_color(kl_entries[i].label, bg_color, 0);
+        } else {
+            /* Not selected: normal colors */
+            lv_obj_set_style_bg_opa(kl_entries[i].label, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_text_color(kl_entries[i].label, text_color, 0);
+        }
+    }
+}
+
+/* Destroy a single keyboard list entry */
+static void kl_destroy_entry(struct kl_entry *entry) {
+    if (entry->label) {
+        lv_obj_del(entry->label);
+        entry->label = NULL;
+    }
+    entry->keyboard_index = -1;
+}
+
+/* Create a single keyboard list entry - simplified to single label
+ * Format: "-65 KeyboardName" (RSSI as number + name)
+ */
+static void kl_create_entry(int entry_idx, int y_pos, int keyboard_index,
+                            const char *name, int8_t rssi) {
+    if (entry_idx >= KL_MAX_ENTRIES) return;
+
+    struct kl_entry *entry = &kl_entries[entry_idx];
+    entry->keyboard_index = keyboard_index;
+
+    /* Single label for entire entry - direct on main_screen (no container) */
+    entry->label = lv_label_create(main_screen);
+    lv_obj_set_style_text_color(entry->label, text_color, 0);
+    lv_obj_set_style_text_font(entry->label, &lv_font_unscii_8, 0);
+    lv_obj_set_pos(entry->label, 4, y_pos);
+    lv_obj_set_width(entry->label, SCREEN_W - 8);
+    lv_obj_set_style_pad_left(entry->label, 2, 0);
+    lv_obj_set_style_pad_right(entry->label, 2, 0);
+    lv_label_set_long_mode(entry->label, LV_LABEL_LONG_CLIP);
+
+    /* Format: "-65 Name" - RSSI as number + keyboard name */
+    char entry_text[48];
+    snprintf(entry_text, sizeof(entry_text), "%3d %s", rssi, name);
+    lv_label_set_text(entry->label, entry_text);  /* LVGL copies the string */
+}
+
+/* Update keyboard list entries */
+static void kl_update_entries(void) {
+    int active_keyboards[KL_MAX_ENTRIES];
+    int active_count = 0;
+
+    /* Find active keyboards */
+    for (int i = 0; i < CONFIG_PROSPECTOR_MAX_KEYBOARDS && active_count < KL_MAX_ENTRIES; i++) {
+        struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
+        if (!kbd || !kbd->active) continue;
+        active_keyboards[active_count++] = i;
+    }
+
+    int y_pos = 24;  /* Start below title */
+    int spacing = KL_ENTRY_HEIGHT + KL_ENTRY_SPACING;
+
+    /* Need to recreate entries if count changed */
+    if (active_count != kl_entry_count) {
+        /* Destroy existing entries */
+        for (int i = 0; i < kl_entry_count; i++) {
+            kl_destroy_entry(&kl_entries[i]);
+        }
+
+        /* Create new entries */
+        for (int i = 0; i < active_count; i++) {
+            int kbd_idx = active_keyboards[i];
+            struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(kbd_idx);
+            const char *name = kbd->ble_name[0] ? kbd->ble_name : "Unknown";
+            kl_create_entry(i, y_pos + (i * spacing), kbd_idx, name, kbd->rssi);
+        }
+        kl_entry_count = active_count;
+    } else {
+        /* Just update existing entries - single label format */
+        static char entry_text[48];
+        for (int i = 0; i < kl_entry_count; i++) {
+            struct kl_entry *entry = &kl_entries[i];
+            if (!entry->label) continue;
+
+            int kbd_idx = active_keyboards[i];
+            struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(kbd_idx);
+            if (!kbd) continue;
+
+            /* Update combined RSSI + name text */
+            const char *name = kbd->ble_name[0] ? kbd->ble_name : "Unknown";
+            snprintf(entry_text, sizeof(entry_text), "%3d %s", kbd->rssi, name);
+            lv_label_set_text(entry->label, entry_text);
+        }
+    }
+
+    /* Update selection highlight */
+    kl_update_selection();
+}
+
+/* Timer callback for keyboard list updates */
+static void kl_update_timer_cb(lv_timer_t *timer) {
+    ARG_UNUSED(timer);
+    if (current_screen == SCREEN_KEYBOARD_LIST) {
+        kl_update_entries();
+    }
+}
+
+/* Forward declarations for screen management */
+static void destroy_main_widgets(void);
+static void create_main_widgets(void);
+static void destroy_keyboard_list_widgets(void);
+static void create_keyboard_list_widgets(void);
+
+/* Destroy keyboard list screen widgets */
+static void destroy_keyboard_list_widgets(void) {
+    /* Stop update timer */
+    if (kl_update_timer) {
+        lv_timer_del(kl_update_timer);
+        kl_update_timer = NULL;
+    }
+
+    /* Destroy entries */
+    for (int i = 0; i < kl_entry_count; i++) {
+        kl_destroy_entry(&kl_entries[i]);
+    }
+    kl_entry_count = 0;
+
+    /* Destroy title */
+    if (kl_title) {
+        lv_obj_del(kl_title);
+        kl_title = NULL;
+    }
+}
+
+/* Create keyboard list screen widgets */
+static void create_keyboard_list_widgets(void) {
+    /* Title */
+    kl_title = lv_label_create(main_screen);
+    lv_obj_set_style_text_color(kl_title, text_color, 0);
+    lv_obj_set_style_text_font(kl_title, &unscii_14, 0);
+    lv_obj_align(kl_title, LV_ALIGN_TOP_MID, 0, 4);
+    lv_label_set_text(kl_title, "Keyboards");
+
+    /* Initial keyboard list */
+    kl_update_entries();
+
+    /* Initialize selection to currently selected keyboard */
+    kl_selected_index = 0;  /* Default to first if not found */
+    for (int i = 0; i < kl_entry_count; i++) {
+        if (kl_entries[i].keyboard_index == selected_keyboard_index) {
+            kl_selected_index = i;
+            break;
+        }
+    }
+    kl_update_selection();
+
+    /* Record entry time for timeout (reset on any button press) */
+    kl_last_interaction_time = k_uptime_get();
+
+    LOG_INF("Keyboard list created (%d keyboards)", kl_entry_count);
+}
+
+/* ===== Screen Switching Functions ===== */
+
+/* Destroy main screen widgets (to switch to keyboard list) */
+static void destroy_main_widgets(void) {
+    /* Stop scanner battery work */
+    k_work_cancel_delayable(&scanner_battery_work);
+    scanner_charge_anim_running = false;
+
+    /* Destroy scanner battery widgets */
+    if (scanner_bat_fill) { lv_anim_del(scanner_bat_fill, scanner_charge_anim_cb); }
+    if (scanner_bat_bg) { lv_obj_del(scanner_bat_bg); scanner_bat_bg = NULL; }
+    if (scanner_bat_tip) { lv_obj_del(scanner_bat_tip); scanner_bat_tip = NULL; }
+    if (scanner_bat_fill) { lv_obj_del(scanner_bat_fill); scanner_bat_fill = NULL; }
+    if (scanner_bat_pct) { lv_obj_del(scanner_bat_pct); scanner_bat_pct = NULL; }
+
+    /* Destroy device name */
+    if (device_name_label) { lv_obj_del(device_name_label); device_name_label = NULL; }
+
+    /* Destroy WPM */
+    if (wpm_label) { lv_obj_del(wpm_label); wpm_label = NULL; }
+
+    /* Destroy BLE profile */
+    if (ble_profile_label) { lv_obj_del(ble_profile_label); ble_profile_label = NULL; }
+
+    /* Destroy layer widgets */
+    if (layer_title) { lv_obj_del(layer_title); layer_title = NULL; }
+    for (int i = 0; i < SLIDE_VISIBLE_COUNT; i++) {
+        if (layer_slide_labels[i]) { lv_obj_del(layer_slide_labels[i]); layer_slide_labels[i] = NULL; }
+    }
+    if (layer_indicator) { lv_obj_del(layer_indicator); layer_indicator = NULL; }
+
+    /* Destroy modifier label */
+    if (modifier_label) { lv_obj_del(modifier_label); modifier_label = NULL; }
+
+    /* Destroy battery widgets */
+    for (int i = 0; i < MAX_BATTERY_WIDGETS; i++) {
+        if (bat_name[i]) { lv_obj_del(bat_name[i]); bat_name[i] = NULL; }
+        if (bat_pct[i]) { lv_obj_del(bat_pct[i]); bat_pct[i] = NULL; }
+        if (bat_bg[i]) { lv_obj_del(bat_bg[i]); bat_bg[i] = NULL; }
+        if (bat_fill[i]) { lv_obj_del(bat_fill[i]); bat_fill[i] = NULL; }
+    }
+    active_battery_count = 0;
+}
+
+/* Forward declaration for create_main_widgets (will define after zmk_display_status_screen) */
+static void create_main_widgets(void);
+
+/* Button press counter for debugging */
+static volatile uint32_t button_press_count = 0;
+
+/* Button interrupt callback - simple press detection only */
+#if NAV_BUTTON_ENABLED
+static void nav_button_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+    ARG_UNUSED(dev);
+    ARG_UNUSED(cb);
+    ARG_UNUSED(pins);
+
+    uint64_t now = k_uptime_get();
+
+    /* Debounce */
+    if (now - last_button_press_time < BUTTON_DEBOUNCE_MS) {
+        return;
+    }
+    last_button_press_time = now;
+    button_press_count++;
+
+    if (current_screen == SCREEN_KEYBOARD_LIST) {
+        /* Keyboard list: select next keyboard + reset timeout */
+        if (kl_entry_count > 0) {
+            kl_selected_index = (kl_selected_index + 1) % kl_entry_count;
+        }
+        kl_last_interaction_time = now;
+    } else {
+        /* Main screen: go to keyboard list */
+        screen_switch_pending = true;
+    }
+}
+#endif /* NAV_BUTTON_ENABLED */
+
+/* Handle screen switch (called from LVGL timer - main thread safe) */
+static void handle_screen_switch(void) {
+    if (!screen_switch_pending) return;
+    screen_switch_pending = false;
+
+    LOG_INF("Screen switch: current=%d", current_screen);
+
+    if (current_screen == SCREEN_MAIN) {
+        /* Switch to keyboard list */
+        destroy_main_widgets();
+        k_msleep(10);  /* Small delay for stability */
+        create_keyboard_list_widgets();
+        current_screen = SCREEN_KEYBOARD_LIST;
+        LOG_INF("Switched to keyboard list");
+    } else {
+        /* Switch to main - use selected keyboard */
+        int selected_kbd_idx = -1;
+        if (kl_selected_index >= 0 && kl_selected_index < kl_entry_count) {
+            selected_kbd_idx = kl_entries[kl_selected_index].keyboard_index;
+        }
+
+        /* Set the selected keyboard BEFORE destroying widgets */
+        if (selected_kbd_idx >= 0) {
+            selected_keyboard_index = selected_kbd_idx;
+            LOG_INF("Selected keyboard set to index %d", selected_kbd_idx);
+        }
+
+        destroy_keyboard_list_widgets();
+        k_msleep(10);  /* Small delay for stability */
+        create_main_widgets();
+        current_screen = SCREEN_MAIN;
+
+        LOG_INF("Switched to main screen");
+    }
+}
+
+/* Debug: counter for timer ticks */
+static uint32_t timer_tick_count = 0;
+
 /* LVGL timer callback */
 static void display_timer_callback(lv_timer_t *timer) {
     ARG_UNUSED(timer);
+
+    /* Debug: log every 50 ticks (5 seconds) - reduced frequency */
+    timer_tick_count++;
+    if (timer_tick_count % 50 == 0) {
+        LOG_INF("tick=%d btn=%d scr=%d",
+                timer_tick_count, button_press_count, current_screen);
+    }
+
+    /* Handle screen switch request (from button interrupt) */
+    handle_screen_switch();
+
+    /* Keyboard list screen handling */
+    if (current_screen == SCREEN_KEYBOARD_LIST) {
+        /* Check for timeout (3 seconds since last interaction) */
+        uint64_t now = k_uptime_get();
+        if (now - kl_last_interaction_time >= KL_TIMEOUT_MS) {
+            LOG_INF("Keyboard list timeout - returning to main");
+            screen_switch_pending = true;
+            return;
+        }
+
+        /* Update selection highlight (in case it was changed by button) */
+        kl_update_selection();
+        return;
+    }
+
+    /* Only update main screen widgets below */
+    if (current_screen != SCREEN_MAIN) {
+        return;
+    }
 
     /* Handle BLE blink animation (runs every timer tick) */
     handle_ble_blink();
@@ -1064,8 +1439,169 @@ lv_obj_t *zmk_display_status_screen(void) {
     /* Start scanner battery update work (5 second interval) */
     k_work_schedule(&scanner_battery_work, K_MSEC(1000));
 
+    /* Initialize navigation button */
+#if NAV_BUTTON_ENABLED
+    if (gpio_is_ready_dt(&nav_button)) {
+        int ret = gpio_pin_configure_dt(&nav_button, GPIO_INPUT);
+        if (ret == 0) {
+            /* Detect button press only (falling edge for active-low) */
+            ret = gpio_pin_interrupt_configure_dt(&nav_button, GPIO_INT_EDGE_TO_ACTIVE);
+            if (ret == 0) {
+                gpio_init_callback(&nav_button_cb_data, nav_button_callback, BIT(nav_button.pin));
+                gpio_add_callback(nav_button.port, &nav_button_cb_data);
+                LOG_INF("Navigation button initialized (D6)");
+            } else {
+                LOG_ERR("Failed to configure button interrupt: %d", ret);
+            }
+        } else {
+            LOG_ERR("Failed to configure button GPIO: %d", ret);
+        }
+    } else {
+        LOG_WRN("Navigation button not ready");
+    }
+#endif /* NAV_BUTTON_ENABLED */
+
     LOG_INF("Scanner Pocket screen created");
     return main_screen;
+}
+
+/* Create main screen widgets (called when switching back from keyboard list) */
+static void create_main_widgets(void) {
+    LOG_INF("Creating main screen widgets...");
+
+    /* Scanner Battery at top-right */
+    int16_t bat_x = SCREEN_W - 4 - 20 - SCANNER_BAT_WIDTH - SCANNER_BAT_TIP_WIDTH;
+    int16_t bat_y = 2;
+
+    /* Battery outline (main rectangle) */
+    scanner_bat_bg = lv_obj_create(main_screen);
+    lv_obj_set_size(scanner_bat_bg, SCANNER_BAT_WIDTH, SCANNER_BAT_HEIGHT);
+    lv_obj_set_pos(scanner_bat_bg, bat_x, bat_y);
+    lv_obj_set_style_bg_color(scanner_bat_bg, bg_color, 0);
+    lv_obj_set_style_bg_opa(scanner_bat_bg, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(scanner_bat_bg, text_color, 0);
+    lv_obj_set_style_border_width(scanner_bat_bg, 1, 0);
+    lv_obj_set_style_radius(scanner_bat_bg, 1, 0);
+    lv_obj_set_style_pad_all(scanner_bat_bg, 0, 0);
+    lv_obj_clear_flag(scanner_bat_bg, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* + terminal protrusion */
+    scanner_bat_tip = lv_obj_create(main_screen);
+    lv_obj_set_size(scanner_bat_tip, SCANNER_BAT_TIP_WIDTH, SCANNER_BAT_TIP_HEIGHT);
+    lv_obj_set_pos(scanner_bat_tip, bat_x + SCANNER_BAT_WIDTH, bat_y + (SCANNER_BAT_HEIGHT - SCANNER_BAT_TIP_HEIGHT) / 2);
+    lv_obj_set_style_bg_color(scanner_bat_tip, text_color, 0);
+    lv_obj_set_style_bg_opa(scanner_bat_tip, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(scanner_bat_tip, 0, 0);
+    lv_obj_set_style_radius(scanner_bat_tip, 0, 0);
+    lv_obj_set_style_pad_all(scanner_bat_tip, 0, 0);
+    lv_obj_clear_flag(scanner_bat_tip, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Fill bar */
+    scanner_bat_fill = lv_obj_create(main_screen);
+    lv_obj_set_size(scanner_bat_fill, 0, SCANNER_BAT_HEIGHT - 4);
+    lv_obj_set_pos(scanner_bat_fill, bat_x + 2, bat_y + 2);
+    lv_obj_set_style_bg_color(scanner_bat_fill, text_color, 0);
+    lv_obj_set_style_bg_opa(scanner_bat_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(scanner_bat_fill, 0, 0);
+    lv_obj_set_style_radius(scanner_bat_fill, 0, 0);
+    lv_obj_set_style_pad_all(scanner_bat_fill, 0, 0);
+    lv_obj_clear_flag(scanner_bat_fill, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Percentage text */
+    scanner_bat_pct = lv_label_create(main_screen);
+    lv_obj_set_style_text_color(scanner_bat_pct, text_color, 0);
+    lv_obj_set_style_text_font(scanner_bat_pct, &lv_font_unscii_8, 0);
+    lv_obj_set_pos(scanner_bat_pct, bat_x + SCANNER_BAT_WIDTH + SCANNER_BAT_TIP_WIDTH + 2, bat_y);
+    lv_label_set_text(scanner_bat_pct, "?");
+
+    /* Device name */
+    device_name_label = lv_label_create(main_screen);
+    lv_obj_set_style_text_color(device_name_label, text_color, 0);
+    lv_obj_set_style_text_font(device_name_label, &unscii_14, 0);
+    lv_obj_align(device_name_label, LV_ALIGN_TOP_MID, 0, 14);
+    lv_label_set_text(device_name_label, pending_data.keyboard_name);
+
+    /* WPM label */
+    wpm_label = lv_label_create(main_screen);
+    lv_obj_set_style_text_color(wpm_label, text_color, 0);
+    lv_obj_set_style_text_font(wpm_label, &lv_font_unscii_8, 0);
+    lv_obj_align(wpm_label, LV_ALIGN_TOP_LEFT, 4, 32);
+    char wpm_buf[16];
+    snprintf(wpm_buf, sizeof(wpm_buf), "WPM\n%3d", current_wpm);
+    lv_label_set_text(wpm_label, wpm_buf);
+
+    /* BLE Profile label */
+    ble_profile_label = lv_label_create(main_screen);
+    lv_obj_set_style_text_color(ble_profile_label, text_color, 0);
+    lv_obj_set_style_text_font(ble_profile_label, &lv_font_unscii_8, 0);
+    lv_obj_set_style_text_align(ble_profile_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(ble_profile_label, LV_ALIGN_TOP_RIGHT, -4, 32);
+    lv_label_set_text(ble_profile_label, "BLE\n 0");
+
+    /* Layer widget */
+    create_layer_widget(main_screen);
+
+    /* Reset layer state to current */
+    current_layer = 0;
+    layer_slide_window_start = 0;
+    if (pending_data.layer != 0) {
+        update_layer_indicator(pending_data.layer);
+    }
+
+    /* Modifier widget */
+    modifier_label = lv_label_create(main_screen);
+    lv_obj_set_style_text_font(modifier_label, &NerdFonts_Regular_40, 0);
+    lv_obj_set_style_text_color(modifier_label, text_color, 0);
+    lv_obj_set_style_text_letter_space(modifier_label, 8, 0);
+    lv_label_set_text(modifier_label, "");
+    lv_obj_align(modifier_label, LV_ALIGN_TOP_MID, 0, 82);
+    current_modifiers = 0;
+    if (pending_data.modifiers != 0) {
+        update_modifiers(pending_data.modifiers);
+    }
+
+    /* Battery widgets */
+    create_battery_widgets(main_screen);
+
+    /* Load data from selected keyboard and update display immediately */
+    struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(selected_keyboard_index);
+    if (kbd && kbd->active) {
+        /* Update pending_data with selected keyboard's data */
+        strncpy(pending_data.keyboard_name, kbd->ble_name, sizeof(pending_data.keyboard_name) - 1);
+        pending_data.keyboard_name[sizeof(pending_data.keyboard_name) - 1] = '\0';
+        pending_data.layer = kbd->data.active_layer;
+        pending_data.modifiers = kbd->data.modifier_flags;
+        pending_data.wpm = kbd->data.wpm_value;
+        pending_data.ble_profile = kbd->data.profile_slot;
+        pending_data.usb_ready = (kbd->data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
+        pending_data.ble_connected = (kbd->data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
+        pending_data.ble_bonded = (kbd->data.status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
+        pending_data.rssi = kbd->rssi;
+        pending_data.bat[0] = kbd->data.battery_level;
+        pending_data.bat[1] = kbd->data.peripheral_battery[0];
+        pending_data.bat[2] = kbd->data.peripheral_battery[1];
+        pending_data.bat[3] = kbd->data.peripheral_battery[2];
+
+        /* Update display with loaded data */
+        lv_label_set_text(device_name_label, pending_data.keyboard_name);
+        update_layer_indicator(pending_data.layer);
+        update_modifiers(pending_data.modifiers);
+        update_wpm(pending_data.wpm);
+        update_batteries(pending_data.bat[0], pending_data.bat[1],
+                        pending_data.bat[2], pending_data.bat[3]);
+
+        LOG_INF("Loaded data from keyboard %d: %s", selected_keyboard_index, pending_data.keyboard_name);
+    }
+
+    /* Update BLE display with current state */
+    update_connection(pending_data.usb_ready, pending_data.ble_connected,
+                      pending_data.ble_bonded, pending_data.ble_profile);
+
+    /* Start scanner battery update work again */
+    scanner_battery_pending = true;
+    k_work_schedule(&scanner_battery_work, K_MSEC(100));
+
+    LOG_INF("Main screen widgets created");
 }
 
 #endif /* CONFIG_PROSPECTOR_MODE_SCANNER && CONFIG_ZMK_DISPLAY */

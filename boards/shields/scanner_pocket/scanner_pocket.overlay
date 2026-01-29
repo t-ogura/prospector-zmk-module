@@ -46,11 +46,33 @@
         map = <RC(0,0)>;
     };
 
+    /* Navigation button: D3 (GND) + D6 (Input)
+     * Press button to toggle between Main and Keyboard List screens
+     */
+    gpio_keys {
+        compatible = "gpio-keys";
+        nav_button: nav_button {
+            gpios = <&xiao_d 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "Navigation Button";
+        };
+    };
+
     /* Dummy kscan - Scanner Pocket is display-only device */
     kscan0: kscan {
         compatible = "zmk,kscan-gpio-direct";
         wakeup-source;
         input-gpios = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+};
+
+/* D3 as GND output for button */
+&gpio0 {
+    status = "okay";
+    button_gnd: button_gnd {
+        gpio-hog;
+        gpios = <29 GPIO_ACTIVE_HIGH>;  /* D3 = P0.29 */
+        output-low;
+        line-name = "Button GND";
     };
 };
 
