@@ -3424,6 +3424,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         /* Display Settings → Main OR Main → Keyboard Select */
         if (current_screen == SCREEN_DISPLAY_SETTINGS) {
             LOG_INF(">>> Transitioning: DISPLAY_SETTINGS -> MAIN");
+            display_settings_save_if_dirty();
             destroy_display_settings_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
@@ -3458,6 +3459,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_SYSTEM_SETTINGS) {
             LOG_INF(">>> Transitioning: QUICK_ACTIONS -> MAIN");
+            display_settings_save_if_dirty();
             destroy_system_settings_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
@@ -3477,6 +3479,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         /* Pong Wars → Main OR Main → Quick Actions */
         if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
             LOG_INF(">>> Transitioning: PROSPECTOR_DISPLAY -> MAIN");
+            display_settings_save_if_dirty();
             destroy_prospector_display_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);

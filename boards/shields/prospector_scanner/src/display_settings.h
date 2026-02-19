@@ -5,8 +5,8 @@
  * Display Settings - NVS Persistence for Scanner Display
  *
  * Persists user-configurable display settings across reboots using
- * Zephyr Settings Subsystem (NVS backend). Settings are loaded at boot
- * and saved with debounce when changed via the UI.
+ * Zephyr Settings Subsystem (NVS backend). Settings are loaded at boot.
+ * Call display_settings_save_if_dirty() when leaving a settings screen.
  *
  * Settings stored:
  *   - Brightness (auto/manual mode, manual level)
@@ -26,6 +26,13 @@
  * Loads saved settings from NVS flash. Call once during display init.
  */
 void display_settings_init(void);
+
+/**
+ * Save settings to NVS if any value has changed since last save.
+ * Call when leaving a settings screen (swipe away, screen transition).
+ * No-op if nothing changed.
+ */
+void display_settings_save_if_dirty(void);
 
 /* ========== Brightness ========== */
 

@@ -130,33 +130,28 @@ static int display_settings_handle_set(const char *name, size_t len,
 SETTINGS_STATIC_HANDLER_DEFINE(prosp_display, "prosp", NULL,
                                display_settings_handle_set, NULL, NULL);
 
-/* ========== Debounced Save ========== */
+/* ========== Dirty Flag Save ========== */
 
-static void display_settings_save_work_handler(struct k_work *work) {
+static bool dirty = false;
+
+static void do_save(void) {
     settings_save_one("prosp/brightness", &brightness, sizeof(brightness));
     settings_save_one("prosp/layers", &layers, sizeof(layers));
     settings_save_one("prosp/channel", &scanner_channel, sizeof(scanner_channel));
     settings_save_one("prosp/layout", &layout_style, sizeof(layout_style));
+    dirty = false;
     LOG_INF("Display settings saved to NVS");
 }
 
-static struct k_work_delayable save_work;
-
-/* Display settings use a shorter debounce than ZMK default (60s).
- * User expects settings to persist immediately after changing them.
- * 2 seconds is enough to batch rapid slider adjustments. */
-#define DISPLAY_SETTINGS_SAVE_DEBOUNCE_MS 2000
-
-static void schedule_save(void) {
-    if (!settings_loaded) {
-        return; /* Don't save before initial load completes */
+static void mark_dirty(void) {
+    if (settings_loaded) {
+        dirty = true;
     }
-    k_work_reschedule(&save_work, K_MSEC(DISPLAY_SETTINGS_SAVE_DEBOUNCE_MS));
 }
 
 #else /* !CONFIG_SETTINGS */
 
-static void schedule_save(void) {}
+static void mark_dirty(void) {}
 
 #endif /* CONFIG_SETTINGS */
 
@@ -168,8 +163,6 @@ void display_settings_init(void) {
     }
 
 #if IS_ENABLED(CONFIG_SETTINGS)
-    k_work_init_delayable(&save_work, display_settings_save_work_handler);
-
     /* Load saved settings from NVS.
      * settings_load() is called by ZMK main.c, which loads ALL registered
      * handlers including ours. But we call load_subtree for our prefix
@@ -184,6 +177,15 @@ void display_settings_init(void) {
             scanner_channel, layout_style);
 }
 
+void display_settings_save_if_dirty(void) {
+#if IS_ENABLED(CONFIG_SETTINGS)
+    if (!settings_loaded || !dirty) {
+        return;
+    }
+    do_save();
+#endif
+}
+
 /* ========== Brightness Getters/Setters ========== */
 
 bool display_settings_get_auto_brightness(void) {
@@ -195,7 +197,7 @@ void display_settings_set_auto_brightness(bool enabled) {
         return;
     }
     brightness.auto_enabled = enabled;
-    schedule_save();
+    mark_dirty();
 }
 
 uint8_t display_settings_get_manual_brightness(void) {
@@ -207,7 +209,7 @@ void display_settings_set_manual_brightness(uint8_t level) {
         return;
     }
     brightness.manual_level = level;
-    schedule_save();
+    mark_dirty();
 }
 
 /* ========== Layer Getters/Setters ========== */
@@ -221,7 +223,7 @@ void display_settings_set_max_layers(uint8_t max) {
         return;
     }
     layers.max_layers = max;
-    schedule_save();
+    mark_dirty();
 }
 
 bool display_settings_get_layer_slide_mode(void) {
@@ -233,7 +235,7 @@ void display_settings_set_layer_slide_mode(bool enabled) {
         return;
     }
     layers.slide_mode = enabled;
-    schedule_save();
+    mark_dirty();
 }
 
 /* ========== Channel Getters/Setters ========== */
@@ -247,7 +249,7 @@ void display_settings_set_channel(uint8_t channel) {
         return;
     }
     scanner_channel = channel;
-    schedule_save();
+    mark_dirty();
 }
 
 /* ========== Layout Getters/Setters ========== */
@@ -261,5 +263,5 @@ void display_settings_set_layout(uint8_t layout) {
         return;
     }
     layout_style = layout;
-    schedule_save();
+    mark_dirty();
 }
