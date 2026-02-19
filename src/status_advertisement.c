@@ -593,18 +593,30 @@ static void build_manufacturer_payload(void) {
     uint8_t aux1_battery = peripheral_batteries[CONFIG_ZMK_STATUS_ADV_AUX1_PERIPHERAL];
     uint8_t aux2_battery = peripheral_batteries[CONFIG_ZMK_STATUS_ADV_AUX2_PERIPHERAL];
 
+    /*
+     * Scanner display mapping:
+     *   battery_level         -> LEFT arc on screen
+     *   peripheral_battery[0] -> RIGHT arc on screen
+     *
+     * So we map:
+     *   LEFT physical side battery  -> battery_level
+     *   RIGHT physical side battery -> peripheral_battery[0]
+     */
     if (strcmp(central_side, "LEFT") == 0) {
-        // Central is on LEFT: Scanner expects battery_level=Right, peripheral_battery[0]=Left
-        // So we swap: battery_level gets peripheral (half), peripheral_battery[0] gets central
-        uint8_t central_battery = battery_level;
-        manufacturer_data.battery_level = half_battery;           // Right (peripheral half) -> battery_level
-        manufacturer_data.peripheral_battery[0] = central_battery; // Left (central) -> peripheral_battery[0]
+        // Central is on LEFT physical side
+        // battery_level (LEFT arc) = central battery (already in battery_level)
+        // peripheral_battery[0] (RIGHT arc) = peripheral half
+        manufacturer_data.peripheral_battery[0] = half_battery;    // Right physical -> Right arc
         manufacturer_data.peripheral_battery[1] = aux1_battery;    // Aux1 (e.g., trackball)
         manufacturer_data.peripheral_battery[2] = aux2_battery;    // Aux2
+        // battery_level already has central battery, no change needed
     } else {
-        // Central is on RIGHT (default): Scanner expects battery_level=Right, peripheral_battery[0]=Left
-        // battery_level=central(right), peripheral_battery[0]=peripheral half(left)
-        manufacturer_data.peripheral_battery[0] = half_battery;    // Left (peripheral half)
+        // Central is on RIGHT physical side (default)
+        // battery_level (LEFT arc) = peripheral half (swap needed)
+        // peripheral_battery[0] (RIGHT arc) = central (swap needed)
+        uint8_t central_battery = battery_level;
+        manufacturer_data.battery_level = half_battery;            // Left physical (peripheral) -> Left arc
+        manufacturer_data.peripheral_battery[0] = central_battery; // Right physical (central) -> Right arc
         manufacturer_data.peripheral_battery[1] = aux1_battery;    // Aux1 (e.g., trackball)
         manufacturer_data.peripheral_battery[2] = aux2_battery;    // Aux2
     }
