@@ -8,8 +8,9 @@ config ZMK_KEYBOARD_NAME
 config ZMK_DISPLAY
     default y
 
-# MIPI DBI for ST7789V
+# MIPI DBI for ST7789V (bool required for Zephyr 3.5.0 compatibility)
 config MIPI_DBI
+    bool
     default y
 
 config SPI
