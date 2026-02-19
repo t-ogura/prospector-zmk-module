@@ -7,6 +7,7 @@
  */
 
 #include "operator_layout.h"
+#include "display_settings.h"
 #include "fonts_carrefinho.h"
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -14,15 +15,6 @@
 #include <stdio.h>
 
 LOG_MODULE_REGISTER(operator_layout, CONFIG_ZMK_LOG_LEVEL);
-
-/* Get max layers from Kconfig (will be replaced by settings persistence later) */
-static inline uint8_t display_settings_get_max_layers(void) {
-#ifdef CONFIG_PROSPECTOR_MAX_LAYERS
-    return CONFIG_PROSPECTOR_MAX_LAYERS;
-#else
-    return 5;
-#endif
-}
 
 /* ========== Color Palette Structure ========== */
 typedef struct {

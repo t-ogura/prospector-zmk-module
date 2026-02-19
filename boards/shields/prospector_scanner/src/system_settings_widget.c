@@ -5,27 +5,22 @@
  */
 
 #include "system_settings_widget.h"
+#include "display_settings.h"
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/reboot.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-// ========== Runtime Channel Storage ==========
+// ========== Runtime Channel Storage (backed by NVS via display_settings) ==========
 
-// Runtime channel value (0 = All, 1-255 = specific channel)
-// Initialized from Kconfig default, can be changed at runtime
-static uint8_t runtime_scanner_channel = 0;
 static bool runtime_channel_initialized = false;
+static uint8_t runtime_scanner_channel = 0;
 
 static void init_runtime_channel(void) {
     if (!runtime_channel_initialized) {
-#ifdef CONFIG_PROSPECTOR_SCANNER_CHANNEL
-        runtime_scanner_channel = CONFIG_PROSPECTOR_SCANNER_CHANNEL;
-#else
-        runtime_scanner_channel = 0;  // Default: accept all
-#endif
+        runtime_scanner_channel = display_settings_get_channel();
         runtime_channel_initialized = true;
-        LOG_INF("📡 Runtime channel initialized to %d", runtime_scanner_channel);
+        LOG_INF("Runtime channel initialized to %d (from NVS)", runtime_scanner_channel);
     }
 }
 
@@ -37,7 +32,9 @@ uint8_t scanner_get_runtime_channel(void) {
 void scanner_set_runtime_channel(uint8_t channel) {
     init_runtime_channel();
     runtime_scanner_channel = channel;
-    LOG_INF("📡 Scanner channel set to %d (%s)", channel, channel == 0 ? "All" : "Filtered");
+    display_settings_set_channel(channel);
+    LOG_INF("Scanner channel set to %d (%s, saved to NVS)",
+            channel, channel == 0 ? "All" : "Filtered");
 }
 
 // Forward declaration for channel value update

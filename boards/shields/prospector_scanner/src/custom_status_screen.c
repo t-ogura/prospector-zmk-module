@@ -34,6 +34,7 @@
 #include "fonts.h"  /* NerdFont declarations */
 #include "touch_handler.h"  /* For LVGL input device registration */
 #include "brightness_control.h"  /* For auto brightness sensor control */
+#include "display_settings.h"   /* NVS persistence for display settings */
 #include "prospector_layouts.h"  /* Carrefinho-inspired display layouts */
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
@@ -278,14 +279,33 @@ static lv_obj_t *ds_slide_label = NULL;
 static lv_obj_t *ds_slide_switch = NULL;
 static lv_obj_t *ds_nav_hint = NULL;
 
-/* Display Settings State (persists across screen transitions) */
+/* Display Settings State (persists across screen transitions, backed by NVS) */
 static bool ds_auto_brightness_enabled = false;
 static uint8_t ds_manual_brightness = 65;
 /* Battery visible if CONFIG_PROSPECTOR_BATTERY_SUPPORT=y in config */
 static bool ds_battery_visible = IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT);
 static uint8_t ds_max_layers = 7;
-static bool ds_layer_slide_mode = IS_ENABLED(CONFIG_PROSPECTOR_LAYER_SLIDE_DEFAULT);  /* Slide animation mode for layer display */
-static uint8_t ds_layer_slide_max = 7;    /* Dynamic max layer for slide mode */
+static bool ds_layer_slide_mode = IS_ENABLED(CONFIG_PROSPECTOR_LAYER_SLIDE_DEFAULT);
+static uint8_t ds_layer_slide_max = 7;
+
+/* Load persisted settings from NVS into display state variables */
+static void load_display_settings(void) {
+    display_settings_init();
+    ds_auto_brightness_enabled = display_settings_get_auto_brightness();
+    ds_manual_brightness = display_settings_get_manual_brightness();
+    ds_max_layers = display_settings_get_max_layers();
+    ds_layer_slide_mode = display_settings_get_layer_slide_mode();
+    LOG_INF("NVS settings loaded: bright=%d/%d%%, layers=%d, slide=%d",
+            ds_auto_brightness_enabled, ds_manual_brightness,
+            ds_max_layers, ds_layer_slide_mode);
+
+    /* Apply saved brightness setting */
+    if (ds_auto_brightness_enabled) {
+        brightness_control_set_auto(true);
+    } else {
+        set_pwm_brightness(ds_manual_brightness);
+    }
+}
 
 /* Forward declarations for layer display helpers */
 static void create_layer_list_widgets(lv_obj_t *parent, int y_offset);
@@ -612,6 +632,9 @@ lv_obj_t *zmk_display_status_screen(void) {
     LOG_INF("=== Full Widget Test - NO CONTAINER ===");
     LOG_INF("=== All widgets use absolute positioning ===");
     LOG_INF("=============================================");
+
+    /* Load persisted display settings from NVS flash */
+    load_display_settings();
 
     /* Create main screen */
     LOG_INF("[INIT] Creating main_screen...");
@@ -2169,6 +2192,7 @@ static void ds_auto_switch_event_cb(lv_event_t *e) {
     lv_obj_t *sw = lv_event_get_target(e);
     bool checked = lv_obj_has_state(sw, LV_STATE_CHECKED);
     ds_auto_brightness_enabled = checked;
+    display_settings_set_auto_brightness(checked);
 
     /* Enable/disable the brightness control module's auto mode */
     brightness_control_set_auto(checked);
@@ -2219,6 +2243,7 @@ static void ds_brightness_slider_event_cb(lv_event_t *e) {
 
     int value = lv_slider_get_value(slider);
     ds_manual_brightness = (uint8_t)value;
+    display_settings_set_manual_brightness((uint8_t)value);
 
     /* Update value label */
     if (ds_brightness_value) {
@@ -2262,6 +2287,7 @@ static void ds_layer_slider_event_cb(lv_event_t *e) {
 
     int value = lv_slider_get_value(slider);
     ds_max_layers = (uint8_t)value;
+    display_settings_set_max_layers((uint8_t)value);
 
     /* Update value label */
     if (ds_layer_value) {
@@ -2280,6 +2306,7 @@ static void ds_slide_switch_event_cb(lv_event_t *e) {
     lv_obj_t *sw = lv_event_get_target(e);
     bool checked = lv_obj_has_state(sw, LV_STATE_CHECKED);
     ds_layer_slide_mode = checked;
+    display_settings_set_layer_slide_mode(checked);
 
     LOG_INF("Layer slide mode: %s", checked ? "ON" : "OFF");
 
@@ -3266,6 +3293,12 @@ static void create_prospector_display_widgets(void) {
     /* Initialize layout system on the screen object */
     prospector_layouts_init(screen_obj);
 
+    /* Restore saved layout style from NVS */
+    uint8_t saved_layout = display_settings_get_layout();
+    if (saved_layout != (uint8_t)prospector_layouts_get_style()) {
+        prospector_layouts_set_style((prospector_layout_t)saved_layout);
+    }
+
     prospector_display_active = true;
 
     LOG_INF("Prospector Display created (%s)",
@@ -3349,6 +3382,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
             LOG_INF(">>> Prospector Display: next layout");
             prospector_layouts_next();
+            display_settings_set_layout((uint8_t)prospector_layouts_get_style());
             break;
         }
         /* Main → Display Settings OR Keyboard Select → Main */
@@ -3379,6 +3413,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
             LOG_INF(">>> Prospector Display: prev layout");
             prospector_layouts_prev();
+            display_settings_set_layout((uint8_t)prospector_layouts_get_style());
             break;
         }
         /* Display Settings → Main OR Main → Keyboard Select */
