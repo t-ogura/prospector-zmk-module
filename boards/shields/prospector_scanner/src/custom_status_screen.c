@@ -3412,6 +3412,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
+            scanner_msg_send_display_refresh();
             LOG_INF(">>> Transition complete");
         }
         break;
@@ -3434,6 +3435,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
+            scanner_msg_send_display_refresh();
             LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_MAIN) {
             LOG_INF(">>> Transitioning: MAIN -> KEYBOARD_SELECT");
@@ -3469,6 +3471,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
+            scanner_msg_send_display_refresh();
             LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_KEYBOARD_SELECT) {
             /* Channel decrement on left swipe */
@@ -3489,6 +3492,7 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             lv_obj_invalidate(screen_obj);
             create_main_screen_widgets();
             current_screen = SCREEN_MAIN;
+            scanner_msg_send_display_refresh();
             LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_MAIN) {
             LOG_INF(">>> Transitioning: MAIN -> QUICK_ACTIONS");
