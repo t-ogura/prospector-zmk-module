@@ -884,7 +884,7 @@ static void adv_work_handler(struct k_work *work) {
 }
 
 // Initialize Prospector simple advertising system
-static int init_prospector_status(const struct device *dev) {
+static int init_prospector_status(void) {
     k_work_init_delayable(&adv_work, adv_work_handler);
 
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
