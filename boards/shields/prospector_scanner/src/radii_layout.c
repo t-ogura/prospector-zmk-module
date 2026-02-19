@@ -478,6 +478,11 @@ void radii_layout_update(uint8_t active_layer, const char *layer_name,
 
     /* Update modifiers */
     update_modifiers(modifier_flags);
+
+    /* Force LVGL to redraw updated widgets */
+    if (parent_screen) {
+        lv_obj_invalidate(parent_screen);
+    }
 }
 
 void radii_layout_destroy(void) {

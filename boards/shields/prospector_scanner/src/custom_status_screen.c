@@ -2621,7 +2621,7 @@ static void create_system_settings_widgets(void) {
     ss_version_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(ss_version_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ss_version_label, lv_color_hex(0x808080), 0);
-    lv_label_set_text(ss_version_label, "Prospector Scanner v2.1.0");
+    lv_label_set_text(ss_version_label, "Prospector Scanner v2.2.0");
     lv_obj_align(ss_version_label, LV_ALIGN_TOP_MID, 0, 52);
 
     /* Bootloader button (blue) - position matches original system_settings_widget.c */
@@ -3135,11 +3135,16 @@ static void ks_update_entries(void) {
         }
         ks_entry_count = active_count;
     } else {
-        /* Just update existing entries */
+        /* Just update existing entries (same channel filter as creation path) */
         int entry_idx = 0;
         for (int i = 0; i < CONFIG_PROSPECTOR_MAX_KEYBOARDS && entry_idx < ks_entry_count; i++) {
             struct zmk_keyboard_status *kbd = zmk_status_scanner_get_keyboard(i);
             if (!kbd || !kbd->active) continue;
+
+            /* Apply same channel filter as creation path */
+            if (scanner_ch != CHANNEL_ALL && kbd->data.channel != scanner_ch) {
+                continue;
+            }
 
             struct ks_keyboard_entry *entry = &ks_entries[entry_idx];
             if (!entry->container) {

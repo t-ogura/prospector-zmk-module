@@ -966,6 +966,9 @@ void operator_layout_update(uint8_t active_layer, const char *layer_name,
     }
 
     cached_state.initialized = true;
+
+    /* Force LVGL to redraw updated widgets */
+    lv_obj_invalidate(layout_container);
 }
 
 void operator_layout_destroy(void) {

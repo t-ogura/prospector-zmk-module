@@ -142,11 +142,16 @@ static void display_settings_save_work_handler(struct k_work *work) {
 
 static struct k_work_delayable save_work;
 
+/* Display settings use a shorter debounce than ZMK default (60s).
+ * User expects settings to persist immediately after changing them.
+ * 2 seconds is enough to batch rapid slider adjustments. */
+#define DISPLAY_SETTINGS_SAVE_DEBOUNCE_MS 2000
+
 static void schedule_save(void) {
     if (!settings_loaded) {
         return; /* Don't save before initial load completes */
     }
-    k_work_reschedule(&save_work, K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE));
+    k_work_reschedule(&save_work, K_MSEC(DISPLAY_SETTINGS_SAVE_DEBOUNCE_MS));
 }
 
 #else /* !CONFIG_SETTINGS */
