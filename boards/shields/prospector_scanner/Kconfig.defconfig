@@ -3,7 +3,7 @@
 if SHIELD_PROSPECTOR_SCANNER
 
 config ZMK_KEYBOARD_NAME
-    default "Prospect"
+    default "Prospector"
 
 config ZMK_DISPLAY
     default y
