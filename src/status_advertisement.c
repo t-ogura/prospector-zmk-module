@@ -621,10 +621,11 @@ static void build_manufacturer_payload(void) {
     // Compact layer name (4 bytes) - reduced from 6
     snprintf(manufacturer_data.layer_name, sizeof(manufacturer_data.layer_name), "L%d", layer);
 
-    // Keyboard ID (4 bytes)
+    // Keyboard ID (4 bytes) - hash ALL characters to avoid collisions
+    // (e.g. "AroundFortyRB" vs "AroundFortyAA" differ after 8th char)
     const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
     uint32_t id_hash = 0;
-    for (int i = 0; keyboard_name[i] && i < 8; i++) {
+    for (int i = 0; keyboard_name[i]; i++) {
         id_hash = id_hash * 31 + keyboard_name[i];
     }
     memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
