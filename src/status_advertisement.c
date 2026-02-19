@@ -618,14 +618,17 @@ static void build_manufacturer_payload(void) {
     memset(manufacturer_data.peripheral_battery, 0, 3);
 #endif
 
-    // Compact layer name (4 bytes = 3 chars + null)
-    // Use actual layer name from keymap, truncated to 3 characters
+    // Compact layer name (4 bytes, NOT null-terminated, full 4 chars usable)
+    // Receiver must use %.4s or memcpy+null, never raw %s
+    memset(manufacturer_data.layer_name, 0, sizeof(manufacturer_data.layer_name));
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
     const char *layer_name = zmk_keymap_layer_name(layer);
     if (layer_name && layer_name[0] != '\0') {
-        strncpy(manufacturer_data.layer_name, layer_name,
-                sizeof(manufacturer_data.layer_name) - 1);
-        manufacturer_data.layer_name[sizeof(manufacturer_data.layer_name) - 1] = '\0';
+        size_t len = strlen(layer_name);
+        if (len > sizeof(manufacturer_data.layer_name)) {
+            len = sizeof(manufacturer_data.layer_name);
+        }
+        memcpy(manufacturer_data.layer_name, layer_name, len);
     } else {
         snprintf(manufacturer_data.layer_name, sizeof(manufacturer_data.layer_name),
                  "L%d", layer % 10);

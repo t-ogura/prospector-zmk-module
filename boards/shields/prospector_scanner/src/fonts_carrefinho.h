@@ -10,11 +10,15 @@
 
 #include <lvgl.h>
 
-/* Operator and Radii layout fonts */
+/* Shared layout fonts */
 LV_FONT_DECLARE(FG_Medium_20);              /* Modifiers, USB/BLE labels, slot labels */
+LV_FONT_DECLARE(FG_Medium_26);              /* FIELD: output indicator */
 LV_FONT_DECLARE(FR_Medium_32);              /* WPM label */
-LV_FONT_DECLARE(DINishExpanded_Light_36);   /* Layer name */
+LV_FONT_DECLARE(FR_Regular_30);             /* FIELD: battery label */
+LV_FONT_DECLARE(FR_Regular_36);             /* FIELD: layer name */
+LV_FONT_DECLARE(DINishExpanded_Light_36);   /* Operator/Radii: layer name */
 LV_FONT_DECLARE(DINish_Medium_24);          /* Battery labels */
+LV_FONT_DECLARE(DINishCondensed_SemiBold_20); /* FIELD: modifier labels */
 LV_FONT_DECLARE(DINishCondensed_SemiBold_22); /* Radii modifier labels (text mode) */
 LV_FONT_DECLARE(Symbols_Semibold_32);       /* Radii modifier symbols (Mac mode) */
 

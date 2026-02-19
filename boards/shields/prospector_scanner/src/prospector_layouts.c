@@ -11,6 +11,7 @@
 #include "prospector_layouts.h"
 #include "operator_layout.h"
 #include "radii_layout.h"
+#include "field_layout.h"
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(prospector_layouts, CONFIG_ZMK_LOG_LEVEL);
@@ -58,8 +59,10 @@ void prospector_layouts_destroy(void) {
 void prospector_layouts_set_style(prospector_layout_t layout) {
     if (!initialized) return;
 
-    /* Only support Operator and Radii */
-    if (layout != PROSPECTOR_LAYOUT_OPERATOR && layout != PROSPECTOR_LAYOUT_RADII) {
+    /* Support Field, Operator, and Radii */
+    if (layout != PROSPECTOR_LAYOUT_FIELD &&
+        layout != PROSPECTOR_LAYOUT_OPERATOR &&
+        layout != PROSPECTOR_LAYOUT_RADII) {
         layout = PROSPECTOR_LAYOUT_OPERATOR;
     }
 
@@ -83,16 +86,41 @@ prospector_layout_t prospector_layouts_get_style(void) {
 void prospector_layouts_next(void) {
     if (!initialized) return;
 
-    /* Toggle between Operator and Radii */
-    prospector_layout_t next = (current_layout == PROSPECTOR_LAYOUT_OPERATOR)
-                               ? PROSPECTOR_LAYOUT_RADII
-                               : PROSPECTOR_LAYOUT_OPERATOR;
+    /* Cycle: Field -> Operator -> Radii -> Field */
+    prospector_layout_t next;
+    switch (current_layout) {
+    case PROSPECTOR_LAYOUT_FIELD:
+        next = PROSPECTOR_LAYOUT_OPERATOR;
+        break;
+    case PROSPECTOR_LAYOUT_OPERATOR:
+        next = PROSPECTOR_LAYOUT_RADII;
+        break;
+    case PROSPECTOR_LAYOUT_RADII:
+    default:
+        next = PROSPECTOR_LAYOUT_FIELD;
+        break;
+    }
     prospector_layouts_set_style(next);
 }
 
 void prospector_layouts_prev(void) {
-    /* Same as next - just toggle between two layouts */
-    prospector_layouts_next();
+    if (!initialized) return;
+
+    /* Cycle reverse: Field <- Operator <- Radii <- Field */
+    prospector_layout_t prev;
+    switch (current_layout) {
+    case PROSPECTOR_LAYOUT_FIELD:
+        prev = PROSPECTOR_LAYOUT_RADII;
+        break;
+    case PROSPECTOR_LAYOUT_OPERATOR:
+        prev = PROSPECTOR_LAYOUT_FIELD;
+        break;
+    case PROSPECTOR_LAYOUT_RADII:
+    default:
+        prev = PROSPECTOR_LAYOUT_OPERATOR;
+        break;
+    }
+    prospector_layouts_set_style(prev);
 }
 
 void prospector_layouts_update(const struct prospector_keyboard_data *data) {
@@ -104,6 +132,24 @@ void prospector_layouts_update(const struct prospector_keyboard_data *data) {
     cached_data = *data;
 
     update_current_layout();
+}
+
+void prospector_layouts_cycle_palette(void) {
+    if (!initialized) return;
+
+    switch (current_layout) {
+    case PROSPECTOR_LAYOUT_FIELD:
+        field_layout_cycle_palette();
+        break;
+    case PROSPECTOR_LAYOUT_OPERATOR:
+        operator_layout_cycle_palette();
+        break;
+    case PROSPECTOR_LAYOUT_RADII:
+        radii_layout_cycle_palette();
+        break;
+    default:
+        break;
+    }
 }
 
 const char *prospector_layouts_get_name(prospector_layout_t layout) {
@@ -125,6 +171,9 @@ const char *prospector_layouts_get_name(prospector_layout_t layout) {
 
 static void destroy_current_layout(void) {
     switch (current_layout) {
+    case PROSPECTOR_LAYOUT_FIELD:
+        field_layout_destroy();
+        break;
     case PROSPECTOR_LAYOUT_OPERATOR:
         operator_layout_destroy();
         break;
@@ -140,6 +189,9 @@ static void create_current_layout(void) {
     if (!parent_obj) return;
 
     switch (current_layout) {
+    case PROSPECTOR_LAYOUT_FIELD:
+        field_layout_create(parent_obj);
+        break;
     case PROSPECTOR_LAYOUT_OPERATOR:
         operator_layout_create(parent_obj);
         break;
@@ -175,6 +227,16 @@ static void update_current_layout(void) {
     bool ble_bonded = cached_data.ble_bonded;
 
     switch (current_layout) {
+    case PROSPECTOR_LAYOUT_FIELD:
+        field_layout_update(
+            active_layer, layer_name,
+            battery_level, battery_connected,
+            peripheral_battery, peripheral_connected,
+            wpm, modifier_flags,
+            usb_connected, ble_profile,
+            ble_connected, ble_bonded
+        );
+        break;
     case PROSPECTOR_LAYOUT_OPERATOR:
         operator_layout_update(
             active_layer, layer_name,

@@ -12,6 +12,7 @@
  *   "prosp/layers"      - max_layers (uint8_t) + slide_mode (bool)
  *   "prosp/channel"     - scanner channel (uint8_t)
  *   "prosp/layout"      - layout style (uint8_t)
+ *   "prosp/batviz"      - scanner battery visibility (bool)
  */
 
 #include "display_settings.h"
@@ -62,6 +63,8 @@ static uint8_t scanner_channel =
 #endif
 
 static uint8_t layout_style = 2; /* PROSPECTOR_LAYOUT_OPERATOR = 2 */
+
+static bool battery_visible = IS_ENABLED(CONFIG_PROSPECTOR_BATTERY_SUPPORT);
 
 static bool settings_loaded = false;
 
@@ -124,6 +127,18 @@ static int display_settings_handle_set(const char *name, size_t len,
         return rc;
     }
 
+    if (settings_name_steq(name, "batviz", &next) && !next) {
+        if (len != sizeof(battery_visible)) {
+            return -EINVAL;
+        }
+        rc = read_cb(cb_arg, &battery_visible, sizeof(battery_visible));
+        if (rc >= 0) {
+            LOG_INF("Loaded battery_visible: %d", battery_visible);
+            return 0;
+        }
+        return rc;
+    }
+
     return -ENOENT;
 }
 
@@ -139,6 +154,7 @@ static void do_save(void) {
     settings_save_one("prosp/layers", &layers, sizeof(layers));
     settings_save_one("prosp/channel", &scanner_channel, sizeof(scanner_channel));
     settings_save_one("prosp/layout", &layout_style, sizeof(layout_style));
+    settings_save_one("prosp/batviz", &battery_visible, sizeof(battery_visible));
     dirty = false;
     LOG_INF("Display settings saved to NVS");
 }
@@ -171,10 +187,10 @@ void display_settings_init(void) {
 #endif
 
     settings_loaded = true;
-    LOG_INF("Display settings initialized: bright=%d/%d%%, layers=%d/%s, ch=%d, layout=%d",
+    LOG_INF("Display settings initialized: bright=%d/%d%%, layers=%d/%s, ch=%d, layout=%d, batviz=%d",
             brightness.auto_enabled, brightness.manual_level,
             layers.max_layers, layers.slide_mode ? "slide" : "list",
-            scanner_channel, layout_style);
+            scanner_channel, layout_style, battery_visible);
 }
 
 void display_settings_save_if_dirty(void) {
@@ -263,5 +279,19 @@ void display_settings_set_layout(uint8_t layout) {
         return;
     }
     layout_style = layout;
+    mark_dirty();
+}
+
+/* ========== Battery Visibility Getters/Setters ========== */
+
+bool display_settings_get_battery_visible(void) {
+    return battery_visible;
+}
+
+void display_settings_set_battery_visible(bool visible) {
+    if (battery_visible == visible) {
+        return;
+    }
+    battery_visible = visible;
     mark_dirty();
 }

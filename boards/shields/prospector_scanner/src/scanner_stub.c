@@ -69,6 +69,7 @@ struct pending_display_data {
 
     /* Cached data for LVGL update */
     char device_name[MAX_NAME_LEN];
+    char layer_name[4];
     int layer;
     int wpm;
     bool usb_ready;
@@ -199,9 +200,8 @@ static float rate_history[RATE_HISTORY_SIZE] = {0};
 static int rate_history_idx = 0;
 static bool rate_history_filled = false;  /* True after first full cycle */
 
-/* External flags from custom_status_screen.c */
+/* External flag from custom_status_screen.c */
 extern volatile bool transition_in_progress;
-extern volatile bool prospector_display_active;
 
 /* Scanner battery update interval */
 static uint32_t scanner_battery_last_update = 0;
@@ -212,22 +212,24 @@ static void display_update_work_handler(struct k_work *work) {
 
     display_update_pending = false;
 
-    /* Skip ALL updates when Pong Wars is active (different LVGL screen) */
-    if (prospector_display_active) {
-        return;
-    }
-
     /* Skip update if screen transition in progress */
     if (transition_in_progress) {
         LOG_DBG("Skipping update - transition in progress");
         return;
     }
 
-    /* Update scanner's own battery periodically */
+    /* Update scanner's own battery periodically (via pending flag, no direct LVGL calls) */
     uint32_t now = k_uptime_get_32();
     if (scanner_battery_last_update == 0 ||
         (now - scanner_battery_last_update) >= SCANNER_BATTERY_UPDATE_INTERVAL_MS) {
-        scanner_msg_send_battery_update();
+        int scanner_battery_level = 0;
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+        scanner_battery_level = zmk_battery_state_of_charge();
+#endif
+        if (scanner_battery_level > 0) {
+            pending_data.scanner_battery = scanner_battery_level;
+            pending_data.scanner_battery_pending = true;
+        }
         scanner_battery_last_update = now;
     }
 
@@ -280,6 +282,7 @@ static void display_update_work_handler(struct k_work *work) {
     /* Store data in pending structure - NO LVGL calls here! */
     strncpy(pending_data.device_name, name, MAX_NAME_LEN - 1);
     pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
+    memcpy(pending_data.layer_name, data.layer_name, sizeof(pending_data.layer_name));
     pending_data.layer = data.active_layer;
     pending_data.wpm = data.wpm_value;
     pending_data.usb_ready = (data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
@@ -340,11 +343,6 @@ static void display_update_work_handler(struct k_work *work) {
 }
 
 static void schedule_display_update(void) {
-    /* Skip scheduling entirely when Pong Wars is active */
-    if (prospector_display_active) {
-        return;
-    }
-
     if (!display_update_pending) {
         display_update_pending = true;
         /* Schedule with small delay to batch rapid updates */
@@ -473,21 +471,17 @@ int scanner_msg_send_tap(int16_t x, int16_t y) {
 }
 
 int scanner_msg_send_battery_update(void) {
-    /* Skip during Pong Wars to avoid LVGL thread conflicts */
-    if (prospector_display_active) {
-        return 0;
-    }
-
-    /* Read local scanner battery from ZMK battery API */
+    /* Read local scanner battery from ZMK battery API and set pending flag.
+     * Actual LVGL update happens in main thread via pending_update_timer_cb. */
     int scanner_battery_level = 0;
 
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     scanner_battery_level = zmk_battery_state_of_charge();
 #endif
 
-    /* Only update if we got a valid reading */
     if (scanner_battery_level > 0) {
-        display_update_scanner_battery(scanner_battery_level);
+        pending_data.scanner_battery = scanner_battery_level;
+        pending_data.scanner_battery_pending = true;
     }
 
     msgs_sent++;

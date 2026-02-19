@@ -32,6 +32,7 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
 
     # Prospector Display layouts (Carrefinho-inspired)
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/prospector_layouts.c)
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/field_layout.c)
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/operator_layout.c)
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/radii_layout.c)
 

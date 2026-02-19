@@ -62,6 +62,11 @@ static int64_t last_swipe_time = 0;
 // Flag to prevent duplicate events (hardware gesture + software detection)
 static bool swipe_already_raised = false;
 
+// Double-tap detection
+#define DOUBLE_TAP_THRESHOLD 10   /* Max movement for tap (pixels) */
+#define DOUBLE_TAP_INTERVAL_MS 350 /* Max interval between two taps */
+static int64_t last_tap_time = 0;
+
 // Helper function to raise swipe gesture event (thread-safe)
 // Uses ZMK event system - listener runs in main thread, safe for LVGL
 static void raise_swipe_event(enum swipe_direction direction) {
@@ -193,7 +198,7 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
                 // Touch is being held (dragging) - just log current position (reduced logging)
                 LOG_DBG("Dragging at (%d, %d)", current_x, current_y);
             } else {
-                // Touch UP - Software swipe detection (fallback if no hardware gesture)
+                // Touch UP - Software swipe or tap detection
                 if (!swipe_already_raised && swipe_state.in_progress) {
                     int16_t raw_dx = current_x - swipe_state.start_x;
                     int16_t raw_dy = current_y - swipe_state.start_y;
@@ -212,6 +217,16 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
                     } else if (abs_dx > abs_dy && abs_dx > SWIPE_THRESHOLD) {
                         LOG_INF("SW SWIPE: %s (dx=%d)", dx > 0 ? "RIGHT" : "LEFT", dx);
                         raise_swipe_event(dx > 0 ? SWIPE_DIRECTION_RIGHT : SWIPE_DIRECTION_LEFT);
+                    } else if (abs_dx <= DOUBLE_TAP_THRESHOLD && abs_dy <= DOUBLE_TAP_THRESHOLD) {
+                        // Short tap detected - check for double-tap
+                        int64_t tap_now = k_uptime_get();
+                        if ((tap_now - last_tap_time) < DOUBLE_TAP_INTERVAL_MS && last_tap_time > 0) {
+                            LOG_INF("DOUBLE TAP detected");
+                            last_tap_time = 0;  // Reset to prevent triple-tap
+                            raise_swipe_event(SWIPE_DIRECTION_DOUBLE_TAP);
+                        } else {
+                            last_tap_time = tap_now;
+                        }
                     }
                 }
 

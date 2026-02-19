@@ -60,4 +60,9 @@ void display_settings_set_channel(uint8_t channel);
 uint8_t display_settings_get_layout(void);
 void display_settings_set_layout(uint8_t layout);
 
+/* ========== Scanner Battery Visibility ========== */
+
+bool display_settings_get_battery_visible(void);
+void display_settings_set_battery_visible(bool visible);
+
 #endif /* DISPLAY_SETTINGS_H */

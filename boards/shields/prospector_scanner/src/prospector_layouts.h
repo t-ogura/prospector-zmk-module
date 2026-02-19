@@ -105,6 +105,11 @@ void prospector_layouts_prev(void);
 void prospector_layouts_update(const struct prospector_keyboard_data *data);
 
 /**
+ * @brief Cycle the color palette of the current layout
+ */
+void prospector_layouts_cycle_palette(void);
+
+/**
  * @brief Get the name of a layout style
  * @param layout Layout style
  * @return Human-readable name

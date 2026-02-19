@@ -47,6 +47,7 @@ struct pending_display_data {
     volatile bool signal_update_pending;  /* Signal widget updates separately (1Hz) */
     volatile bool no_keyboards;           /* True when all keyboards timed out */
     char device_name[MAX_NAME_LEN];
+    char layer_name[4];
     int layer;
     int wpm;
     bool usb_ready;
@@ -295,9 +296,10 @@ static void load_display_settings(void) {
     ds_manual_brightness = display_settings_get_manual_brightness();
     ds_max_layers = display_settings_get_max_layers();
     ds_layer_slide_mode = display_settings_get_layer_slide_mode();
-    LOG_INF("NVS settings loaded: bright=%d/%d%%, layers=%d, slide=%d",
+    ds_battery_visible = display_settings_get_battery_visible();
+    LOG_INF("NVS settings loaded: bright=%d/%d%%, layers=%d, slide=%d, batviz=%d",
             ds_auto_brightness_enabled, ds_manual_brightness,
-            ds_max_layers, ds_layer_slide_mode);
+            ds_max_layers, ds_layer_slide_mode, ds_battery_visible);
 
     /* Apply saved brightness setting */
     if (ds_auto_brightness_enabled) {
@@ -561,9 +563,9 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
             kb_data.has_dynamic_data = true;
             strncpy(kb_data.keyboard_name, data.device_name,
                     sizeof(kb_data.keyboard_name) - 1);
-            /* Use layer name from v1 ADV (3 chars, e.g. "Bas", "Nav") */
-            /* layer_name field will be empty if keyboard sends "L0" format */
-            kb_data.current_layer_name[0] = '\0';
+            /* Layer name from BLE advertisement (4 chars, not null-terminated) */
+            memcpy(kb_data.current_layer_name, data.layer_name, 4);
+            kb_data.current_layer_name[4] = '\0';
             prospector_layouts_update(&kb_data);
         } else {
             /* SCREEN_MAIN: Update YADS-style widgets */
@@ -2266,6 +2268,7 @@ static void ds_battery_switch_event_cb(lv_event_t *e) {
 
     lv_obj_t *sw = lv_event_get_target(e);
     ds_battery_visible = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    display_settings_set_battery_visible(ds_battery_visible);
     LOG_INF("Scanner battery widget: %s", ds_battery_visible ? "visible" : "hidden");
 
     /* Immediately update scanner battery widget visibility using cached value */
@@ -3502,6 +3505,14 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
             ks_close_channel_popup();  /* Close popup if open */
             ks_channel_increment();
             LOG_INF(">>> Keyboard Select: Channel incremented");
+        }
+        break;
+
+    case SWIPE_DIRECTION_DOUBLE_TAP:
+        /* Double-tap: cycle color palette on Prospector Display */
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            LOG_INF(">>> Prospector Display: cycle palette (double-tap)");
+            prospector_layouts_cycle_palette();
         }
         break;
 

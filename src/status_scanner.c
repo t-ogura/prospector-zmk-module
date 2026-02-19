@@ -330,7 +330,7 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
 
-        LOG_INF("New %s device found: %s (slot %d)", role_str, adv_data->layer_name, index);
+        LOG_INF("New %s device found: %.4s (slot %d)", role_str, adv_data->layer_name, index);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_FOUND, index);
     } else if (actual_data_change) {
         // Only notify if data actually changed
@@ -339,12 +339,12 @@ static void process_advertisement(const struct zmk_status_adv_data *adv_data, in
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_PERIPHERAL) role_str = "PERIPHERAL";
         else if (adv_data->device_role == ZMK_DEVICE_ROLE_STANDALONE) role_str = "STANDALONE";
 
-        LOG_DBG("%s device updated: %s, battery: %d%%",
+        LOG_DBG("%s device updated: %.4s, battery: %d%%",
                role_str, adv_data->layer_name, adv_data->battery_level);
         notify_event(ZMK_STATUS_SCANNER_EVENT_KEYBOARD_UPDATED, index);
     } else {
         // Data unchanged - just update last_seen timestamp silently
-        LOG_DBG("Heartbeat from %s (no data change)", adv_data->layer_name);
+        LOG_DBG("Heartbeat from %.4s (no data change)", adv_data->layer_name);
     }
 }
 
@@ -476,10 +476,11 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                     uint8_t keyboard_channel = data->channel;
 
                     // Accept if:
-                    // - Scanner channel is 0 (accept all)
+                    // - Scanner channel is 0 or >= 10 (accept all; UI uses CHANNEL_ALL=10)
                     // - Keyboard channel is 0 (broadcast to all)
                     // - Channels match
                     bool channel_match = (scanner_channel == 0 ||
+                                        scanner_channel >= 10 ||
                                         keyboard_channel == 0 ||
                                         scanner_channel == keyboard_channel);
 
@@ -569,7 +570,7 @@ static void timeout_work_handler(struct k_work *work) {
                    i, age, KEYBOARD_TIMEOUT_MS);
 
             if (age > KEYBOARD_TIMEOUT_MS) {
-                LOG_INF("Keyboard timeout: %s (slot %d)", keyboards[i].data.layer_name, i);
+                LOG_INF("Keyboard timeout: %.4s (slot %d)", keyboards[i].data.layer_name, i);
                 keyboards[i].active = false;
                 timeout_indices[timeout_count++] = i;
             }
@@ -682,7 +683,7 @@ int zmk_status_scanner_get_active_count(void) {
     for (int i = 0; i < ZMK_STATUS_SCANNER_MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) {
             uint32_t age = now - keyboards[i].last_seen;
-            LOG_DBG("Slot %d: ACTIVE, last_seen=%u, age=%ums, name=%s",
+            LOG_DBG("Slot %d: ACTIVE, last_seen=%u, age=%ums, name=%.4s",
                    i, keyboards[i].last_seen, age, keyboards[i].data.layer_name);
             count++;
         } else {
