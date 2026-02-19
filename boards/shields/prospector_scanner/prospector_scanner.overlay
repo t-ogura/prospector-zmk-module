@@ -141,9 +141,15 @@
     };
 };
 
-/* ========== I2C Bus (Step 5a) ========== */
+/* ========== I2C Bus ========== */
 
-/* I2C0 pinctrl for touch sensor and light sensor */
+/*
+ * I2C0 configuration for touch sensor (CST816S) and light sensor (APDS9960).
+ * This MUST be in the shield overlay (not board-level boards/*.overlay)
+ * because I2C0 shares hardware peripheral 0x40003000 with SPI0 on nRF52840.
+ * Keyboards using SPI0 (e.g. PAW3222 trackball) would conflict if I2C0
+ * were enabled at the board level for all builds.
+ */
 &pinctrl {
     i2c0_default: i2c0_default {
         group1 {
