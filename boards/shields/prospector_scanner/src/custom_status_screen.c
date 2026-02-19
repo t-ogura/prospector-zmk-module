@@ -34,6 +34,7 @@
 #include "fonts.h"  /* NerdFont declarations */
 #include "touch_handler.h"  /* For LVGL input device registration */
 #include "brightness_control.h"  /* For auto brightness sensor control */
+#include "prospector_layouts.h"  /* Carrefinho-inspired display layouts */
 
 LOG_MODULE_REGISTER(display_screen, LOG_LEVEL_INF);
 
@@ -75,7 +76,7 @@ enum screen_state {
     SCREEN_DISPLAY_SETTINGS,
     SCREEN_SYSTEM_SETTINGS,
     SCREEN_KEYBOARD_SELECT,
-    SCREEN_PONG_WARS,
+    SCREEN_PROSPECTOR_DISPLAY,
 };
 
 static enum screen_state current_screen = SCREEN_MAIN;
@@ -84,8 +85,8 @@ static lv_obj_t *screen_obj = NULL;
 /* Transition protection flag - checked by work queues */
 volatile bool transition_in_progress = false;
 
-/* Pong Wars active flag - stops all background display updates */
-volatile bool pong_wars_active = false;
+/* Prospector Display active flag - modifies data routing */
+volatile bool prospector_display_active = false;
 
 /* Pending swipe direction - set by ISR listener, processed by LVGL timer */
 static volatile enum swipe_direction pending_swipe = SWIPE_DIRECTION_NONE;
@@ -104,8 +105,8 @@ static void destroy_system_settings_widgets(void);
 static void create_system_settings_widgets(void);
 static void destroy_keyboard_select_widgets(void);
 static void create_keyboard_select_widgets(void);
-static void destroy_pong_wars_widgets(void);
-static void create_pong_wars_widgets(void);
+static void destroy_prospector_display_widgets(void);
+static void create_prospector_display_widgets(void);
 static void swipe_process_timer_cb(lv_timer_t *timer);
 
 /* Display update functions - called from pending_update_timer_cb */
@@ -474,8 +475,8 @@ static char last_keyboard_name[MAX_NAME_LEN] = "";  /* Track keyboard changes */
 static void pending_update_timer_cb(lv_timer_t *timer) {
     ARG_UNUSED(timer);
 
-    /* Only process updates on main screen */
-    if (current_screen != SCREEN_MAIN) {
+    /* Only process updates on main screen or prospector display */
+    if (current_screen != SCREEN_MAIN && current_screen != SCREEN_PROSPECTOR_DISPLAY) {
         return;
     }
 
@@ -523,20 +524,43 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
 #endif
         }
 
-        /* Process all updates in main thread - safe to call LVGL */
-        display_update_device_name(data.device_name);
-        display_update_layer(data.layer);
-        display_update_wpm(data.wpm);
-        display_update_connection(data.usb_ready, data.ble_connected,
-                                  data.ble_bonded, data.profile);
-        display_update_modifiers(data.modifiers);
-
-        /* Battery update */
-        if (data.bat[1] == 0 && data.bat[2] == 0 && data.bat[3] == 0) {
-            display_update_keyboard_battery_4(data.bat[0], 0, 0, 0);
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            /* Route data to Prospector Display layouts */
+            struct prospector_keyboard_data kb_data = {0};
+            kb_data.active_layer = data.layer;
+            kb_data.modifier_flags = data.modifiers;
+            kb_data.wpm_value = data.wpm;
+            kb_data.battery_level = data.bat[0];
+            kb_data.peripheral_battery[0] = data.bat[1];
+            kb_data.peripheral_battery[1] = data.bat[2];
+            kb_data.peripheral_battery[2] = data.bat[3];
+            kb_data.profile_slot = data.profile;
+            kb_data.usb_connected = data.usb_ready;
+            kb_data.ble_connected = data.ble_connected;
+            kb_data.ble_bonded = data.ble_bonded;
+            kb_data.has_dynamic_data = true;
+            strncpy(kb_data.keyboard_name, data.device_name,
+                    sizeof(kb_data.keyboard_name) - 1);
+            /* Use layer name from v1 ADV (3 chars, e.g. "Bas", "Nav") */
+            /* layer_name field will be empty if keyboard sends "L0" format */
+            kb_data.current_layer_name[0] = '\0';
+            prospector_layouts_update(&kb_data);
         } else {
-            display_update_keyboard_battery_4(data.bat[0], data.bat[1],
-                                              data.bat[2], data.bat[3]);
+            /* SCREEN_MAIN: Update YADS-style widgets */
+            display_update_device_name(data.device_name);
+            display_update_layer(data.layer);
+            display_update_wpm(data.wpm);
+            display_update_connection(data.usb_ready, data.ble_connected,
+                                      data.ble_bonded, data.profile);
+            display_update_modifiers(data.modifiers);
+
+            /* Battery update */
+            if (data.bat[1] == 0 && data.bat[2] == 0 && data.bat[3] == 0) {
+                display_update_keyboard_battery_4(data.bat[0], 0, 0, 0);
+            } else {
+                display_update_keyboard_battery_4(data.bat[0], data.bat[1],
+                                                  data.bat[2], data.bat[3]);
+            }
         }
     }
 
@@ -3225,439 +3249,27 @@ static void create_keyboard_select_widgets(void) {
     LOG_INF("Keyboard select widgets created (%d keyboards)", ks_entry_count);
 }
 
-/* ========== Pong Wars Screen ========== */
+/* ========== Prospector Display (Carrefinho-inspired layouts) ========== */
 
-/*
- * Pong Wars - Pre-allocated cell version (stable)
- * - ALL cell objects created at init (no dynamic alloc during game)
- * - Cell conversion just changes color (no create/delete)
- * - Much more stable on resource-constrained devices
- */
-
-#define PW_CELL_SIZE 20       /* Cell size in pixels */
-#define PW_GRID_W 12          /* 240 / 20 = 12 cells */
-#define PW_GRID_H 9           /* 180 / 20 = 9 cells */
-#define PW_NUM_CELLS (PW_GRID_W * PW_GRID_H)  /* 108 cells total */
-#define PW_NUM_BALLS 2
-#define PW_BALL_RADIUS 6
-#define PW_ARENA_W 240        /* 80% of 280 */
-#define PW_ARENA_H 180        /* 75% of 240 */
-#define PW_OFFSET_X 20        /* (280 - 240) / 2 */
-#define PW_OFFSET_Y 30        /* Top margin for score */
-
-/* Pastel color palettes - {team1_bg, team2_bg, team1_ball, team2_ball} */
-static const uint32_t pw_color_palettes[][4] = {
-    {0xFFB5E8, 0xB5DEFF, 0xFF4D6D, 0x2D8CFF},  /* Pink vs Blue */
-    {0xFFDEB5, 0xB5FFD9, 0xFF8C42, 0x2ECC71},  /* Orange vs Green */
-    {0xE8B5FF, 0xFFFDB5, 0x9B59B6, 0xF1C40F},  /* Purple vs Yellow */
-    {0xB5FFE8, 0xFFB5C5, 0x1ABC9C, 0xE74C3C},  /* Cyan vs Red */
-    {0xD5B5FF, 0xB5F0FF, 0x8E44AD, 0x3498DB},  /* Violet vs Sky */
-    {0xFFE5B5, 0xC5FFB5, 0xE67E22, 0x27AE60},  /* Peach vs Lime */
-};
-#define PW_NUM_PALETTES (sizeof(pw_color_palettes) / sizeof(pw_color_palettes[0]))
-
-/* Current colors (set randomly at start) */
-static uint32_t pw_color_team1 = 0xFFB5E8;
-static uint32_t pw_color_team2 = 0xB5DEFF;
-static uint32_t pw_color_ball1 = 0xFF4D6D;
-static uint32_t pw_color_ball2 = 0x2D8CFF;
-
-/* State */
-static lv_timer_t *pw_timer = NULL;
-static uint8_t pw_grid[PW_NUM_CELLS];  /* Cell ownership: 0=team1, 1=team2 */
-static lv_obj_t *pw_cell_objs[PW_NUM_CELLS];  /* Pre-allocated cell objects */
-static lv_obj_t *pw_arena_container = NULL;  /* Container for arena */
-static lv_obj_t *pw_ball_objs[PW_NUM_BALLS];
-static lv_obj_t *pw_score_label1 = NULL;  /* Team1 score */
-static lv_obj_t *pw_score_label2 = NULL;  /* Team2 score */
-static bool pw_initialized = false;
-static uint32_t pw_rand_seed = 12345;
-static int16_t pw_base_speed = 25;  /* Random base speed */
-
-/* Ball state - pixel coordinates with fixed-point velocity */
-struct pw_ball {
-    int16_t x, y;      /* Pixel position */
-    int16_t dx, dy;    /* Velocity (pixels * 10 for precision) */
-    uint8_t team;
-};
-static struct pw_ball pw_balls[PW_NUM_BALLS];
-static int pw_score1 = 0, pw_score2 = 0;
-
-/* Forward declarations */
-static void pw_tap_handler(lv_event_t *e);
-static void pw_reset_game(void);
-
-/* Simple random number generator */
-static uint32_t pw_rand(void) {
-    pw_rand_seed = pw_rand_seed * 1103515245 + 12345;
-    return (pw_rand_seed >> 16) & 0x7FFF;
+static void destroy_prospector_display_widgets(void) {
+    prospector_display_active = false;
+    prospector_layouts_destroy();
+    LOG_INF("Prospector Display destroyed");
 }
 
-/* Initialize grid data and update cell colors */
-static void pw_init_grid(void) {
-    pw_score1 = 0;
-    pw_score2 = 0;
-    for (int y = 0; y < PW_GRID_H; y++) {
-        for (int x = 0; x < PW_GRID_W; x++) {
-            int idx = y * PW_GRID_W + x;
-            pw_grid[idx] = (x < PW_GRID_W / 2) ? 0 : 1;
-            if (pw_grid[idx] == 0) pw_score1++; else pw_score2++;
+static void create_prospector_display_widgets(void) {
+    LOG_INF("Creating Prospector Display...");
 
-            /* Update pre-allocated cell color */
-            if (pw_cell_objs[idx]) {
-                uint32_t color = (pw_grid[idx] == 0) ? pw_color_team1 : pw_color_team2;
-                lv_obj_set_style_bg_color(pw_cell_objs[idx], lv_color_hex(color), 0);
-            }
-        }
-    }
-}
+    /* Dark background */
+    lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
 
-static void pw_select_random_palette(void) {
-    int idx = pw_rand() % PW_NUM_PALETTES;
-    pw_color_team1 = pw_color_palettes[idx][0];
-    pw_color_team2 = pw_color_palettes[idx][1];
-    pw_color_ball1 = pw_color_palettes[idx][2];
-    pw_color_ball2 = pw_color_palettes[idx][3];
-    LOG_INF("Pong Wars palette: %d", idx);
-}
+    /* Initialize layout system on the screen object */
+    prospector_layouts_init(screen_obj);
 
-static void pw_init_balls(void) {
-    /* Use uptime as random seed */
-    pw_rand_seed = k_uptime_get_32();
+    prospector_display_active = true;
 
-    /* Random color palette */
-    pw_select_random_palette();
-
-    /* Random base speed (40-60) - faster gameplay */
-    pw_base_speed = 40 + (pw_rand() % 21);
-    LOG_INF("Pong Wars speed: %d", pw_base_speed);
-
-    for (int i = 0; i < PW_NUM_BALLS; i++) {
-        pw_balls[i].team = i;  /* Ball 0 = team 0, Ball 1 = team 1 */
-
-        /* Start position: team 0 on left, team 1 on right */
-        if (i == 0) {
-            pw_balls[i].x = PW_ARENA_W / 4;
-            pw_balls[i].y = PW_ARENA_H / 2;
-        } else {
-            pw_balls[i].x = PW_ARENA_W * 3 / 4;
-            pw_balls[i].y = PW_ARENA_H / 2;
-        }
-
-        /* Random velocity with random base speed */
-        int angle_idx = pw_rand() % 8;
-        /* Vary velocity slightly around base_speed */
-        int vx = pw_base_speed + (pw_rand() % 10) - 5;
-        int vy = pw_base_speed + (pw_rand() % 10) - 5;
-
-        /* Direction based on angle index */
-        int sx = (angle_idx < 4) ? 1 : -1;
-        int sy = ((angle_idx % 4) < 2) ? 1 : -1;
-
-        pw_balls[i].dx = vx * sx;
-        pw_balls[i].dy = vy * sy;
-
-        /* Team 0 goes right, Team 1 goes left initially */
-        if (i == 0 && pw_balls[i].dx < 0) pw_balls[i].dx = -pw_balls[i].dx;
-        if (i == 1 && pw_balls[i].dx > 0) pw_balls[i].dx = -pw_balls[i].dx;
-    }
-}
-
-/* Update cell color (no object creation/deletion!) */
-static void pw_update_cell_color(int gx, int gy, uint8_t team) {
-    int idx = gy * PW_GRID_W + gx;
-    if (idx < 0 || idx >= PW_NUM_CELLS) return;
-    if (!pw_cell_objs[idx]) return;
-
-    uint32_t color = (team == 0) ? pw_color_team1 : pw_color_team2;
-    lv_obj_set_style_bg_color(pw_cell_objs[idx], lv_color_hex(color), 0);
-}
-
-static void pw_update_ball_display(int i) {
-    if (!pw_ball_objs[i]) return;
-    lv_obj_set_pos(pw_ball_objs[i], pw_balls[i].x - PW_BALL_RADIUS, pw_balls[i].y - PW_BALL_RADIUS);
-}
-
-static void pw_update_score(void) {
-    char buf[8];
-    if (pw_score_label1) {
-        snprintf(buf, sizeof(buf), "%d", pw_score1);
-        lv_label_set_text(pw_score_label1, buf);
-    }
-    if (pw_score_label2) {
-        snprintf(buf, sizeof(buf), "%d", pw_score2);
-        lv_label_set_text(pw_score_label2, buf);
-    }
-}
-
-static void pw_step(void) {
-    if (!pw_initialized) return;
-
-    for (int i = 0; i < PW_NUM_BALLS; i++) {
-        struct pw_ball *b = &pw_balls[i];
-
-        /* Move ball (velocity is *10, so divide by 10) */
-        int new_x = b->x + b->dx / 10;
-        int new_y = b->y + b->dy / 10;
-
-        /* Bounce off walls */
-        if (new_x < PW_BALL_RADIUS) {
-            new_x = PW_BALL_RADIUS;
-            b->dx = -b->dx;
-        } else if (new_x > PW_ARENA_W - PW_BALL_RADIUS) {
-            new_x = PW_ARENA_W - PW_BALL_RADIUS;
-            b->dx = -b->dx;
-        }
-        if (new_y < PW_BALL_RADIUS) {
-            new_y = PW_BALL_RADIUS;
-            b->dy = -b->dy;
-        } else if (new_y > PW_ARENA_H - PW_BALL_RADIUS) {
-            new_y = PW_ARENA_H - PW_BALL_RADIUS;
-            b->dy = -b->dy;
-        }
-
-        /* Check which grid cell we're in */
-        int gx = new_x / PW_CELL_SIZE;
-        int gy = new_y / PW_CELL_SIZE;
-        if (gx >= 0 && gx < PW_GRID_W && gy >= 0 && gy < PW_GRID_H) {
-            int idx = gy * PW_GRID_W + gx;
-            if (pw_grid[idx] != b->team) {
-                /* Convert cell! (just update color, no object creation) */
-                pw_grid[idx] = b->team;
-                pw_update_cell_color(gx, gy, b->team);
-                if (b->team == 0) { pw_score1++; pw_score2--; }
-                else { pw_score2++; pw_score1--; }
-
-                /* Bounce - vary the angle slightly */
-                int r = pw_rand() % 3;
-                if (r == 0) b->dx = -b->dx;
-                else if (r == 1) b->dy = -b->dy;
-                else { b->dx = -b->dx; b->dy = -b->dy; }
-            }
-        }
-
-        b->x = new_x;
-        b->y = new_y;
-        pw_update_ball_display(i);
-    }
-}
-
-static void pw_timer_cb(lv_timer_t *timer) {
-    ARG_UNUSED(timer);
-    if (!pw_initialized) return;
-
-    /* Frame counter */
-    static uint16_t frame_count = 0;
-    frame_count++;
-
-    /* Run physics (no object creation, just color updates) */
-    pw_step();
-
-    /* Update score every ~10 frames */
-    if (frame_count % 10 == 0) {
-        pw_update_score();
-    }
-}
-
-static void destroy_pong_wars_widgets(void) {
-    /* CRITICAL: Resume background display updates */
-    pong_wars_active = false;
-
-    pw_initialized = false;
-    if (pw_timer) { lv_timer_del(pw_timer); pw_timer = NULL; }
-    /* Cell objects will be cleaned by lv_obj_clean(screen_obj) in swipe handler */
-    memset(pw_cell_objs, 0, sizeof(pw_cell_objs));
-    memset(pw_ball_objs, 0, sizeof(pw_ball_objs));
-    pw_arena_container = NULL;
-    pw_score_label1 = NULL;
-    pw_score_label2 = NULL;
-    LOG_INF("Pong Wars destroyed");
-}
-
-static void pw_tap_handler(lv_event_t *e) {
-    ARG_UNUSED(e);
-    LOG_INF("Pong Wars: tap detected, resetting...");
-    pw_reset_game();
-}
-
-static void create_pong_wars_widgets(void) {
-    LOG_INF("Creating Pong Wars (smooth version)...");
-
-    pw_initialized = false;
-    pw_init_grid();
-    pw_init_balls();  /* This sets random colors and speed */
-
-    /* Dark background for whole screen */
-    lv_obj_set_style_bg_color(screen_obj, lv_color_hex(0x1a1a2e), 0);
-
-    /* Title "Pong Wars" centered at top (white text) */
-    lv_obj_t *title = lv_label_create(screen_obj);
-    if (title) {
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(title, lv_color_white(), 0);
-        lv_label_set_text(title, "Pong Wars");
-        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
-    }
-
-    /* Score labels - aligned with arena edges */
-    /* Arena: x=PW_OFFSET_X(20) to x=PW_OFFSET_X+PW_ARENA_W(260) */
-    pw_score_label1 = lv_label_create(screen_obj);
-    if (pw_score_label1) {
-        lv_obj_set_style_text_font(pw_score_label1, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(pw_score_label1, lv_color_hex(pw_color_ball1), 0);
-        lv_obj_set_style_bg_color(pw_score_label1, lv_color_hex(pw_color_team1), 0);
-        lv_obj_set_style_bg_opa(pw_score_label1, LV_OPA_COVER, 0);
-        lv_obj_set_style_pad_hor(pw_score_label1, 8, 0);
-        lv_obj_set_style_pad_ver(pw_score_label1, 2, 0);
-        lv_obj_set_style_radius(pw_score_label1, 6, 0);
-        lv_obj_set_pos(pw_score_label1, PW_OFFSET_X, 6);  /* Left edge of arena */
-    }
-
-    pw_score_label2 = lv_label_create(screen_obj);
-    if (pw_score_label2) {
-        lv_obj_set_style_text_font(pw_score_label2, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(pw_score_label2, lv_color_hex(pw_color_ball2), 0);
-        lv_obj_set_style_bg_color(pw_score_label2, lv_color_hex(pw_color_team2), 0);
-        lv_obj_set_style_bg_opa(pw_score_label2, LV_OPA_COVER, 0);
-        lv_obj_set_style_pad_hor(pw_score_label2, 8, 0);
-        lv_obj_set_style_pad_ver(pw_score_label2, 2, 0);
-        lv_obj_set_style_radius(pw_score_label2, 6, 0);
-        /* Right-align to arena right edge (arena ends at x=260, label ~30px wide) */
-        lv_obj_set_pos(pw_score_label2, PW_OFFSET_X + PW_ARENA_W - 35, 6);
-    }
-
-    /* Arena container with rounded border */
-    pw_arena_container = lv_obj_create(screen_obj);
-    if (pw_arena_container) {
-        lv_obj_remove_style_all(pw_arena_container);
-        lv_obj_set_size(pw_arena_container, PW_ARENA_W, PW_ARENA_H);
-        lv_obj_set_pos(pw_arena_container, PW_OFFSET_X, PW_OFFSET_Y);
-        lv_obj_set_style_radius(pw_arena_container, 8, 0);
-        lv_obj_set_style_clip_corner(pw_arena_container, true, 0);
-        lv_obj_set_style_border_color(pw_arena_container, lv_color_hex(0x404060), 0);
-        lv_obj_set_style_border_width(pw_arena_container, 2, 0);
-        lv_obj_clear_flag(pw_arena_container, LV_OBJ_FLAG_SCROLLABLE);
-        /* Add tap handler for reset */
-        lv_obj_add_flag(pw_arena_container, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(pw_arena_container, pw_tap_handler, LV_EVENT_CLICKED, NULL);
-    }
-
-    /* Pre-allocate ALL cell objects (no dynamic alloc during game!) */
-    for (int y = 0; y < PW_GRID_H; y++) {
-        for (int x = 0; x < PW_GRID_W; x++) {
-            int idx = y * PW_GRID_W + x;
-            lv_obj_t *cell = lv_obj_create(pw_arena_container);
-            if (!cell) continue;
-
-            lv_obj_remove_style_all(cell);
-            lv_obj_set_size(cell, PW_CELL_SIZE, PW_CELL_SIZE);
-            lv_obj_set_pos(cell, x * PW_CELL_SIZE, y * PW_CELL_SIZE);
-
-            /* Initial color based on grid position */
-            uint32_t color = (x < PW_GRID_W / 2) ? pw_color_team1 : pw_color_team2;
-            lv_obj_set_style_bg_color(cell, lv_color_hex(color), 0);
-            lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
-            lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-            pw_cell_objs[idx] = cell;
-        }
-    }
-    LOG_INF("Pre-allocated %d cell objects", PW_NUM_CELLS);
-
-    /* Create balls inside arena (using dynamic colors) */
-    lv_color_t ball_colors[2] = {lv_color_hex(pw_color_ball1), lv_color_hex(pw_color_ball2)};
-    for (int i = 0; i < PW_NUM_BALLS; i++) {
-        lv_obj_t *ball = lv_obj_create(pw_arena_container);
-        if (!ball) continue;
-        lv_obj_remove_style_all(ball);
-        lv_obj_set_size(ball, PW_BALL_RADIUS * 2, PW_BALL_RADIUS * 2);
-        lv_obj_set_style_bg_color(ball, ball_colors[pw_balls[i].team], 0);
-        lv_obj_set_style_bg_opa(ball, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(ball, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_color(ball, lv_color_white(), 0);
-        lv_obj_set_style_border_width(ball, 2, 0);
-        lv_obj_set_style_shadow_color(ball, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_shadow_width(ball, 4, 0);
-        lv_obj_set_style_shadow_opa(ball, LV_OPA_50, 0);
-        lv_obj_clear_flag(ball, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-        pw_ball_objs[i] = ball;
-        pw_update_ball_display(i);
-    }
-
-    pw_update_score();
-
-    /* Nav hint at bottom */
-    lv_obj_t *hint = lv_label_create(screen_obj);
-    if (hint) {
-        lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(hint, lv_color_hex(0x606080), 0);
-        lv_label_set_text(hint, LV_SYMBOL_RIGHT " swipe to return");
-        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -4);
-    }
-
-    pw_initialized = true;
-
-    /* CRITICAL: Stop background display updates to prevent thread conflicts */
-    pong_wars_active = true;
-
-    /* High framerate for smooth animation (30 FPS) */
-    pw_timer = lv_timer_create(pw_timer_cb, 33, NULL);  /* 30 FPS */
-    LOG_INF("Pong Wars started! (smooth mode, background updates paused)");
-}
-
-/* Reset game with new random colors and speed (pre-allocated cells version) */
-static void pw_reset_game(void) {
-    if (!pw_initialized) return;
-    if (!pw_arena_container) return;
-
-    /* Stop timer during reset */
-    pw_initialized = false;
-    if (pw_timer) {
-        lv_timer_del(pw_timer);
-        pw_timer = NULL;
-    }
-
-    /* Reinitialize grid and balls with new random colors/speed */
-    pw_init_grid();
-    pw_init_balls();
-
-    /* Update ALL pre-allocated cell colors to match new grid state */
-    for (int y = 0; y < PW_GRID_H; y++) {
-        for (int x = 0; x < PW_GRID_W; x++) {
-            int idx = y * PW_GRID_W + x;
-            if (pw_cell_objs[idx]) {
-                uint32_t color = (pw_grid[idx] == 0) ? pw_color_team1 : pw_color_team2;
-                lv_obj_set_style_bg_color(pw_cell_objs[idx], lv_color_hex(color), 0);
-            }
-        }
-    }
-
-    /* Update ball colors and positions (balls already exist) */
-    lv_color_t ball_colors[2] = {lv_color_hex(pw_color_ball1), lv_color_hex(pw_color_ball2)};
-    for (int i = 0; i < PW_NUM_BALLS; i++) {
-        if (pw_ball_objs[i]) {
-            lv_obj_set_style_bg_color(pw_ball_objs[i], ball_colors[pw_balls[i].team], 0);
-            /* Move balls to foreground */
-            lv_obj_move_foreground(pw_ball_objs[i]);
-            pw_update_ball_display(i);
-        }
-    }
-
-    /* Update score labels with new colors */
-    if (pw_score_label1) {
-        lv_obj_set_style_text_color(pw_score_label1, lv_color_hex(pw_color_ball1), 0);
-        lv_obj_set_style_bg_color(pw_score_label1, lv_color_hex(pw_color_team1), 0);
-    }
-    if (pw_score_label2) {
-        lv_obj_set_style_text_color(pw_score_label2, lv_color_hex(pw_color_ball2), 0);
-        lv_obj_set_style_bg_color(pw_score_label2, lv_color_hex(pw_color_team2), 0);
-    }
-
-    pw_update_score();
-
-    /* Restart timer */
-    pw_initialized = true;
-    pw_timer = lv_timer_create(pw_timer_cb, 33, NULL);  /* 30 FPS */
-    LOG_INF("Pong Wars reset! (new colors/speed)");
+    LOG_INF("Prospector Display created (%s)",
+            prospector_layouts_get_name(prospector_layouts_get_style()));
 }
 
 /* ========== Swipe Processing (runs in LVGL timer = Main Thread) ========== */
@@ -3733,6 +3345,12 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
 
     switch (dir) {
     case SWIPE_DIRECTION_DOWN:
+        /* Prospector Display: cycle layout */
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            LOG_INF(">>> Prospector Display: next layout");
+            prospector_layouts_next();
+            break;
+        }
         /* Main → Display Settings OR Keyboard Select → Main */
         if (current_screen == SCREEN_MAIN) {
             LOG_INF(">>> Transitioning: MAIN -> DISPLAY_SETTINGS");
@@ -3757,6 +3375,12 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
         break;
 
     case SWIPE_DIRECTION_UP:
+        /* Prospector Display: cycle layout (reverse) */
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            LOG_INF(">>> Prospector Display: prev layout");
+            prospector_layouts_prev();
+            break;
+        }
         /* Display Settings → Main OR Main → Keyboard Select */
         if (current_screen == SCREEN_DISPLAY_SETTINGS) {
             LOG_INF(">>> Transitioning: DISPLAY_SETTINGS -> MAIN");
@@ -3783,14 +3407,14 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
     case SWIPE_DIRECTION_LEFT:
         /* Main → Pong Wars OR Quick Actions → Main */
         if (current_screen == SCREEN_MAIN) {
-            LOG_INF(">>> Transitioning: MAIN -> PONG_WARS");
+            LOG_INF(">>> Transitioning: MAIN -> PROSPECTOR_DISPLAY");
             destroy_main_screen_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);
-            create_pong_wars_widgets();
+            create_prospector_display_widgets();
             ensure_lvgl_indev_registered();  /* Register for tap-to-reset */
-            current_screen = SCREEN_PONG_WARS;
+            current_screen = SCREEN_PROSPECTOR_DISPLAY;
             LOG_INF(">>> Transition complete");
         } else if (current_screen == SCREEN_SYSTEM_SETTINGS) {
             LOG_INF(">>> Transitioning: QUICK_ACTIONS -> MAIN");
@@ -3811,9 +3435,9 @@ static void swipe_process_timer_cb(lv_timer_t *timer) {
 
     case SWIPE_DIRECTION_RIGHT:
         /* Pong Wars → Main OR Main → Quick Actions */
-        if (current_screen == SCREEN_PONG_WARS) {
-            LOG_INF(">>> Transitioning: PONG_WARS -> MAIN");
-            destroy_pong_wars_widgets();
+        if (current_screen == SCREEN_PROSPECTOR_DISPLAY) {
+            LOG_INF(">>> Transitioning: PROSPECTOR_DISPLAY -> MAIN");
+            destroy_prospector_display_widgets();
             lv_obj_clean(screen_obj);
             lv_obj_set_style_bg_color(screen_obj, lv_color_black(), 0);
             lv_obj_invalidate(screen_obj);

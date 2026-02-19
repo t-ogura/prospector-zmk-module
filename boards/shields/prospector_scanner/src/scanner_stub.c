@@ -201,7 +201,7 @@ static bool rate_history_filled = false;  /* True after first full cycle */
 
 /* External flags from custom_status_screen.c */
 extern volatile bool transition_in_progress;
-extern volatile bool pong_wars_active;
+extern volatile bool prospector_display_active;
 
 /* Scanner battery update interval */
 static uint32_t scanner_battery_last_update = 0;
@@ -213,7 +213,7 @@ static void display_update_work_handler(struct k_work *work) {
     display_update_pending = false;
 
     /* Skip ALL updates when Pong Wars is active (different LVGL screen) */
-    if (pong_wars_active) {
+    if (prospector_display_active) {
         return;
     }
 
@@ -341,7 +341,7 @@ static void display_update_work_handler(struct k_work *work) {
 
 static void schedule_display_update(void) {
     /* Skip scheduling entirely when Pong Wars is active */
-    if (pong_wars_active) {
+    if (prospector_display_active) {
         return;
     }
 
@@ -474,7 +474,7 @@ int scanner_msg_send_tap(int16_t x, int16_t y) {
 
 int scanner_msg_send_battery_update(void) {
     /* Skip during Pong Wars to avoid LVGL thread conflicts */
-    if (pong_wars_active) {
+    if (prospector_display_active) {
         return 0;
     }
 

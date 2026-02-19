@@ -26,6 +26,37 @@ if(CONFIG_SHIELD_PROSPECTOR_SCANNER)
 
     # NerdFont for modifier icons
     target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/fonts/NerdFonts_Regular_40.c)
+
+    # Prospector Display layouts (Carrefinho-inspired)
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/prospector_layouts.c)
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/operator_layout.c)
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE src/radii_layout.c)
+
+    # Carrefinho custom fonts
+    target_sources_ifdef(CONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM app PRIVATE
+        src/fonts_carrefinho/DINish_Condensed_Semibold_20.c
+        src/fonts_carrefinho/DINish_Condensed_Semibold_22.c
+        src/fonts_carrefinho/DINish_Expanded_Light_36.c
+        src/fonts_carrefinho/DINish_Medium_24.c
+        src/fonts_carrefinho/FG_Medium_20.c
+        src/fonts_carrefinho/FG_Medium_21.c
+        src/fonts_carrefinho/FG_Medium_24.c
+        src/fonts_carrefinho/FG_Medium_26.c
+        src/fonts_carrefinho/FR_Medium_32.c
+        src/fonts_carrefinho/FR_Regular_30.c
+        src/fonts_carrefinho/FR_Regular_36.c
+        src/fonts_carrefinho/FR_Regular_48.c
+        src/fonts_carrefinho/FR_Thin_48.c
+        src/fonts_carrefinho/PPF_NarrowThin_64.c
+        src/fonts_carrefinho/Symbols_Bold_26.c
+        src/fonts_carrefinho/Symbols_Medium_28.c
+        src/fonts_carrefinho/Symbols_Regular_28.c
+        src/fonts_carrefinho/Symbols_Semibold_28.c
+        src/fonts_carrefinho/Symbols_Semibold_32.c
+    )
+
+    # Include path for local headers
+    target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 
 # ORIGINAL FULL BUILD - TO BE RESTORED INCREMENTALLY
