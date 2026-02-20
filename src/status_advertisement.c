@@ -404,11 +404,13 @@ static struct bt_data prospector_ad[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
-// Non-connectable, non-scannable with NRPA (different address than ZMK)
-// ADV_NONCONN_IND: scanner reads manufacturer data directly from AD packet
+// Non-connectable, non-scannable ADV_NONCONN_IND
+// NO NRPA: Using default address avoids tainting the BLE controller's
+// random address register, which broke ZMK's reconnection with bonded PCs.
+// Non-connectable → PCs ignore this ADV (won't try to connect)
 static const struct bt_le_adv_param prospector_adv_params =
     BT_LE_ADV_PARAM_INIT(
-        BT_LE_ADV_OPT_USE_NRPA,
+        0,  // No flags: non-connectable, non-scannable, default address
         BT_GAP_ADV_FAST_INT_MIN_2,
         BT_GAP_ADV_FAST_INT_MAX_2,
         NULL);
