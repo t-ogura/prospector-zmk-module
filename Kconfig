@@ -14,15 +14,11 @@ config ZMK_STATUS_ADVERTISEMENT
     bool "Enable ZMK Status Advertisement"
     default n
     depends on ZMK_BLE
-    select BT_EXT_ADV
     help
       Enable broadcasting of keyboard status information via BLE Advertisement.
       This allows external devices to receive status updates without establishing
       a connection to the keyboard.
-      Requires Extended Advertising for connection-aware separate ADV set.
-
-config BT_EXT_ADV_MAX_ADV_SET
-    default 2 if ZMK_STATUS_ADVERTISEMENT
+      Uses legacy advertising API - no BT_EXT_ADV needed.
 
 config ZMK_STATUS_ADV_INTERVAL_MS
     int "Status advertisement interval in milliseconds"

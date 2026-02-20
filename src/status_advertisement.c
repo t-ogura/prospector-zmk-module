@@ -98,9 +98,8 @@ static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static enum zmk_activity_state last_activity_state = ZMK_ACTIVITY_ACTIVE;
 
-// Separate ADV set for connected state (non-connectable, NRPA)
-static struct bt_le_ext_adv *adv_set = NULL;
-static bool separate_adv_running = false;
+// Prospector advertising state (uses legacy API, no BT_EXT_ADV needed)
+static bool prospector_adv_active = false;
 
 // Adaptive update intervals based on activity - using Kconfig values for flexibility
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
@@ -264,19 +263,14 @@ static int activity_state_listener(const zmk_event_t *eh) {
             new_state == ZMK_ACTIVITY_ACTIVE ? "ACTIVE" :
             new_state == ZMK_ACTIVITY_IDLE ? "IDLE" : "SLEEP");
 
-    // Handle sleep entry - stop work handler and delete ADV set
-    // This is the ONLY place where bt_le_ext_adv_delete is called
+    // Handle sleep entry - stop work handler and advertising
     if (new_state == ZMK_ACTIVITY_SLEEP) {
         LOG_INF("💤 Entering sleep - stopping Prospector updates");
         k_work_cancel_delayable(&adv_work);
-        if (adv_set) {
-            if (separate_adv_running) {
-                bt_le_ext_adv_stop(adv_set);
-                separate_adv_running = false;
-            }
-            bt_le_ext_adv_delete(adv_set);
-            adv_set = NULL;
-            LOG_INF("💤 ADV set deleted for sleep");
+        if (prospector_adv_active) {
+            bt_le_adv_stop();
+            prospector_adv_active = false;
+            LOG_INF("💤 Prospector ADV stopped for sleep");
         }
     }
     // Handle wake from sleep - restart work handler
@@ -366,28 +360,49 @@ _Static_assert(sizeof(struct zmk_status_adv_data) == MAX_MANUF_PAYLOAD,
 static struct zmk_status_adv_data manufacturer_data; // Use structured data directly
 
 // =====================================================================
-// CONNECTION-AWARE ADVERTISING
+// CONNECTION-AWARE ADVERTISING (Legacy API - no BT_EXT_ADV)
 // =====================================================================
-// Uses a separate non-connectable ADV set with NRPA address, BUT only
-// when the keyboard is connected to a PC (ZMK's advertising is stopped).
-// When disconnected, Prospector stops its ADV to let ZMK reconnect freely.
+// Uses the SAME default advertising set as ZMK, reconfigured on the fly.
+// When connected (ZMK ADV stopped): bt_le_adv_start() with non-connectable params
+// When disconnected: bt_le_adv_stop() → ZMK restarts its connectable ADV
 //
-// This eliminates radio scheduler contention entirely:
-// - Connected state: Only Prospector ADV running (ZMK ADV stopped)
-// - Disconnected state: Only ZMK ADV running (Prospector ADV stopped)
+// Key: bt_conn_cb ensures we stop BEFORE ZMK's deferred work queue restarts.
+// No BT_EXT_ADV needed → ZMK's BLE stack behavior is unchanged.
 // =====================================================================
 
-// Separate ADV set data: Flags + Manufacturer Data (fits in 31-byte AD)
+// Prospector ADV data: Flags + Manufacturer Data (fits in 31-byte AD)
 static struct bt_data adv_data_array[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
-// Scan response for separate ADV set: device name + appearance
+// Scan response: device name + appearance
 static char device_name_buffer[24];
 static struct bt_data scan_rsp[] = {
     BT_DATA(BT_DATA_NAME_COMPLETE, device_name_buffer, 0), // Length set dynamically
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03),     // HID Keyboard
+};
+
+// Non-connectable, scannable advertising with NRPA address
+// Same interval as the working release/v2.2.0 (100-150ms)
+static const struct bt_le_adv_param prospector_adv_params =
+    BT_LE_ADV_PARAM_INIT(
+        BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NRPA,
+        BT_GAP_ADV_FAST_INT_MIN_2,
+        BT_GAP_ADV_FAST_INT_MAX_2,
+        NULL);
+
+// BLE connection callback - fires IMMEDIATELY on disconnect (before ZMK's work queue)
+static void prospector_ble_disconnected(struct bt_conn *conn, uint8_t reason) {
+    if (prospector_adv_active) {
+        bt_le_adv_stop();
+        prospector_adv_active = false;
+        LOG_INF("📡 BLE disconnected → Prospector ADV stopped (yielding to ZMK)");
+    }
+}
+
+static struct bt_conn_cb prospector_conn_callbacks = {
+    .disconnected = prospector_ble_disconnected,
 };
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -727,7 +742,7 @@ static void build_manufacturer_payload(void) {
 
 
 // =====================================================================
-// Separate ADV set management (for connected state)
+// Legacy ADV management (connection-aware, no BT_EXT_ADV)
 // =====================================================================
 
 static void prepare_scan_response(void) {
@@ -741,75 +756,36 @@ static void prepare_scan_response(void) {
     scan_rsp[0].data_len = actual_len;
 }
 
-// Create ADV set once, reuse across connection state changes.
-// Only bt_le_ext_adv_start/stop are used for switching - these are lightweight.
-// bt_le_ext_adv_create/delete are heavyweight and must NOT be called repeatedly.
-static int ensure_adv_set_created(void) {
-    if (adv_set) {
-        return 0; // Already created
-    }
-
-    // Same interval as the old working approach (100-150ms)
-    // This was proven to work without keyboard freezes on release/v2.2.0
-    static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
-        BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NRPA,
-        BT_GAP_ADV_FAST_INT_MIN_2,
-        BT_GAP_ADV_FAST_INT_MAX_2,
-        NULL);
-
-    int err = bt_le_ext_adv_create(&adv_param, NULL, &adv_set);
-    if (err) {
-        LOG_ERR("Failed to create ADV set: %d", err);
-        return err;
+static int prospector_adv_start(void) {
+    if (prospector_adv_active) {
+        return 0;
     }
 
     prepare_scan_response();
-    LOG_INF("Prospector ADV set created (Scannable + NRPA, 100-150ms)");
-    return 0;
-}
 
-static int start_separate_adv(void) {
-    if (separate_adv_running) {
-        return 0;
+    int err = bt_le_adv_start(&prospector_adv_params,
+                              adv_data_array, ARRAY_SIZE(adv_data_array),
+                              scan_rsp, ARRAY_SIZE(scan_rsp));
+    if (err == 0) {
+        prospector_adv_active = true;
+        LOG_INF("📡 Prospector ADV started (non-connectable, NRPA)");
+    } else if (err == -EALREADY) {
+        // Advertising already running (maybe ZMK?) - just update data
+        prospector_adv_active = false;
+        LOG_DBG("ADV already running, skipping start");
+    } else {
+        LOG_WRN("Failed to start Prospector ADV: %d", err);
     }
-    if (!adv_set) {
-        int err = ensure_adv_set_created();
-        if (err) return err;
-    }
-
-    int err = bt_le_ext_adv_set_data(adv_set, adv_data_array, ARRAY_SIZE(adv_data_array),
-                                     scan_rsp, ARRAY_SIZE(scan_rsp));
-    if (err) {
-        LOG_ERR("Failed to set ADV data: %d", err);
-        return err;
-    }
-
-    err = bt_le_ext_adv_start(adv_set, BT_LE_EXT_ADV_START_DEFAULT);
-    if (err == 0 || err == -EALREADY) {
-        separate_adv_running = true;
-        LOG_INF("Prospector ADV started (connected state)");
-        return 0;
-    }
-    LOG_ERR("Failed to start ADV: %d", err);
     return err;
 }
 
-static void stop_separate_adv(void) {
-    if (!separate_adv_running || !adv_set) {
+static void prospector_adv_stop(void) {
+    if (!prospector_adv_active) {
         return;
     }
-    // Just stop - do NOT delete. Reuse the ADV set on next start.
-    bt_le_ext_adv_stop(adv_set);
-    separate_adv_running = false;
-    LOG_INF("Prospector ADV stopped (disconnected state, set kept for reuse)");
-}
-
-static int update_separate_adv_data(void) {
-    if (!adv_set || !separate_adv_running) {
-        return -EINVAL;
-    }
-    return bt_le_ext_adv_set_data(adv_set, adv_data_array, ARRAY_SIZE(adv_data_array),
-                                  scan_rsp, ARRAY_SIZE(scan_rsp));
+    bt_le_adv_stop();
+    prospector_adv_active = false;
+    LOG_INF("📡 Prospector ADV stopped");
 }
 
 // =====================================================================
@@ -846,20 +822,25 @@ static void adv_work_handler(struct k_work *work) {
     bool connected = is_keyboard_connected();
 
     if (connected) {
-        // CONNECTED: ZMK advertising is stopped → use separate ADV set
+        // CONNECTED: ZMK advertising is stopped → we take over the default ADV set
         // Zero radio contention because ZMK is not advertising
-        if (!separate_adv_running) {
-            LOG_INF("📡 Connected → starting Prospector ADV");
-            start_separate_adv();
+        if (!prospector_adv_active) {
+            LOG_INF("📡 Connected → starting Prospector ADV (legacy API)");
+            prospector_adv_start();
         } else {
-            update_separate_adv_data();
+            // Already advertising → just update the data in-place
+            int err = bt_le_adv_update_data(adv_data_array, ARRAY_SIZE(adv_data_array),
+                                            scan_rsp, ARRAY_SIZE(scan_rsp));
+            if (err) {
+                LOG_DBG("ADV data update failed (%d), will retry", err);
+            }
         }
     } else {
-        // DISCONNECTED: ZMK is advertising for reconnection → stop our ADV
+        // DISCONNECTED: ZMK needs the default ADV set for reconnection → yield
         // Let ZMK have exclusive radio time for smooth reconnection
-        if (separate_adv_running) {
+        if (prospector_adv_active) {
             LOG_INF("📡 Disconnected → stopping Prospector ADV (yielding to ZMK)");
-            stop_separate_adv();
+            prospector_adv_stop();
         }
     }
 
@@ -882,7 +863,7 @@ static void adv_work_handler(struct k_work *work) {
         LOG_INF("📊 PROSPECTOR: %dms intervals (%s) - %s - ADV %s",
                 interval_ms, is_active ? "ACTIVE" : "IDLE",
                 connected ? "CONNECTED" : "DISCONNECTED",
-                separate_adv_running ? "ON" : "OFF");
+                prospector_adv_active ? "ON" : "OFF");
     }
 
     k_work_schedule(&adv_work, K_MSEC(interval_ms));
@@ -922,10 +903,18 @@ static int init_prospector_status(void) {
     last_activity_time = k_uptime_get_32();
     is_active = true; // Start in active mode
 
+    // Register BLE connection callback for immediate disconnect handling
+    // This fires BEFORE ZMK's deferred work queue, ensuring clean handoff
+    bt_conn_cb_register(&prospector_conn_callbacks);
+    LOG_INF("📡 Registered BLE connection callback for disconnect handling");
+
+    // Prepare scan response data (device name)
+    prepare_scan_response();
+
     // Start connection-aware advertising
     adv_started = true;
     k_work_schedule(&adv_work, K_SECONDS(1)); // Wait for ZMK BLE to start
-    LOG_INF("Prospector: Connection-aware mode - separate ADV when connected, yield when disconnected");
+    LOG_INF("Prospector: Connection-aware mode (legacy API) - ADV when connected, yield when disconnected");
 
     return 0;
 }
@@ -959,14 +948,7 @@ int zmk_status_advertisement_start(void) {
 int zmk_status_advertisement_stop(void) {
     if (adv_started) {
         k_work_cancel_delayable(&adv_work);
-        if (adv_set) {
-            if (separate_adv_running) {
-                bt_le_ext_adv_stop(adv_set);
-                separate_adv_running = false;
-            }
-            bt_le_ext_adv_delete(adv_set);
-            adv_set = NULL;
-        }
+        prospector_adv_stop();
         LOG_INF("Stopped Prospector status updates");
     }
     return 0;
