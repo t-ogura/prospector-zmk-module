@@ -746,10 +746,17 @@ static int ensure_separate_adv_running(void) {
     if (!adv_set) {
         // Create non-connectable, scannable ADV set with NRPA address
         // NRPA = different address from ZMK's identity, prevents host confusion
+        //
+        // IMPORTANT: Use slow advertising interval (1000-1500ms) to minimize
+        // radio contention with BLE connection events (PC + peripheral).
+        // Fast intervals (100-150ms) cause keyboard freezes and stuck keys
+        // because the radio can't service connection events in time.
+        #define PROSPECTOR_ADV_INT_MIN 0x0640  // 1600 * 0.625ms = 1000ms
+        #define PROSPECTOR_ADV_INT_MAX 0x0960  // 2400 * 0.625ms = 1500ms
         static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
             BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NRPA,
-            BT_GAP_ADV_FAST_INT_MIN_2,
-            BT_GAP_ADV_FAST_INT_MAX_2,
+            PROSPECTOR_ADV_INT_MIN,
+            PROSPECTOR_ADV_INT_MAX,
             NULL);
 
         int err = bt_le_ext_adv_create(&adv_param, NULL, &adv_set);
