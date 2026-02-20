@@ -371,14 +371,16 @@ static struct zmk_status_adv_data manufacturer_data; // Use structured data dire
 // =====================================================================
 
 // Copy of ZMK's advertising data (must match zmk_ble_ad[] in ble.c)
-// Includes device name since ZMK uses BT_LE_ADV_OPT_FORCE_NAME_IN_AD
+// NOTE: Do NOT include BT_DATA_NAME_COMPLETE here! ZMK uses
+// BT_LE_ADV_OPT_FORCE_NAME_IN_AD which sets BT_ADV_INCLUDE_NAME_AD flag.
+// Zephyr's le_adv_update() auto-appends the name and returns -EINVAL
+// if name is already present in the data we pass.
 static struct bt_data zmk_ad_restore[] = {
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, BT_BYTES_LIST_LE16(CONFIG_BT_DEVICE_APPEARANCE)),
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA_BYTES(BT_DATA_UUID16_SOME,
                   BT_UUID_16_ENCODE(BT_UUID_HIDS_VAL),
                   BT_UUID_16_ENCODE(BT_UUID_BAS_VAL)),
-    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
 // Scan response: Prospector manufacturer data (injected into ZMK's empty SCAN_RSP)
