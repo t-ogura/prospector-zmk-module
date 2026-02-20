@@ -101,6 +101,10 @@ static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static enum zmk_activity_state last_activity_state = ZMK_ACTIVITY_ACTIVE;
 
+// Forward declaration - defined later in HYBRID ADVERTISING section
+// Needed by activity_state_listener (sleep handler) which appears before the definition
+static bool prospector_adv_active = false;
+
 // Piggyback state: tracks whether ZMK is currently advertising
 static bool zmk_adv_was_active = false;
 
@@ -409,7 +413,7 @@ static const struct bt_le_adv_param prospector_adv_params =
         BT_GAP_ADV_FAST_INT_MAX_2,
         NULL);
 
-static bool prospector_adv_active = false;
+// prospector_adv_active is declared at top of file (forward declaration)
 
 // Disconnect callback: fires IMMEDIATELY in BLE RX thread, BEFORE ZMK's
 // deferred work queue restarts connectable advertising.
