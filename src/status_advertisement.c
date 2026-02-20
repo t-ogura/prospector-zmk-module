@@ -264,16 +264,19 @@ static int activity_state_listener(const zmk_event_t *eh) {
             new_state == ZMK_ACTIVITY_ACTIVE ? "ACTIVE" :
             new_state == ZMK_ACTIVITY_IDLE ? "IDLE" : "SLEEP");
 
-    // Handle sleep entry - stop work handler and separate ADV set
+    // Handle sleep entry - stop work handler and delete ADV set
+    // This is the ONLY place where bt_le_ext_adv_delete is called
     if (new_state == ZMK_ACTIVITY_SLEEP) {
         LOG_INF("💤 Entering sleep - stopping Prospector updates");
         k_work_cancel_delayable(&adv_work);
-        if (adv_set && separate_adv_running) {
-            bt_le_ext_adv_stop(adv_set);
+        if (adv_set) {
+            if (separate_adv_running) {
+                bt_le_ext_adv_stop(adv_set);
+                separate_adv_running = false;
+            }
             bt_le_ext_adv_delete(adv_set);
             adv_set = NULL;
-            separate_adv_running = false;
-            LOG_INF("💤 Separate ADV set cleaned up for sleep");
+            LOG_INF("💤 ADV set deleted for sleep");
         }
     }
     // Handle wake from sleep - restart work handler
@@ -738,78 +741,75 @@ static void prepare_scan_response(void) {
     scan_rsp[0].data_len = actual_len;
 }
 
-static int ensure_separate_adv_running(void) {
-    if (separate_adv_running && adv_set) {
-        return 0; // Already running
+// Create ADV set once, reuse across connection state changes.
+// Only bt_le_ext_adv_start/stop are used for switching - these are lightweight.
+// bt_le_ext_adv_create/delete are heavyweight and must NOT be called repeatedly.
+static int ensure_adv_set_created(void) {
+    if (adv_set) {
+        return 0; // Already created
     }
 
-    if (!adv_set) {
-        // Create non-connectable, scannable ADV set with NRPA address
-        // NRPA = different address from ZMK's identity, prevents host confusion
-        //
-        // IMPORTANT: Use slow advertising interval (1000-1500ms) to minimize
-        // radio contention with BLE connection events (PC + peripheral).
-        // Fast intervals (100-150ms) cause keyboard freezes and stuck keys
-        // because the radio can't service connection events in time.
-        #define PROSPECTOR_ADV_INT_MIN 0x0640  // 1600 * 0.625ms = 1000ms
-        #define PROSPECTOR_ADV_INT_MAX 0x0960  // 2400 * 0.625ms = 1500ms
-        static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
-            BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NRPA,
-            PROSPECTOR_ADV_INT_MIN,
-            PROSPECTOR_ADV_INT_MAX,
-            NULL);
+    // Same interval as the old working approach (100-150ms)
+    // This was proven to work without keyboard freezes on release/v2.2.0
+    static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
+        BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NRPA,
+        BT_GAP_ADV_FAST_INT_MIN_2,
+        BT_GAP_ADV_FAST_INT_MAX_2,
+        NULL);
 
-        int err = bt_le_ext_adv_create(&adv_param, NULL, &adv_set);
-        if (err) {
-            LOG_ERR("Failed to create separate ADV set: %d", err);
-            return err;
-        }
-        LOG_INF("Separate ADV set created (Scannable + NRPA)");
+    int err = bt_le_ext_adv_create(&adv_param, NULL, &adv_set);
+    if (err) {
+        LOG_ERR("Failed to create ADV set: %d", err);
+        return err;
     }
 
     prepare_scan_response();
+    LOG_INF("Prospector ADV set created (Scannable + NRPA, 100-150ms)");
+    return 0;
+}
+
+static int start_separate_adv(void) {
+    if (separate_adv_running) {
+        return 0;
+    }
+    if (!adv_set) {
+        int err = ensure_adv_set_created();
+        if (err) return err;
+    }
 
     int err = bt_le_ext_adv_set_data(adv_set, adv_data_array, ARRAY_SIZE(adv_data_array),
                                      scan_rsp, ARRAY_SIZE(scan_rsp));
     if (err) {
-        LOG_ERR("Failed to set separate ADV data: %d", err);
+        LOG_ERR("Failed to set ADV data: %d", err);
         return err;
     }
 
     err = bt_le_ext_adv_start(adv_set, BT_LE_EXT_ADV_START_DEFAULT);
     if (err == 0 || err == -EALREADY) {
         separate_adv_running = true;
-        LOG_INF("Separate ADV started (connected state)");
+        LOG_INF("Prospector ADV started (connected state)");
         return 0;
-    } else {
-        LOG_ERR("Failed to start separate ADV: %d", err);
-        return err;
     }
+    LOG_ERR("Failed to start ADV: %d", err);
+    return err;
 }
 
 static void stop_separate_adv(void) {
     if (!separate_adv_running || !adv_set) {
         return;
     }
-
+    // Just stop - do NOT delete. Reuse the ADV set on next start.
     bt_le_ext_adv_stop(adv_set);
-    bt_le_ext_adv_delete(adv_set);
-    adv_set = NULL;
     separate_adv_running = false;
-    LOG_INF("Separate ADV stopped (disconnected state)");
+    LOG_INF("Prospector ADV stopped (disconnected state, set kept for reuse)");
 }
 
 static int update_separate_adv_data(void) {
     if (!adv_set || !separate_adv_running) {
         return -EINVAL;
     }
-
-    int err = bt_le_ext_adv_set_data(adv_set, adv_data_array, ARRAY_SIZE(adv_data_array),
-                                     scan_rsp, ARRAY_SIZE(scan_rsp));
-    if (err) {
-        LOG_WRN("Failed to update separate ADV data: %d", err);
-    }
-    return err;
+    return bt_le_ext_adv_set_data(adv_set, adv_data_array, ARRAY_SIZE(adv_data_array),
+                                  scan_rsp, ARRAY_SIZE(scan_rsp));
 }
 
 // =====================================================================
@@ -849,8 +849,8 @@ static void adv_work_handler(struct k_work *work) {
         // CONNECTED: ZMK advertising is stopped → use separate ADV set
         // Zero radio contention because ZMK is not advertising
         if (!separate_adv_running) {
-            LOG_INF("📡 Connected → starting separate Prospector ADV");
-            ensure_separate_adv_running();
+            LOG_INF("📡 Connected → starting Prospector ADV");
+            start_separate_adv();
         } else {
             update_separate_adv_data();
         }
@@ -861,8 +861,6 @@ static void adv_work_handler(struct k_work *work) {
             LOG_INF("📡 Disconnected → stopping Prospector ADV (yielding to ZMK)");
             stop_separate_adv();
         }
-        // During disconnected state, scanner won't receive data.
-        // This is acceptable because reconnection is typically brief.
     }
 
     // Check if we're in burst mode (high-priority event)
@@ -961,7 +959,14 @@ int zmk_status_advertisement_start(void) {
 int zmk_status_advertisement_stop(void) {
     if (adv_started) {
         k_work_cancel_delayable(&adv_work);
-        stop_separate_adv();
+        if (adv_set) {
+            if (separate_adv_running) {
+                bt_le_ext_adv_stop(adv_set);
+                separate_adv_running = false;
+            }
+            bt_le_ext_adv_delete(adv_set);
+            adv_set = NULL;
+        }
         LOG_INF("Stopped Prospector status updates");
     }
     return 0;
