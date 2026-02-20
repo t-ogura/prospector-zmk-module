@@ -79,8 +79,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
 
-// REVERT TO WORKING APPROACH: Simple separated advertising
-#pragma message "*** PROSPECTOR SIMPLE SEPARATED ADVERTISING ***"
+// PIGGYBACK APPROACH: Inject data into ZMK's scan response (no separate ADV set)
+#pragma message "*** PROSPECTOR PIGGYBACK ADVERTISING (single ADV set) ***"
 
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/position_state_changed.h>
@@ -94,11 +94,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static struct k_work_delayable adv_work;
 static bool adv_started = false;
-static struct bt_le_ext_adv *adv_set = NULL;
 static enum zmk_activity_state last_activity_state = ZMK_ACTIVITY_ACTIVE;
-static bool adv_needs_restart = false;  // Flag to indicate advertising needs restart after sleep
-static int adv_error_count = 0;  // Error counter for retry logic
-#define ADV_MAX_ERRORS_BEFORE_RESET 3
 
 // Adaptive update intervals based on activity - using Kconfig values for flexibility
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
@@ -262,39 +258,19 @@ static int activity_state_listener(const zmk_event_t *eh) {
             new_state == ZMK_ACTIVITY_ACTIVE ? "ACTIVE" :
             new_state == ZMK_ACTIVITY_IDLE ? "IDLE" : "SLEEP");
 
-    // Handle sleep entry
+    // Handle sleep entry - just stop the work handler
     if (new_state == ZMK_ACTIVITY_SLEEP) {
-        LOG_INF("💤 Entering sleep - stopping advertising cleanly");
-        if (adv_set) {
-            // Stop advertising before sleep
-            bt_le_ext_adv_stop(adv_set);
-            // Delete the advertising set - it will be invalid after sleep
-            bt_le_ext_adv_delete(adv_set);
-            adv_set = NULL;
-            adv_needs_restart = true;
-            LOG_INF("💤 Advertising set deleted for clean sleep");
-        }
+        LOG_INF("💤 Entering sleep - stopping Prospector updates");
+        k_work_cancel_delayable(&adv_work);
     }
-    // Handle wake from sleep (or idle)
+    // Handle wake from sleep - restart work handler
     else if (new_state == ZMK_ACTIVITY_ACTIVE &&
-             (last_activity_state == ZMK_ACTIVITY_SLEEP || adv_needs_restart)) {
-        LOG_INF("⚡ Waking from sleep - restarting advertising");
-
-        // Ensure adv_set is clean
-        if (adv_set) {
-            LOG_WRN("⚠️ adv_set still exists after sleep - cleaning up");
-            bt_le_ext_adv_stop(adv_set);
-            bt_le_ext_adv_delete(adv_set);
-            adv_set = NULL;
-        }
-
-        adv_needs_restart = false;
-
-        // Schedule advertising restart with small delay to allow BLE stack to stabilize
+             last_activity_state == ZMK_ACTIVITY_SLEEP) {
+        LOG_INF("⚡ Waking from sleep - restarting Prospector updates");
         if (adv_started) {
             k_work_cancel_delayable(&adv_work);
-            k_work_schedule(&adv_work, K_MSEC(500));  // 500ms delay for BLE stability
-            LOG_INF("⚡ Advertising restart scheduled (500ms delay)");
+            k_work_schedule(&adv_work, K_MSEC(500));  // Wait for BLE to stabilize
+            LOG_INF("⚡ Prospector update scheduled (500ms delay)");
         }
     }
 
@@ -373,19 +349,35 @@ _Static_assert(sizeof(struct zmk_status_adv_data) == MAX_MANUF_PAYLOAD,
 
 static struct zmk_status_adv_data manufacturer_data; // Use structured data directly
 
-// Advertisement packet: Flags + Manufacturer Data ONLY (for 31-byte limit)
-static struct bt_data adv_data_array[] = {
+// =====================================================================
+// PIGGYBACK APPROACH: Inject Prospector data into ZMK's scan response
+// =====================================================================
+// Instead of creating a separate advertising set (which causes BLE connection
+// failures due to radio scheduler contention), we inject Prospector's manufacturer
+// data into ZMK's existing connectable advertising via bt_le_adv_update_data().
+//
+// ZMK's advertising:
+//   AD: Appearance + Flags + UUID16 + auto-added device name (~23 bytes)
+//   SD: Empty (NULL, 0) ← we put manufacturer data here (28 bytes)
+//
+// This eliminates the second advertising set entirely, so ZMK's connectable
+// advertising has exclusive radio time → reliable BLE connection.
+// =====================================================================
+
+// ZMK's standard advertising data structure (must match zmk/app/src/ble.c).
+// bt_le_adv_update_data() replaces AD entirely, so we must restore ZMK's
+// AD elements. Device name is auto-added by the BLE stack (FORCE_NAME_IN_AD flag).
+static const struct bt_data zmk_ble_ad_restore[] = {
+    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03),  // HID Keyboard (0x03C1)
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t*)&manufacturer_data, sizeof(manufacturer_data)),
+    BT_DATA_BYTES(BT_DATA_UUID16_SOME,
+                  0x12, 0x18,   // HID Service (0x1812)
+                  0x0f, 0x18),  // Battery Service (0x180F)
 };
 
-// Scan response: Name + Appearance (sent separately)
-// Note: Scan response also has 31-byte limit, so we may need to truncate long names
-static char device_name_buffer[24]; // Reserve space for name (31 - header bytes)
-
-static struct bt_data scan_rsp[] = {
-    BT_DATA(BT_DATA_NAME_COMPLETE, device_name_buffer, 0), // Length set dynamically
-    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03), // HID Keyboard appearance
+// Prospector manufacturer data injected into ZMK's scan response (28 bytes)
+static struct bt_data prospector_sd[] = {
+    BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -724,159 +716,50 @@ static void build_manufacturer_payload(void) {
 }
 
 
-static void start_custom_advertising(void) {
+// Inject Prospector manufacturer data into ZMK's advertising scan response.
+// Uses bt_le_adv_update_data() to piggyback on ZMK's single advertising set,
+// completely avoiding radio scheduler contention from a second advertising set.
+//
+// Returns: 0 on success, -EAGAIN if ZMK advertising not started yet, other error codes
+static int update_zmk_scan_response(void) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    // CRITICAL FIX: Don't interfere with peripheral split communication
     LOG_DBG("Skipping advertising on peripheral device to preserve split communication");
-    return;
+    return 0;
 #endif
-
-    if (!adv_set) {
-        // Use scannable non-connectable advertising with NRPA (random) address
-        // BT_LE_ADV_OPT_SCANNABLE - allows scan responses (device name) to be sent
-        // BT_LE_ADV_OPT_USE_NRPA - use Non-Resolvable Private Address (different from identity)
-        //
-        // CRITICAL: Do NOT use BT_LE_ADV_OPT_USE_IDENTITY here!
-        // Using the same address as ZMK's connectable advertising causes BLE hosts
-        // (Windows/macOS) to see non-connectable ADV first and refuse to connect.
-        // Scanner identifies keyboards by keyboard_id hash, not BLE address.
-        // Use slower interval than ZMK's connectable ADV (100-150ms) to avoid
-        // controller ticker scheduler collisions. When both advertising sets use
-        // identical intervals, one consistently dominates radio time depending on
-        // random startup timing, causing unreliable BLE reconnection.
-        // 250-350ms is sufficient for status display updates.
-        static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
-            BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NRPA,
-            0x0190,  // 250ms (400 * 0.625ms) - avoids collision with ZMK's 100ms
-            0x0230,  // 350ms (560 * 0.625ms) - avoids collision with ZMK's 150ms
-            NULL);
-
-        int err = bt_le_ext_adv_create(&adv_param, NULL, &adv_set);
-        if (err) {
-            LOG_ERR("❌ Failed to create extended advertising set: %d", err);
-            return;
-        }
-        LOG_INF("✅ Extended advertising set created (Scannable + NRPA mode)");
-    }
 
     build_manufacturer_payload();
 
-    // Prepare device name for scan response (respecting 31-byte limit)
-    const char *full_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
-    int full_name_len = strlen(full_name);
+    // Inject manufacturer data into ZMK's scan response.
+    // bt_le_adv_update_data() replaces BOTH AD and SD on the default advertising set.
+    // We must provide ZMK's original AD structure (Appearance + Flags + UUID16) or
+    // it will be lost. Device name is auto-added by BLE stack (FORCE_NAME_IN_AD flag).
+    int err = bt_le_adv_update_data(
+        zmk_ble_ad_restore, ARRAY_SIZE(zmk_ble_ad_restore),
+        prospector_sd, ARRAY_SIZE(prospector_sd));
 
-    // Calculate available space: 31 - (name_header=2) - (appearance_header=1) - (appearance_data=2) = 26
-    int max_name_len = sizeof(device_name_buffer) - 1;
-    int actual_name_len = MIN(full_name_len, max_name_len);
-
-    memcpy(device_name_buffer, full_name, actual_name_len);
-    device_name_buffer[actual_name_len] = '\0';
-
-    // Update scan response data length
-    scan_rsp[0].data_len = actual_name_len;
-
-    LOG_DBG("Prospector: Starting Extended Advertising");
-    LOG_DBG("ADV packet: Flags + Manufacturer Data = %d bytes", 3 + 2 + sizeof(manufacturer_data));
-
-    // Set advertising data for the extended set
-    int err = bt_le_ext_adv_set_data(adv_set, adv_data_array, ARRAY_SIZE(adv_data_array),
-                                     scan_rsp, ARRAY_SIZE(scan_rsp));
-    if (err) {
-        LOG_ERR("❌ Failed to set extended advertising data: %d", err);
-        return;
-    }
-
-    // Start advertising
-    err = bt_le_ext_adv_start(adv_set, BT_LE_EXT_ADV_START_DEFAULT);
-
-    if (err == 0 || err == -EALREADY) {
-        LOG_INF("✅ Extended advertising started successfully");
-        adv_error_count = 0;  // Reset error count on success
-    } else if (err == -EAGAIN || err == -EBUSY) {
-        // Temporary error - keep adv_set and retry later
-        LOG_WRN("⚠️ Advertising start busy (%d), will retry on next work cycle", err);
+    if (err == 0) {
+        LOG_DBG("✅ Prospector data injected into ZMK scan response");
+    } else if (err == -EAGAIN) {
+        LOG_DBG("⏳ ZMK advertising not started yet, will retry");
     } else {
-        LOG_ERR("❌ Extended advertising start failed with error: %d", err);
-        // Don't immediately reset - let adv_work_handler handle retries
-        // Only reset if this is a persistent failure (handled by error count in work handler)
+        LOG_WRN("⚠️ Failed to update advertising data: %d", err);
     }
 
-    LOG_INF("Manufacturer data (%d bytes): %02X%02X %02X%02X %02X %02X %02X %02X %02X %02X %02X",
-            sizeof(manufacturer_data),
-            manufacturer_data.manufacturer_id[0], manufacturer_data.manufacturer_id[1],
-            manufacturer_data.service_uuid[0], manufacturer_data.service_uuid[1],
-            manufacturer_data.version, manufacturer_data.battery_level, manufacturer_data.active_layer,
-            manufacturer_data.profile_slot, manufacturer_data.connection_count, manufacturer_data.status_flags, manufacturer_data.device_role);
-
-    // Log the complete data structure in hex for debugging
-    LOG_INF("Complete manufacturer data (26 bytes):");
-    uint8_t *data_bytes = (uint8_t*)&manufacturer_data;
-    for (int i = 0; i < sizeof(manufacturer_data); i += 8) {
-        int remaining = sizeof(manufacturer_data) - i;
-        if (remaining >= 8) {
-            LOG_INF("  [%02d-%02d]: %02X %02X %02X %02X %02X %02X %02X %02X",
-                    i, i+7,
-                    data_bytes[i], data_bytes[i+1], data_bytes[i+2], data_bytes[i+3],
-                    data_bytes[i+4], data_bytes[i+5], data_bytes[i+6], data_bytes[i+7]);
-        } else {
-            // Handle last incomplete chunk
-            char hex_str[32] = {0};
-            int pos = 0;
-            for (int j = 0; j < remaining; j++) {
-                pos += snprintf(hex_str + pos, sizeof(hex_str) - pos, "%02X ", data_bytes[i + j]);
-            }
-            LOG_INF("  [%02d-%02d]: %s", i, i + remaining - 1, hex_str);
-        }
-    }
+    return err;
 }
 
 static void adv_work_handler(struct k_work *work) {
-    // If adv_set is NULL (after sleep wake or error), recreate it
-    if (!adv_set) {
-        LOG_INF("📡 adv_set is NULL - creating new advertising set");
-        start_custom_advertising();
-        if (!adv_set) {
-            // Failed to create - retry later
-            LOG_ERR("❌ Failed to create advertising set, retrying in 1s");
-            k_work_schedule(&adv_work, K_SECONDS(1));
-            return;
-        }
-        adv_error_count = 0;  // Reset error count on successful creation
-    }
+    // Inject updated Prospector data into ZMK's scan response
+    int err = update_zmk_scan_response();
 
-    // Update manufacturer data
-    build_manufacturer_payload();
-
-    // Update existing advertising data using Extended Advertising API
-    int err = bt_le_ext_adv_set_data(adv_set, adv_data_array, ARRAY_SIZE(adv_data_array),
-                                     scan_rsp, ARRAY_SIZE(scan_rsp));
-
-    if (err == 0) {
-        LOG_DBG("✅ Extended advertising data updated successfully");
-        adv_error_count = 0;  // Reset error count on success
-    } else if (err == -EAGAIN || err == -EBUSY) {
-        // Temporary error - just retry later without resetting
-        LOG_WRN("⚠️ Advertising update busy (%d), retrying...", err);
-        k_work_schedule(&adv_work, K_MSEC(100));
+    if (err == -EAGAIN) {
+        // ZMK advertising not started yet - retry with short delay
+        k_work_schedule(&adv_work, K_MSEC(500));
         return;
-    } else {
-        // Persistent error - count and potentially reset
-        adv_error_count++;
-        LOG_ERR("❌ Extended advertising update failed: %d (error %d/%d)",
-                err, adv_error_count, ADV_MAX_ERRORS_BEFORE_RESET);
-
-        if (adv_error_count >= ADV_MAX_ERRORS_BEFORE_RESET) {
-            LOG_ERR("❌ Too many errors - resetting advertising set");
-            if (adv_set) {
-                bt_le_ext_adv_stop(adv_set);
-                bt_le_ext_adv_delete(adv_set);
-                adv_set = NULL;
-            }
-            adv_error_count = 0;
-            // Schedule restart with delay
-            k_work_schedule(&adv_work, K_MSEC(500));
-            return;
-        }
+    } else if (err != 0) {
+        // Other error - retry with delay
+        k_work_schedule(&adv_work, K_MSEC(500));
+        return;
     }
 
     // Check if we're in burst mode (high-priority event)
@@ -936,10 +819,10 @@ static int init_prospector_status(void) {
     last_activity_time = k_uptime_get_32();
     is_active = true; // Start in active mode
 
-    // Start custom advertising - RESTORE WORKING TIMING
+    // Start piggyback advertising (inject data into ZMK's scan response)
     adv_started = true;
-    k_work_schedule(&adv_work, K_SECONDS(1)); // Original working timing
-    LOG_INF("Prospector: Started custom advertising with original working timing");
+    k_work_schedule(&adv_work, K_SECONDS(1)); // Wait for ZMK BLE to start
+    LOG_INF("Prospector: Piggyback mode - will inject data into ZMK scan response");
 
     return 0;
 }
@@ -971,9 +854,8 @@ int zmk_status_advertisement_start(void) {
 }
 
 int zmk_status_advertisement_stop(void) {
-    if (adv_started && adv_set) {
+    if (adv_started) {
         k_work_cancel_delayable(&adv_work);
-        bt_le_ext_adv_stop(adv_set);
         LOG_INF("Stopped Prospector status updates");
     }
     return 0;
