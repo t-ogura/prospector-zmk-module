@@ -80,12 +80,11 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADVERTISEMENT)
 
-// PIGGYBACK APPROACH: Inject manufacturer data into ZMK's scan response
-// - Uses bt_le_adv_update_data() ONLY (never bt_le_adv_start/stop)
-// - ZMK advertising (disconnected): Scanner receives via SCAN_RSP → PC connectivity unaffected
-// - ZMK not advertising (connected): bt_le_adv_update_data() returns -EAGAIN → do nothing
-// - ZERO interference with ZMK's BLE stack → perfect PC connectivity
-#pragma message "*** PROSPECTOR PIGGYBACK ADVERTISING ***"
+// HYBRID APPROACH: Piggyback when disconnected, own ADV when connected
+// - Disconnected: bt_le_adv_update_data() injects into ZMK's SCAN_RSP
+// - Connected: bt_le_adv_start() with non-connectable ADV (no NRPA)
+// - Disconnect callback stops own ADV before ZMK restarts
+#pragma message "*** PROSPECTOR HYBRID ADVERTISING ***"
 
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/position_state_changed.h>
@@ -101,8 +100,9 @@ static struct k_work_delayable adv_work;
 static bool adv_started = false;
 static enum zmk_activity_state last_activity_state = ZMK_ACTIVITY_ACTIVE;
 
-// Piggyback state: tracks whether ZMK is currently advertising
-static bool zmk_adv_was_active = false;
+// Hybrid state tracking
+static bool zmk_adv_was_active = false;   // Piggyback mode: ZMK is advertising
+static bool prospector_adv_active = false; // MODE 2: our own non-connectable ADV is running
 
 // Adaptive update intervals based on activity - using Kconfig values for flexibility
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
@@ -266,10 +266,14 @@ static int activity_state_listener(const zmk_event_t *eh) {
             new_state == ZMK_ACTIVITY_ACTIVE ? "ACTIVE" :
             new_state == ZMK_ACTIVITY_IDLE ? "IDLE" : "SLEEP");
 
-    // Handle sleep entry - stop work handler (piggyback only, no bt_le_adv_stop needed)
+    // Handle sleep entry - stop work handler and own ADV if running
     if (new_state == ZMK_ACTIVITY_SLEEP) {
         LOG_INF("💤 Entering sleep - stopping Prospector updates");
         k_work_cancel_delayable(&adv_work);
+        if (prospector_adv_active) {
+            bt_le_adv_stop();
+            prospector_adv_active = false;
+        }
         zmk_adv_was_active = false;
     }
     // Handle wake from sleep - restart work handler
@@ -359,19 +363,18 @@ _Static_assert(sizeof(struct zmk_status_adv_data) == MAX_MANUF_PAYLOAD,
 static struct zmk_status_adv_data manufacturer_data; // Use structured data directly
 
 // =====================================================================
-// PIGGYBACK ADVERTISING (bt_le_adv_update_data ONLY)
+// HYBRID ADVERTISING
 // =====================================================================
-// Injects manufacturer data into ZMK's SCAN_RSP via bt_le_adv_update_data().
-// NEVER calls bt_le_adv_start() or bt_le_adv_stop().
-//
-// Why: Calling bt_le_adv_start() invalidates RPA (BT_DEV_RPA_VALID) and
-// modifies BLE controller state, worsening ZMK's PC reconnection issues.
-// Pure piggyback has ZERO interference with ZMK's BLE stack.
-//
-// Trade-off: Scanner receives data only when ZMK is advertising (disconnected).
-// When connected to PC, scanner shows last received data (stale but recent).
+// MODE 1 (disconnected): Piggyback on ZMK's advertising via bt_le_adv_update_data()
+//   - Injects manufacturer data into ZMK's SCAN_RSP
+//   - Zero interference with ZMK's BLE stack
+// MODE 2 (connected): Own non-connectable ADV via bt_le_adv_start()
+//   - ZMK stops advertising when connected, so we use the advertising set
+//   - Non-connectable, no NRPA (preserves BLE address state)
+//   - Stopped immediately on disconnect (bt_conn_cb) before ZMK restarts
 // =====================================================================
 
+// --- MODE 1: Piggyback data ---
 // Copy of ZMK's AD (must match zmk_ble_ad[] in ble.c, WITHOUT name -
 // Zephyr auto-appends name via BT_ADV_INCLUDE_NAME_AD flag)
 static struct bt_data zmk_ad_restore[] = {
@@ -385,6 +388,32 @@ static struct bt_data zmk_ad_restore[] = {
 // Scan response: manufacturer data injected into ZMK's empty SCAN_RSP
 static struct bt_data piggyback_sd[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
+};
+
+// --- MODE 2: Own non-connectable ADV data ---
+static struct bt_data prospector_ad[] = {
+    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+    BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
+};
+
+// Non-connectable ADV params (no NRPA - preserves BLE address state)
+static const struct bt_le_adv_param prospector_adv_params = {
+    .options = 0,  // Non-connectable, no NRPA
+    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,  // 100ms
+    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,  // 150ms
+};
+
+// --- Disconnect callback: stop own ADV before ZMK restarts ---
+static void prospector_ble_disconnected(struct bt_conn *conn, uint8_t reason) {
+    if (prospector_adv_active) {
+        bt_le_adv_stop();
+        prospector_adv_active = false;
+        LOG_INF("📡 Disconnect detected - stopped own ADV for ZMK handoff");
+    }
+}
+
+static struct bt_conn_cb prospector_conn_callbacks = {
+    .disconnected = prospector_ble_disconnected,
 };
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -724,7 +753,7 @@ static void build_manufacturer_payload(void) {
 
 
 // =====================================================================
-// Work handler - pure piggyback via bt_le_adv_update_data() ONLY
+// Work handler - hybrid: piggyback (disconnected) + own ADV (connected)
 // =====================================================================
 
 static void adv_work_handler(struct k_work *work) {
@@ -735,25 +764,44 @@ static void adv_work_handler(struct k_work *work) {
 
     build_manufacturer_payload();
 
-    // Pure piggyback: inject manufacturer data into ZMK's scan response
-    // When ZMK is advertising (disconnected): bt_le_adv_update_data() succeeds
-    // When ZMK is not advertising (connected): returns -EAGAIN, we just skip
-    int err = bt_le_adv_update_data(zmk_ad_restore, ARRAY_SIZE(zmk_ad_restore),
-                                    piggyback_sd, ARRAY_SIZE(piggyback_sd));
-
-    if (err == 0) {
-        if (!zmk_adv_was_active) {
-            LOG_INF("📡 Piggyback active (ZMK advertising)");
-            zmk_adv_was_active = true;
-        }
-    } else if (err == -EAGAIN) {
-        // ZMK not advertising (connected to PC) - nothing to do
-        if (zmk_adv_was_active) {
-            LOG_INF("📡 ZMK stopped advertising (connected?) - piggyback paused");
-            zmk_adv_was_active = false;
+    if (prospector_adv_active) {
+        // MODE 2: Our own ADV is running (connected state)
+        int err = bt_le_adv_update_data(prospector_ad, ARRAY_SIZE(prospector_ad),
+                                        NULL, 0);
+        if (err == -EAGAIN) {
+            // Our ADV was stopped externally (ZMK took over on disconnect)
+            prospector_adv_active = false;
+            LOG_INF("📡 Own ADV stopped externally, switching to piggyback");
+        } else if (err) {
+            LOG_DBG("Own ADV update error: %d", err);
         }
     } else {
-        LOG_WRN("📡 Piggyback update error: %d", err);
+        // Try MODE 1: Piggyback on ZMK's advertising
+        int err = bt_le_adv_update_data(zmk_ad_restore, ARRAY_SIZE(zmk_ad_restore),
+                                        piggyback_sd, ARRAY_SIZE(piggyback_sd));
+
+        if (err == 0) {
+            if (!zmk_adv_was_active) {
+                LOG_INF("📡 MODE 1: Piggyback active (ZMK advertising)");
+                zmk_adv_was_active = true;
+            }
+        } else if (err == -EAGAIN) {
+            // ZMK not advertising (connected to PC) → start own non-connectable ADV
+            zmk_adv_was_active = false;
+            err = bt_le_adv_start(&prospector_adv_params,
+                                  prospector_ad, ARRAY_SIZE(prospector_ad),
+                                  NULL, 0);
+            if (err == 0) {
+                prospector_adv_active = true;
+                LOG_INF("📡 MODE 2: Own ADV started (non-connectable)");
+            } else if (err == -EALREADY) {
+                LOG_DBG("ADV already running, will retry next cycle");
+            } else {
+                LOG_WRN("Failed to start own ADV: %d", err);
+            }
+        } else {
+            LOG_WRN("📡 Piggyback update error: %d", err);
+        }
     }
 
     // Check if we're in burst mode (high-priority event)
@@ -774,6 +822,7 @@ static void adv_work_handler(struct k_work *work) {
     if (update_counter % 20 == 0) {
         LOG_INF("📊 PROSPECTOR: %dms intervals (%s) - %s",
                 interval_ms, is_active ? "ACTIVE" : "IDLE",
+                prospector_adv_active ? "OWN_ADV" :
                 zmk_adv_was_active ? "PIGGYBACK" : "WAITING");
     }
 
@@ -814,10 +863,13 @@ static int init_prospector_status(void) {
     last_activity_time = k_uptime_get_32();
     is_active = true; // Start in active mode
 
-    // Start pure piggyback advertising
+    // Register disconnect callback for clean handoff between own ADV and ZMK
+    bt_conn_cb_register(&prospector_conn_callbacks);
+
+    // Start hybrid advertising
     adv_started = true;
     k_work_schedule(&adv_work, K_SECONDS(1)); // Wait for ZMK BLE to start
-    LOG_INF("Prospector: Pure piggyback mode - injects data into ZMK's scan response");
+    LOG_INF("Prospector: Hybrid mode - piggyback when disconnected, own ADV when connected");
 
     return 0;
 }
@@ -851,6 +903,10 @@ int zmk_status_advertisement_start(void) {
 int zmk_status_advertisement_stop(void) {
     if (adv_started) {
         k_work_cancel_delayable(&adv_work);
+        if (prospector_adv_active) {
+            bt_le_adv_stop();
+            prospector_adv_active = false;
+        }
         zmk_adv_was_active = false;
         LOG_INF("Stopped Prospector status updates");
     }
