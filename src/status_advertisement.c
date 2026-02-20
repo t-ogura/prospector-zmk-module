@@ -740,10 +740,15 @@ static void start_custom_advertising(void) {
         // Using the same address as ZMK's connectable advertising causes BLE hosts
         // (Windows/macOS) to see non-connectable ADV first and refuse to connect.
         // Scanner identifies keyboards by keyboard_id hash, not BLE address.
+        // Use slower interval than ZMK's connectable ADV (100-150ms) to avoid
+        // controller ticker scheduler collisions. When both advertising sets use
+        // identical intervals, one consistently dominates radio time depending on
+        // random startup timing, causing unreliable BLE reconnection.
+        // 250-350ms is sufficient for status display updates.
         static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
             BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NRPA,
-            BT_GAP_ADV_FAST_INT_MIN_2,
-            BT_GAP_ADV_FAST_INT_MAX_2,
+            0x0190,  // 250ms (400 * 0.625ms) - avoids collision with ZMK's 100ms
+            0x0230,  // 350ms (560 * 0.625ms) - avoids collision with ZMK's 150ms
             NULL);
 
         int err = bt_le_ext_adv_create(&adv_param, NULL, &adv_set);
