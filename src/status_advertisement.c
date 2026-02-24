@@ -376,8 +376,12 @@ static struct zmk_status_adv_data manufacturer_data; // Use structured data dire
 // =====================================================================
 
 // --- MODE 1: Piggyback data ---
-// Copy of ZMK's AD (must match zmk_ble_ad[] in ble.c, WITHOUT name -
-// Zephyr auto-appends name via BT_ADV_INCLUDE_NAME_AD flag)
+// Name placement depends on Zephyr version:
+//   FORCE_NAME_IN_AD available (cormoran fork): name in AD → SD free for manufacturer
+//   FORCE_NAME_IN_AD absent (upstream Zephyr): name in SD → manufacturer must go in AD
+// Without this separation, 28-byte manufacturer + name in SD exceeds 31-byte limit → name truncated
+#if defined(BT_LE_ADV_OPT_FORCE_NAME_IN_AD)
+// Newer Zephyr: ZMK uses FORCE_NAME_IN_AD → name in AD, SD free for manufacturer data
 static struct bt_data zmk_ad_restore[] = {
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, BT_BYTES_LIST_LE16(CONFIG_BT_DEVICE_APPEARANCE)),
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -386,10 +390,12 @@ static struct bt_data zmk_ad_restore[] = {
                   BT_UUID_16_ENCODE(BT_UUID_BAS_VAL)),
 };
 
-// Scan response: manufacturer data injected into ZMK's empty SCAN_RSP
 static struct bt_data piggyback_sd[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
 };
+#endif
+// Older Zephyr (no FORCE_NAME_IN_AD): piggyback uses prospector_ad for AD, NULL for SD.
+// Zephyr auto-appends device name to SD. Scanner gets manufacturer from AD, name from SD.
 
 // --- MODE 2: Own non-connectable ADV data ---
 static struct bt_data prospector_ad[] = {
@@ -804,27 +810,11 @@ static void adv_work_handler(struct k_work *work) {
                     need_connectable ? "connectable" : "non-conn");
             // Fall through to start new ADV below
         } else {
-            // Same type - just update data
-            struct bt_data *ad;
-            size_t ad_len;
-            struct bt_data *sd;
-            size_t sd_len;
-
-            if (prospector_adv_connectable) {
-                // Connectable proxy: ZMK's AD + our manufacturer data in SD
-                ad = zmk_ad_restore;
-                ad_len = ARRAY_SIZE(zmk_ad_restore);
-                sd = piggyback_sd;
-                sd_len = ARRAY_SIZE(piggyback_sd);
-            } else {
-                // Non-connectable MODE 2: our AD only
-                ad = prospector_ad;
-                ad_len = ARRAY_SIZE(prospector_ad);
-                sd = NULL;
-                sd_len = 0;
-            }
-
-            int err = bt_le_adv_update_data(ad, ad_len, sd, sd_len);
+            // Same type - just update manufacturer data in AD.
+            // For connectable proxy (scannable): Zephyr auto-appends device name to SD.
+            // For non-connectable MODE 2 (not scannable): no SD needed.
+            int err = bt_le_adv_update_data(prospector_ad, ARRAY_SIZE(prospector_ad),
+                                            NULL, 0);
             if (err == -EAGAIN) {
                 // ADV stopped externally (PC connected through proxy, or ZMK took over)
                 prospector_adv_active = false;
@@ -837,8 +827,16 @@ static void adv_work_handler(struct k_work *work) {
 
     if (!prospector_adv_active) {
         // Try piggyback on ZMK's advertising
+#if defined(BT_LE_ADV_OPT_FORCE_NAME_IN_AD)
+        // Newer Zephyr: ZMK puts name in AD → SD is free for manufacturer data
         int err = bt_le_adv_update_data(zmk_ad_restore, ARRAY_SIZE(zmk_ad_restore),
                                         piggyback_sd, ARRAY_SIZE(piggyback_sd));
+#else
+        // Older Zephyr: name goes in SD → put manufacturer in AD to avoid truncation
+        // (31-byte SD can't hold both 28-byte manufacturer data AND device name)
+        int err = bt_le_adv_update_data(prospector_ad, ARRAY_SIZE(prospector_ad),
+                                        NULL, 0);
+#endif
 
         if (err == 0) {
             if (!zmk_adv_was_active) {
@@ -864,9 +862,10 @@ static void adv_work_handler(struct k_work *work) {
             } else {
                 // Active profile NOT connected → connectable proxy
                 // (ZMK's update_advertising() likely failed with -EALREADY)
+                // Manufacturer data in AD, Zephyr auto-appends name to SD
                 err = bt_le_adv_start(&proxy_connectable_params,
-                                      zmk_ad_restore, ARRAY_SIZE(zmk_ad_restore),
-                                      piggyback_sd, ARRAY_SIZE(piggyback_sd));
+                                      prospector_ad, ARRAY_SIZE(prospector_ad),
+                                      NULL, 0);
                 if (err == 0) {
                     prospector_adv_active = true;
                     prospector_adv_connectable = true;
