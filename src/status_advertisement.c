@@ -404,8 +404,14 @@ static struct bt_data prospector_ad[] = {
 };
 
 // Non-connectable ADV params (MODE 2: when active profile IS connected)
+// SCANNABLE + USE_NAME: scanner can get device name via SCAN_RSP
+// Without SCANNABLE, ADV_NONCONN_IND has no SCAN_RSP → name never reaches scanner
 static const struct bt_le_adv_param prospector_adv_params = {
-    .options = 0,  // Non-connectable, no NRPA
+#if defined(BT_LE_ADV_OPT_SCANNABLE)
+    .options = BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_NAME,
+#else
+    .options = 0,  // Fallback for older Zephyr without SCANNABLE
+#endif
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,  // 100ms
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,  // 150ms
 };
