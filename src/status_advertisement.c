@@ -408,8 +408,9 @@ static const struct bt_le_adv_param prospector_adv_params = {
 // Must match ZMK's ZMK_ADV_CONN_NAME so bonded PCs can reconnect.
 // ZMK's update_advertising() may have failed with -EALREADY because our
 // MODE 2 was occupying the advertising set during profile switch.
+// Uses BT_LE_ADV_OPT_CONNECTABLE (not BT_LE_ADV_OPT_CONN) for Zephyr compatibility.
 static const struct bt_le_adv_param proxy_connectable_params = {
-    .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME | BT_LE_ADV_OPT_FORCE_NAME_IN_AD,
+    .options = BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_USE_NAME,
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,  // 100ms
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,  // 150ms
 };
