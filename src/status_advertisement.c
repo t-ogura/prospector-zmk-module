@@ -101,8 +101,9 @@ static bool adv_started = false;
 static enum zmk_activity_state last_activity_state = ZMK_ACTIVITY_ACTIVE;
 
 // Hybrid state tracking
-static bool zmk_adv_was_active = false;   // Piggyback mode: ZMK is advertising
-static bool prospector_adv_active = false; // MODE 2: our own non-connectable ADV is running
+static bool zmk_adv_was_active = false;        // Piggyback mode: ZMK is advertising
+static bool prospector_adv_active = false;     // Our own ADV is running (MODE 2 or proxy)
+static bool prospector_adv_connectable = false; // true = connectable proxy, false = non-connectable MODE 2
 
 // Adaptive update intervals based on activity - using Kconfig values for flexibility
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
@@ -396,9 +397,19 @@ static struct bt_data prospector_ad[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
-// Non-connectable ADV params (no NRPA - preserves BLE address state)
+// Non-connectable ADV params (MODE 2: when active profile IS connected)
 static const struct bt_le_adv_param prospector_adv_params = {
     .options = 0,  // Non-connectable, no NRPA
+    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,  // 100ms
+    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,  // 150ms
+};
+
+// Connectable proxy ADV params (when active profile is NOT connected)
+// Must match ZMK's ZMK_ADV_CONN_NAME so bonded PCs can reconnect.
+// ZMK's update_advertising() may have failed with -EALREADY because our
+// MODE 2 was occupying the advertising set during profile switch.
+static const struct bt_le_adv_param proxy_connectable_params = {
+    .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME | BT_LE_ADV_OPT_FORCE_NAME_IN_AD,
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,  // 100ms
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,  // 150ms
 };
@@ -753,7 +764,16 @@ static void build_manufacturer_payload(void) {
 
 
 // =====================================================================
-// Work handler - hybrid: piggyback (disconnected) + own ADV (connected)
+// Work handler - hybrid: piggyback / own ADV (profile-aware)
+// =====================================================================
+// Three modes based on state:
+//   1. Piggyback: ZMK advertising → inject data into SCAN_RSP
+//   2. Non-connectable ADV: Active profile connected → status display only
+//   3. Connectable proxy ADV: Active profile NOT connected → let PCs reconnect
+//
+// Mode 3 fixes the critical profile-switch bug: ZMK's update_advertising()
+// is called BEFORE raise_profile_changed_event(), so when MODE 2 is blocking
+// the ADV set, ZMK gets -EALREADY and has NO retry mechanism.
 // =====================================================================
 
 static void adv_work_handler(struct k_work *work) {
@@ -764,40 +784,95 @@ static void adv_work_handler(struct k_work *work) {
 
     build_manufacturer_payload();
 
+    // Determine if active profile needs connectable advertising
+    bool active_connected = false;
+#if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
+    active_connected = zmk_ble_active_profile_is_connected();
+#endif
+
     if (prospector_adv_active) {
-        // MODE 2: Our own ADV is running (connected state)
-        int err = bt_le_adv_update_data(prospector_ad, ARRAY_SIZE(prospector_ad),
-                                        NULL, 0);
-        if (err == -EAGAIN) {
-            // Our ADV was stopped externally (ZMK took over on disconnect)
+        // Our ADV is running - check if type needs to change
+        bool need_connectable = !active_connected;
+
+        if (need_connectable != prospector_adv_connectable) {
+            // Profile state changed - switch ADV type
+            bt_le_adv_stop();
             prospector_adv_active = false;
-            LOG_INF("📡 Own ADV stopped externally, switching to piggyback");
-        } else if (err) {
-            LOG_DBG("Own ADV update error: %d", err);
+            LOG_INF("📡 Profile state changed (%s→%s) - restarting ADV",
+                    prospector_adv_connectable ? "connectable" : "non-conn",
+                    need_connectable ? "connectable" : "non-conn");
+            // Fall through to start new ADV below
+        } else {
+            // Same type - just update data
+            struct bt_data *ad;
+            size_t ad_len;
+            struct bt_data *sd;
+            size_t sd_len;
+
+            if (prospector_adv_connectable) {
+                // Connectable proxy: ZMK's AD + our manufacturer data in SD
+                ad = zmk_ad_restore;
+                ad_len = ARRAY_SIZE(zmk_ad_restore);
+                sd = piggyback_sd;
+                sd_len = ARRAY_SIZE(piggyback_sd);
+            } else {
+                // Non-connectable MODE 2: our AD only
+                ad = prospector_ad;
+                ad_len = ARRAY_SIZE(prospector_ad);
+                sd = NULL;
+                sd_len = 0;
+            }
+
+            int err = bt_le_adv_update_data(ad, ad_len, sd, sd_len);
+            if (err == -EAGAIN) {
+                // ADV stopped externally (PC connected through proxy, or ZMK took over)
+                prospector_adv_active = false;
+                LOG_INF("📡 Own ADV stopped externally (connection established?)");
+            } else if (err) {
+                LOG_DBG("Own ADV update error: %d", err);
+            }
         }
-    } else {
-        // Try MODE 1: Piggyback on ZMK's advertising
+    }
+
+    if (!prospector_adv_active) {
+        // Try piggyback on ZMK's advertising
         int err = bt_le_adv_update_data(zmk_ad_restore, ARRAY_SIZE(zmk_ad_restore),
                                         piggyback_sd, ARRAY_SIZE(piggyback_sd));
 
         if (err == 0) {
             if (!zmk_adv_was_active) {
-                LOG_INF("📡 MODE 1: Piggyback active (ZMK advertising)");
+                LOG_INF("📡 Piggyback active (ZMK advertising)");
                 zmk_adv_was_active = true;
             }
         } else if (err == -EAGAIN) {
-            // ZMK not advertising (connected to PC) → start own non-connectable ADV
+            // ZMK not advertising → start our own ADV
             zmk_adv_was_active = false;
-            err = bt_le_adv_start(&prospector_adv_params,
-                                  prospector_ad, ARRAY_SIZE(prospector_ad),
-                                  NULL, 0);
-            if (err == 0) {
-                prospector_adv_active = true;
-                LOG_INF("📡 MODE 2: Own ADV started (non-connectable)");
-            } else if (err == -EALREADY) {
-                LOG_DBG("ADV already running, will retry next cycle");
+
+            if (active_connected) {
+                // Active profile connected → non-connectable (status display only)
+                err = bt_le_adv_start(&prospector_adv_params,
+                                      prospector_ad, ARRAY_SIZE(prospector_ad),
+                                      NULL, 0);
+                if (err == 0) {
+                    prospector_adv_active = true;
+                    prospector_adv_connectable = false;
+                    LOG_INF("📡 MODE 2: Non-connectable ADV (profile connected)");
+                } else if (err != -EALREADY) {
+                    LOG_WRN("Failed to start non-connectable ADV: %d", err);
+                }
             } else {
-                LOG_WRN("Failed to start own ADV: %d", err);
+                // Active profile NOT connected → connectable proxy
+                // (ZMK's update_advertising() likely failed with -EALREADY)
+                err = bt_le_adv_start(&proxy_connectable_params,
+                                      zmk_ad_restore, ARRAY_SIZE(zmk_ad_restore),
+                                      piggyback_sd, ARRAY_SIZE(piggyback_sd));
+                if (err == 0) {
+                    prospector_adv_active = true;
+                    prospector_adv_connectable = true;
+                    LOG_INF("📡 Connectable proxy ADV (profile not connected)");
+                } else if (err != -EALREADY) {
+                    LOG_WRN("Failed to start connectable proxy ADV: %d", err);
+                }
             }
         } else {
             LOG_WRN("📡 Piggyback update error: %d", err);
@@ -822,7 +897,7 @@ static void adv_work_handler(struct k_work *work) {
     if (update_counter % 20 == 0) {
         LOG_INF("📊 PROSPECTOR: %dms intervals (%s) - %s",
                 interval_ms, is_active ? "ACTIVE" : "IDLE",
-                prospector_adv_active ? "OWN_ADV" :
+                prospector_adv_active ? (prospector_adv_connectable ? "PROXY_CONN" : "OWN_NC") :
                 zmk_adv_was_active ? "PIGGYBACK" : "WAITING");
     }
 
