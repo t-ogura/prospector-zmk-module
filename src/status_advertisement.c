@@ -704,8 +704,11 @@ static void build_manufacturer_payload(void) {
 #endif
 
     // Keyboard ID (4 bytes) - hash ALL characters to avoid collisions
-    // (e.g. "AroundFortyRB" vs "AroundFortyAA" differ after 8th char)
+    // Use KEYBOARD_NAME if set, otherwise fall back to BT_DEVICE_NAME
     const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
+    if (strlen(keyboard_name) == 0) {
+        keyboard_name = CONFIG_BT_DEVICE_NAME;
+    }
     uint32_t id_hash = 0;
     for (int i = 0; keyboard_name[i]; i++) {
         id_hash = id_hash * 31 + keyboard_name[i];
@@ -940,15 +943,16 @@ static int init_prospector_status(void) {
 #endif
 
 
-    // Override BLE device name with CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME
-    // This ensures scanner (and PCs) see the user-configured keyboard name
-    // instead of the default CONFIG_BT_DEVICE_NAME
+    // Override BLE device name if CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME is explicitly set.
+    // If empty (default), CONFIG_BT_DEVICE_NAME is used as-is.
 #if IS_ENABLED(CONFIG_BT_DEVICE_NAME_DYNAMIC)
-    int name_err = bt_set_name(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
-    if (name_err) {
-        LOG_WRN("Failed to set BLE device name: %d", name_err);
-    } else {
-        LOG_INF("BLE device name set to: %s", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
+    if (strlen(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME) > 0) {
+        int name_err = bt_set_name(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
+        if (name_err) {
+            LOG_WRN("Failed to set BLE device name: %d", name_err);
+        } else {
+            LOG_INF("BLE device name overridden to: %s", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
+        }
     }
 #endif
 
