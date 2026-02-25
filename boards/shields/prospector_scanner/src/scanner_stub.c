@@ -410,7 +410,8 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
         }
     }
 
-    /* Fallback: look for existing keyboard with same ID (for backward compatibility) */
+    /* Fallback: look for existing keyboard with same ID (for backward compatibility)
+     * But verify BLE address matches to prevent same-name keyboard collision */
     if (index < 0) {
         for (int i = 0; i < MAX_KEYBOARDS; i++) {
             if (keyboards[i].active) {
@@ -419,8 +420,21 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
                                      (keyboards[i].data.keyboard_id[2] << 8) |
                                      keyboards[i].data.keyboard_id[3];
                 if (stored_id == keyboard_id) {
-                    index = i;
-                    break;
+                    /* If we have a BLE address, check it matches */
+                    if (ble_addr != NULL) {
+                        static const uint8_t zero_addr[6] = {0};
+                        if (memcmp(keyboards[i].ble_addr, zero_addr, 6) == 0 ||
+                            memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
+                            index = i;
+                            break;
+                        }
+                        /* Different BLE addr = different keyboard, skip */
+                        LOG_INF("Same ID=%08X but different BLE addr - treating as new keyboard", keyboard_id);
+                    } else {
+                        /* No BLE address available, use ID match as before */
+                        index = i;
+                        break;
+                    }
                 }
             }
         }

@@ -172,13 +172,27 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
            adv_data->battery_level, adv_data->active_layer);
 
     // PRIORITY: Find existing keyboard by BLE address first (unique per device)
-    // This fixes the same-name keyboard conflict issue
     int index = find_keyboard_by_ble_addr(addr);
     bool is_new = false;
 
     if (index < 0) {
         // Fallback: Try to find by ID and role (for backward compatibility)
-        index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
+        // But only if the BLE address matches - prevents same-name keyboard collision
+        int id_index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
+        if (id_index >= 0) {
+            // Check if this slot's BLE address is unset (all zeros = first time) or matches
+            static const uint8_t zero_addr[6] = {0};
+            if (memcmp(keyboards[id_index].ble_addr, zero_addr, 6) == 0) {
+                // Slot has no BLE address yet - claim it
+                index = id_index;
+            } else if (memcmp(keyboards[id_index].ble_addr, addr->a.val, 6) == 0) {
+                // Same BLE address - same device
+                index = id_index;
+            } else {
+                // Different BLE address with same ID+role = different keyboard
+                LOG_INF("Same ID=%08X but different BLE addr - treating as new keyboard", keyboard_id);
+            }
+        }
     }
 
     if (index < 0) {
