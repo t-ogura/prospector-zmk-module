@@ -940,6 +940,18 @@ static int init_prospector_status(void) {
 #endif
 
 
+    // Override BLE device name with CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME
+    // This ensures scanner (and PCs) see the user-configured keyboard name
+    // instead of the default CONFIG_BT_DEVICE_NAME
+#if IS_ENABLED(CONFIG_BT_DEVICE_NAME_DYNAMIC)
+    int name_err = bt_set_name(CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
+    if (name_err) {
+        LOG_WRN("Failed to set BLE device name: %d", name_err);
+    } else {
+        LOG_INF("BLE device name set to: %s", CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME);
+    }
+#endif
+
     // Initialize activity tracking
     last_activity_time = k_uptime_get_32();
     is_active = true; // Start in active mode
