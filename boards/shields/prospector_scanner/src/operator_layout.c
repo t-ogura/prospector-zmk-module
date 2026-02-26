@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: MIT
  *
  * Operator Layout for Scanner Mode
- * Direct port from carrefinho's feat/new-status-screens
+ * Design and layout based on carrefinho's prospector-zmk-module:
+ * https://github.com/carrefinho/prospector-zmk-module
  */
 
 #include "operator_layout.h"
@@ -639,6 +640,11 @@ static void update_battery_circles(uint8_t central_level, bool central_connected
 }
 
 /* ========== Battery Bars (3+ batteries) ========== */
+/*
+ * Bar-style battery display for 3+ peripherals.
+ * Design based on carrefinho's prospector-zmk-module implementation:
+ * https://github.com/carrefinho/prospector-zmk-module
+ */
 
 static void create_battery_bars(lv_obj_t *parent, int count) {
     battery_widgets.container = lv_obj_create(parent);

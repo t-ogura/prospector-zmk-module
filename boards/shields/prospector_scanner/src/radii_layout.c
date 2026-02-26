@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: MIT
  *
  * Radii Layout for Scanner Mode
- * Faithful port of carrefinho's feat/new-status-screens radii layout
+ * Design and layout based on carrefinho's prospector-zmk-module:
+ * https://github.com/carrefinho/prospector-zmk-module
  *
  * Display: 240x280 with hardware y-offset=20
  * Layout designed for: 240x240 visible area (no software offset needed)

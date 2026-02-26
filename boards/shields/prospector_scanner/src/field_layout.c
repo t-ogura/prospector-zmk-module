@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: MIT
  *
  * FIELD Layout for Scanner Mode
- * Faithful port of carrefinho's line_segments.c animation engine
+ * Design and layout based on carrefinho's prospector-zmk-module:
+ * https://github.com/carrefinho/prospector-zmk-module
  *
  * Core visual: 8x6 grid of animated line segments driven by WPM.
  * Uses Perlin-like noise for organic angle variation, time-based decay,
