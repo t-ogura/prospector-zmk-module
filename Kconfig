@@ -158,6 +158,21 @@ config PROSPECTOR_TOUCH_ENABLED
 
       This automatically enables INPUT, INPUT_CST816S drivers when selected.
 
+config PROSPECTOR_DEFAULT_LAYOUT
+    int "Default display layout"
+    default 0
+    range 0 3
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      Select the default display layout at startup.
+      In touch mode, this sets the initial layout (changeable via swipe).
+      In non-touch mode, this layout is fixed for the session.
+
+      0 = YADS (original status display)
+      1 = Field (animated line segments driven by WPM)
+      2 = Operator (minimalist with dot indicators)
+      3 = Radii (circular wheel indicator)
+
 config PROSPECTOR_MULTI_KEYBOARD
     bool "Support multiple keyboards"
     default y

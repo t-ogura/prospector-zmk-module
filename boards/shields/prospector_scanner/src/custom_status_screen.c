@@ -882,7 +882,34 @@ lv_obj_t *zmk_display_status_screen(void) {
 
     /* Save screen reference for screen transitions */
     screen_obj = screen;
+
+    /* Check if Prospector Display layout is configured as default */
+#if CONFIG_PROSPECTOR_DEFAULT_LAYOUT > 0
+    /* Non-YADS layout selected: switch to Prospector Display immediately.
+     * In non-touch mode this is the permanent screen.
+     * In touch mode this is the initial screen (changeable via swipe). */
+    {
+        /* Destroy YADS widgets that were just created above */
+        destroy_main_screen_widgets();
+        lv_obj_clean(screen);
+        lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+
+        /* Create Prospector Display with configured layout */
+        create_prospector_display_widgets();
+
+        /* Override NVS-saved layout with Kconfig default on first boot */
+        prospector_layout_t kconfig_layout = (prospector_layout_t)CONFIG_PROSPECTOR_DEFAULT_LAYOUT;
+        if (prospector_layouts_get_style() != kconfig_layout) {
+            prospector_layouts_set_style(kconfig_layout);
+        }
+
+        current_screen = SCREEN_PROSPECTOR_DISPLAY;
+        LOG_INF("Default layout: %s (from Kconfig)",
+                prospector_layouts_get_name(kconfig_layout));
+    }
+#else
     current_screen = SCREEN_MAIN;
+#endif
 
     /* Register LVGL timer for swipe processing in main thread
      * This timer checks the pending_swipe flag every 50ms and processes
