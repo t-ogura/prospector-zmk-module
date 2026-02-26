@@ -215,8 +215,13 @@ static void update_current_layout(void) {
     uint8_t battery_level = cached_data.battery_level;
     bool battery_connected = cached_data.has_dynamic_data && battery_level > 0;
 
-    uint8_t peripheral_battery = cached_data.peripheral_battery[0];
-    bool peripheral_connected = cached_data.has_dynamic_data && peripheral_battery > 0;
+    /* Peripheral batteries: build arrays for all 3 possible peripherals */
+    uint8_t peripheral_battery[OPERATOR_MAX_PERIPHERALS];
+    bool peripheral_connected[OPERATOR_MAX_PERIPHERALS];
+    for (int i = 0; i < OPERATOR_MAX_PERIPHERALS; i++) {
+        peripheral_battery[i] = cached_data.peripheral_battery[i];
+        peripheral_connected[i] = cached_data.has_dynamic_data && peripheral_battery[i] > 0;
+    }
 
     uint8_t wpm = cached_data.wpm_value;
     uint8_t modifier_flags = cached_data.modifier_flags;
@@ -231,7 +236,7 @@ static void update_current_layout(void) {
         field_layout_update(
             active_layer, layer_name,
             battery_level, battery_connected,
-            peripheral_battery, peripheral_connected,
+            peripheral_battery[0], peripheral_connected[0],
             wpm, modifier_flags,
             usb_connected, ble_profile,
             ble_connected, ble_bonded
@@ -251,7 +256,7 @@ static void update_current_layout(void) {
         radii_layout_update(
             active_layer, layer_name,
             battery_level, battery_connected,
-            peripheral_battery, peripheral_connected,
+            peripheral_battery[0], peripheral_connected[0],
             modifier_flags, usb_connected, ble_profile
         );
         break;

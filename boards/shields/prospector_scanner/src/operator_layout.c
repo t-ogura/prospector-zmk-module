@@ -189,9 +189,18 @@ static struct {
     int dot_count;
 } layer_widgets;
 
-/* Battery circles widgets */
+/* Battery display mode */
+typedef enum {
+    BATTERY_MODE_CIRCLES = 0,  /* 2 or fewer batteries: arc circles */
+    BATTERY_MODE_BARS,         /* 3+ batteries: vertical bars */
+} battery_display_mode_t;
+
+/* Battery widgets (circles mode + bars mode) */
 static struct {
     lv_obj_t *container;
+    battery_display_mode_t mode;
+    int battery_count;  /* Number of active batteries (determines mode) */
+    /* Circles mode (2 batteries) */
     lv_obj_t *central_arc;
     lv_obj_t *central_label_box;
     lv_obj_t *central_label;
@@ -200,6 +209,11 @@ static struct {
     lv_obj_t *peripheral_label_box;
     lv_obj_t *peripheral_label;
     lv_obj_t *peripheral_battery_label;
+    /* Bars mode (3+ batteries) */
+    lv_obj_t *bar_label_boxes[OPERATOR_MAX_PERIPHERALS + 1];   /* +1 for central */
+    lv_obj_t *bar_labels[OPERATOR_MAX_PERIPHERALS + 1];        /* Number labels */
+    lv_obj_t *bars[OPERATOR_MAX_PERIPHERALS + 1];              /* Vertical bars */
+    lv_obj_t *bar_pct_labels[OPERATOR_MAX_PERIPHERALS + 1];    /* Percentage labels */
 } battery_widgets;
 
 /* Output indicator widgets */
@@ -236,8 +250,8 @@ static struct {
     char layer_name[8];
     uint8_t battery_level;
     bool battery_connected;
-    uint8_t peripheral_battery;
-    bool peripheral_connected;
+    uint8_t peripheral_battery[OPERATOR_MAX_PERIPHERALS];
+    bool peripheral_connected[OPERATOR_MAX_PERIPHERALS];
     uint8_t wpm;
     uint8_t modifier_flags;
     bool usb_connected;
@@ -624,6 +638,206 @@ static void update_battery_circles(uint8_t central_level, bool central_connected
                        battery_widgets.peripheral_label, peripheral_level, peripheral_connected);
 }
 
+/* ========== Battery Bars (3+ batteries) ========== */
+
+static void create_battery_bars(lv_obj_t *parent, int count) {
+    battery_widgets.container = lv_obj_create(parent);
+    lv_obj_set_size(battery_widgets.container, 132, 62);
+    lv_obj_set_pos(battery_widgets.container, 11, 170);
+    lv_obj_set_style_bg_opa(battery_widgets.container, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(battery_widgets.container, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(battery_widgets.container, 0, LV_PART_MAIN);
+
+    /*
+     * Layout: [N] ██  [N] ██  [N] ██
+     *         pct     pct     pct
+     *
+     * box(24x23) + gap(4) + bar(8x50) = unit_width(36)
+     * N units + (N-1) gaps(8) = total
+     */
+    int box_width = 24;
+    int box_height = 23;
+    int bar_width = 8;
+    int bar_height = 50;
+    int box_bar_gap = 4;
+    int set_gap = 8;
+    int unit_width = box_width + box_bar_gap + bar_width;
+    int total_width = count * unit_width + (count - 1) * set_gap;
+    int start_x = (132 - total_width) / 2;
+
+    const char *titles[] = {"C", "1", "2", "3"};
+
+    for (int i = 0; i < count; i++) {
+        int unit_x = start_x + i * (unit_width + set_gap);
+
+        /* Number label box */
+        battery_widgets.bar_label_boxes[i] = lv_obj_create(battery_widgets.container);
+        lv_obj_set_size(battery_widgets.bar_label_boxes[i], box_width, box_height);
+        lv_obj_set_pos(battery_widgets.bar_label_boxes[i], unit_x, 1);
+        lv_obj_set_style_bg_opa(battery_widgets.bar_label_boxes[i], LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(battery_widgets.bar_label_boxes[i],
+                                  lv_color_hex(DISPLAY_COLOR_BATTERY_DISCONNECTED_FILL), LV_PART_MAIN);
+        lv_obj_set_style_radius(battery_widgets.bar_label_boxes[i], 2, LV_PART_MAIN);
+        lv_obj_set_style_border_width(battery_widgets.bar_label_boxes[i], 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(battery_widgets.bar_label_boxes[i], 0, LV_PART_MAIN);
+
+        /* Number label inside box */
+        battery_widgets.bar_labels[i] = lv_label_create(battery_widgets.bar_label_boxes[i]);
+        lv_label_set_text(battery_widgets.bar_labels[i], titles[i]);
+        lv_obj_set_style_text_font(battery_widgets.bar_labels[i], &FG_Medium_21, LV_PART_MAIN);
+        lv_obj_set_style_text_color(battery_widgets.bar_labels[i],
+                                    lv_color_hex(DISPLAY_COLOR_BATTERY_DISCONNECTED_LABEL), LV_PART_MAIN);
+        lv_obj_align(battery_widgets.bar_labels[i], LV_ALIGN_CENTER, 0, 1);
+
+        /* Percentage label below box */
+        battery_widgets.bar_pct_labels[i] = lv_label_create(battery_widgets.container);
+        lv_label_set_text(battery_widgets.bar_pct_labels[i], "-");
+        lv_obj_set_style_text_font(battery_widgets.bar_pct_labels[i], &FG_Medium_20, LV_PART_MAIN);
+        lv_obj_set_style_text_letter_space(battery_widgets.bar_pct_labels[i], -1, LV_PART_MAIN);
+        lv_obj_set_style_text_color(battery_widgets.bar_pct_labels[i],
+                                    lv_color_hex(DISPLAY_COLOR_BATTERY_DISCONNECTED_FILL), LV_PART_MAIN);
+        lv_obj_set_style_text_align(battery_widgets.bar_pct_labels[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_align_to(battery_widgets.bar_pct_labels[i],
+                        battery_widgets.bar_label_boxes[i], LV_ALIGN_OUT_BOTTOM_MID, 0, 3);
+
+        /* Vertical bar */
+        battery_widgets.bars[i] = lv_bar_create(battery_widgets.container);
+        lv_obj_set_size(battery_widgets.bars[i], bar_width, bar_height);
+        lv_obj_set_pos(battery_widgets.bars[i], unit_x + box_width + box_bar_gap, 6);
+        lv_bar_set_range(battery_widgets.bars[i], 0, 100);
+        lv_bar_set_value(battery_widgets.bars[i], 0, LV_ANIM_OFF);
+        lv_obj_set_style_radius(battery_widgets.bars[i], 2, LV_PART_MAIN);
+        lv_obj_set_style_radius(battery_widgets.bars[i], 2, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(battery_widgets.bars[i],
+                                  lv_color_hex(DISPLAY_COLOR_BATTERY_DISCONNECTED_RING), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(battery_widgets.bars[i],
+                                  lv_color_hex(DISPLAY_COLOR_BATTERY_DISCONNECTED_FILL), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(battery_widgets.bars[i], LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(battery_widgets.bars[i], LV_OPA_COVER, LV_PART_INDICATOR);
+    }
+}
+
+static void update_battery_bar(int index, uint8_t level, bool connected) {
+    const operator_color_palette_t *p = &color_palettes[current_palette];
+    bool low_battery = connected && level > 0 && level <= LOW_BATTERY_THRESHOLD;
+
+    uint32_t ring_color, fill_color;
+    if (low_battery) {
+        ring_color = p->battery_low_ring;
+        fill_color = p->battery_low_fill;
+    } else if (connected) {
+        ring_color = p->battery_ring;
+        fill_color = p->battery_fill;
+    } else {
+        ring_color = DISPLAY_COLOR_BATTERY_DISCONNECTED_RING;
+        fill_color = DISPLAY_COLOR_BATTERY_DISCONNECTED_FILL;
+    }
+
+    /* Update bar colors */
+    lv_obj_set_style_bg_color(battery_widgets.bars[index],
+                              lv_color_hex(ring_color), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(battery_widgets.bars[index],
+                              lv_color_hex(fill_color), LV_PART_INDICATOR);
+    lv_bar_set_value(battery_widgets.bars[index], connected ? level : 0, LV_ANIM_ON);
+
+    /* Update label box */
+    lv_obj_set_style_bg_color(battery_widgets.bar_label_boxes[index],
+                              lv_color_hex(fill_color), LV_PART_MAIN);
+
+    /* Update number label color */
+    uint32_t label_color = connected ? 0x000000 : DISPLAY_COLOR_BATTERY_DISCONNECTED_LABEL;
+    lv_obj_set_style_text_color(battery_widgets.bar_labels[index],
+                                lv_color_hex(label_color), LV_PART_MAIN);
+
+    /* Update percentage label */
+    char text[4];
+    if (connected && level > 0) {
+        snprintf(text, sizeof(text), "%d", level);
+    } else {
+        snprintf(text, sizeof(text), "-");
+    }
+    lv_label_set_text(battery_widgets.bar_pct_labels[index], text);
+    lv_obj_set_style_text_color(battery_widgets.bar_pct_labels[index],
+                                lv_color_hex(fill_color), LV_PART_MAIN);
+    /* Re-align after text change (text width changes shift position) */
+    lv_obj_align_to(battery_widgets.bar_pct_labels[index],
+                    battery_widgets.bar_label_boxes[index], LV_ALIGN_OUT_BOTTOM_MID, 0, 3);
+}
+
+static void update_battery_bars(uint8_t central_level, bool central_connected,
+                                const uint8_t peripheral_battery[OPERATOR_MAX_PERIPHERALS],
+                                const bool peripheral_connected[OPERATOR_MAX_PERIPHERALS]) {
+    /* Index 0 = central */
+    update_battery_bar(0, central_level, central_connected);
+
+    /* Index 1..N = peripherals */
+    for (int i = 0; i < battery_widgets.battery_count - 1 && i < OPERATOR_MAX_PERIPHERALS; i++) {
+        update_battery_bar(i + 1, peripheral_battery[i], peripheral_connected[i]);
+    }
+}
+
+/* ========== Battery Mode Detection & Switching ========== */
+
+/* Count how many batteries are active (central + peripherals with data) */
+static int count_active_batteries(uint8_t central_level, bool central_connected,
+                                  const uint8_t peripheral_battery[OPERATOR_MAX_PERIPHERALS],
+                                  const bool peripheral_connected[OPERATOR_MAX_PERIPHERALS]) {
+    int count = 0;
+    if (central_connected || central_level > 0) {
+        count = 1;
+    }
+    for (int i = 0; i < OPERATOR_MAX_PERIPHERALS; i++) {
+        if (peripheral_connected[i] || peripheral_battery[i] > 0) {
+            count = i + 2;  /* peripheral[0] => battery #2, etc. */
+        }
+    }
+    return count > 0 ? count : 2;  /* Default to 2 (circles mode) */
+}
+
+static void destroy_battery_container(void) {
+    if (battery_widgets.container != NULL) {
+        lv_obj_del(battery_widgets.container);
+        battery_widgets.container = NULL;
+    }
+    /* Clear all widget pointers */
+    battery_widgets.central_arc = NULL;
+    battery_widgets.central_label_box = NULL;
+    battery_widgets.central_label = NULL;
+    battery_widgets.peripheral_arc = NULL;
+    battery_widgets.peripheral_label_box = NULL;
+    battery_widgets.peripheral_label = NULL;
+    for (int i = 0; i < OPERATOR_MAX_PERIPHERALS + 1; i++) {
+        battery_widgets.bar_label_boxes[i] = NULL;
+        battery_widgets.bar_labels[i] = NULL;
+        battery_widgets.bars[i] = NULL;
+        battery_widgets.bar_pct_labels[i] = NULL;
+    }
+}
+
+static void ensure_battery_mode(lv_obj_t *parent, int new_count) {
+    battery_display_mode_t new_mode = (new_count >= 3) ? BATTERY_MODE_BARS : BATTERY_MODE_CIRCLES;
+
+    if (battery_widgets.container != NULL &&
+        battery_widgets.mode == new_mode &&
+        battery_widgets.battery_count == new_count) {
+        return;  /* No change needed */
+    }
+
+    /* Destroy existing and recreate */
+    destroy_battery_container();
+
+    if (new_mode == BATTERY_MODE_BARS) {
+        create_battery_bars(parent, new_count);
+    } else {
+        create_battery_circles(parent);
+    }
+
+    battery_widgets.mode = new_mode;
+    battery_widgets.battery_count = new_count;
+    LOG_INF("Battery mode: %s (%d batteries)",
+            new_mode == BATTERY_MODE_BARS ? "bars" : "circles", new_count);
+}
+
 /* ========== Output Indicator (USB/BLE) ========== */
 
 /* BLE slot animation timer callback - handles both blink and fade */
@@ -899,7 +1113,10 @@ lv_obj_t *operator_layout_create(lv_obj_t *parent) {
     create_modifier_indicator(layout_container);
     create_wpm_meter(layout_container);
     create_layer_display(layout_container);
+    /* Battery: start with circles (2 batteries), will switch to bars if needed */
     create_battery_circles(layout_container);
+    battery_widgets.mode = BATTERY_MODE_CIRCLES;
+    battery_widgets.battery_count = 2;
     create_output_indicator(layout_container);
 
     LOG_INF("Operator layout created");
@@ -908,7 +1125,8 @@ lv_obj_t *operator_layout_create(lv_obj_t *parent) {
 
 void operator_layout_update(uint8_t active_layer, const char *layer_name,
                            uint8_t battery_level, bool battery_connected,
-                           uint8_t peripheral_battery, bool peripheral_connected,
+                           const uint8_t peripheral_battery[OPERATOR_MAX_PERIPHERALS],
+                           const bool peripheral_connected[OPERATOR_MAX_PERIPHERALS],
                            uint8_t wpm, uint8_t modifier_flags,
                            bool usb_connected, uint8_t ble_profile,
                            bool ble_connected, bool ble_bonded) {
@@ -939,17 +1157,37 @@ void operator_layout_update(uint8_t active_layer, const char *layer_name,
     }
 
     /* Only update battery if changed */
-    if (!cached_state.initialized ||
+    bool battery_changed = !cached_state.initialized ||
         battery_level != cached_state.battery_level ||
-        battery_connected != cached_state.battery_connected ||
-        peripheral_battery != cached_state.peripheral_battery ||
-        peripheral_connected != cached_state.peripheral_connected) {
-        update_battery_circles(battery_level, battery_connected,
-                              peripheral_battery, peripheral_connected);
+        battery_connected != cached_state.battery_connected;
+    if (!battery_changed) {
+        for (int i = 0; i < OPERATOR_MAX_PERIPHERALS; i++) {
+            if (peripheral_battery[i] != cached_state.peripheral_battery[i] ||
+                peripheral_connected[i] != cached_state.peripheral_connected[i]) {
+                battery_changed = true;
+                break;
+            }
+        }
+    }
+    if (battery_changed) {
+        /* Check if mode needs switching */
+        int bat_count = count_active_batteries(battery_level, battery_connected,
+                                               peripheral_battery, peripheral_connected);
+        ensure_battery_mode(layout_container, bat_count);
+
+        if (battery_widgets.mode == BATTERY_MODE_BARS) {
+            update_battery_bars(battery_level, battery_connected,
+                               peripheral_battery, peripheral_connected);
+        } else {
+            update_battery_circles(battery_level, battery_connected,
+                                  peripheral_battery[0], peripheral_connected[0]);
+        }
         cached_state.battery_level = battery_level;
         cached_state.battery_connected = battery_connected;
-        cached_state.peripheral_battery = peripheral_battery;
-        cached_state.peripheral_connected = peripheral_connected;
+        memcpy(cached_state.peripheral_battery, peripheral_battery,
+               sizeof(cached_state.peripheral_battery));
+        memcpy(cached_state.peripheral_connected, peripheral_connected,
+               sizeof(cached_state.peripheral_connected));
     }
 
     /* Only update output indicator if changed */
@@ -985,6 +1223,23 @@ void operator_layout_destroy(void) {
     for (int i = 0; i < 3; i++) {
         mod_separators[i] = NULL;
     }
+
+    /* Clear battery widget pointers (container deleted with layout_container) */
+    battery_widgets.container = NULL;
+    battery_widgets.central_arc = NULL;
+    battery_widgets.central_label_box = NULL;
+    battery_widgets.central_label = NULL;
+    battery_widgets.peripheral_arc = NULL;
+    battery_widgets.peripheral_label_box = NULL;
+    battery_widgets.peripheral_label = NULL;
+    for (int i = 0; i < OPERATOR_MAX_PERIPHERALS + 1; i++) {
+        battery_widgets.bar_label_boxes[i] = NULL;
+        battery_widgets.bar_labels[i] = NULL;
+        battery_widgets.bars[i] = NULL;
+        battery_widgets.bar_pct_labels[i] = NULL;
+    }
+    battery_widgets.mode = BATTERY_MODE_CIRCLES;
+    battery_widgets.battery_count = 0;
 
     if (layout_container != NULL) {
         lv_obj_del(layout_container);
@@ -1073,8 +1328,12 @@ static void apply_palette(void) {
     uint8_t saved_modifier_flags = cached_state.modifier_flags;
     uint8_t saved_battery_level = cached_state.battery_level;
     bool saved_battery_connected = cached_state.battery_connected;
-    uint8_t saved_peripheral_battery = cached_state.peripheral_battery;
-    bool saved_peripheral_connected = cached_state.peripheral_connected;
+    uint8_t saved_peripheral_battery[OPERATOR_MAX_PERIPHERALS];
+    bool saved_peripheral_connected[OPERATOR_MAX_PERIPHERALS];
+    memcpy(saved_peripheral_battery, cached_state.peripheral_battery,
+           sizeof(saved_peripheral_battery));
+    memcpy(saved_peripheral_connected, cached_state.peripheral_connected,
+           sizeof(saved_peripheral_connected));
     bool saved_usb_connected = cached_state.usb_connected;
     uint8_t saved_ble_profile = cached_state.ble_profile;
     bool saved_ble_connected = cached_state.ble_connected;
@@ -1097,8 +1356,13 @@ static void apply_palette(void) {
     update_modifier_indicator(saved_modifier_flags);
     update_wpm_meter(saved_wpm, saved_layer_name);
     update_layer_display(saved_active_layer);
-    update_battery_circles(saved_battery_level, saved_battery_connected,
-                          saved_peripheral_battery, saved_peripheral_connected);
+    if (battery_widgets.mode == BATTERY_MODE_BARS) {
+        update_battery_bars(saved_battery_level, saved_battery_connected,
+                           saved_peripheral_battery, saved_peripheral_connected);
+    } else {
+        update_battery_circles(saved_battery_level, saved_battery_connected,
+                              saved_peripheral_battery[0], saved_peripheral_connected[0]);
+    }
     update_output_indicator(saved_usb_connected, saved_ble_profile,
                            saved_ble_connected, saved_ble_bonded);
 
@@ -1108,8 +1372,10 @@ static void apply_palette(void) {
     cached_state.modifier_flags = saved_modifier_flags;
     cached_state.battery_level = saved_battery_level;
     cached_state.battery_connected = saved_battery_connected;
-    cached_state.peripheral_battery = saved_peripheral_battery;
-    cached_state.peripheral_connected = saved_peripheral_connected;
+    memcpy(cached_state.peripheral_battery, saved_peripheral_battery,
+           sizeof(cached_state.peripheral_battery));
+    memcpy(cached_state.peripheral_connected, saved_peripheral_connected,
+           sizeof(cached_state.peripheral_connected));
     cached_state.usb_connected = saved_usb_connected;
     cached_state.ble_profile = saved_ble_profile;
     cached_state.ble_connected = saved_ble_connected;

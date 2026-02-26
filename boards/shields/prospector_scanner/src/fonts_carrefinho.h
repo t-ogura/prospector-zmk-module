@@ -12,6 +12,7 @@
 
 /* Shared layout fonts */
 LV_FONT_DECLARE(FG_Medium_20);              /* Modifiers, USB/BLE labels, slot labels */
+LV_FONT_DECLARE(FG_Medium_21);              /* Battery bar number labels */
 LV_FONT_DECLARE(FG_Medium_26);              /* FIELD: output indicator */
 LV_FONT_DECLARE(FR_Medium_32);              /* WPM label */
 LV_FONT_DECLARE(FR_Regular_30);             /* FIELD: battery label */

@@ -62,11 +62,15 @@ typedef enum {
     BLE_PROFILE_STATE_CONNECTED           /* Bonded and connected */
 } ble_profile_state_t;
 
+/* Maximum peripheral batteries supported */
+#define OPERATOR_MAX_PERIPHERALS 3
+
 /* Operator layout API */
 lv_obj_t *operator_layout_create(lv_obj_t *parent);
 void operator_layout_update(uint8_t active_layer, const char *layer_name,
                            uint8_t battery_level, bool battery_connected,
-                           uint8_t peripheral_battery, bool peripheral_connected,
+                           const uint8_t peripheral_battery[OPERATOR_MAX_PERIPHERALS],
+                           const bool peripheral_connected[OPERATOR_MAX_PERIPHERALS],
                            uint8_t wpm, uint8_t modifier_flags,
                            bool usb_connected, uint8_t ble_profile,
                            bool ble_connected, bool ble_bonded);
