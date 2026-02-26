@@ -404,6 +404,18 @@ static struct bt_data prospector_ad[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
 };
 
+// --- Name-in-AD: Periodic name broadcast ---
+// MODE 2 SCAN_RSP doesn't reach scanner (radio busy with BLE connection).
+// Periodically swap AD data to send device name directly in ADV packet.
+#define NAME_ADV_INTERVAL_ACTIVE  25  // Every 25th cycle (~5s at 200ms)
+#define NAME_ADV_INTERVAL_IDLE     1  // Every cycle when idle (30s interval)
+static uint32_t adv_cycle_counter = 0;
+static char name_adv_buffer[29]; // Max name in 31-byte AD: 31 - 2(flags) = 29
+static struct bt_data name_ad[] = {
+    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+    BT_DATA(BT_DATA_NAME_COMPLETE, name_adv_buffer, 0), // Length set dynamically
+};
+
 // Non-connectable ADV params (MODE 2: when active profile IS connected)
 // SCANNABLE + USE_NAME: scanner can get device name via SCAN_RSP
 // Without SCANNABLE, ADV_NONCONN_IND has no SCAN_RSP → name never reaches scanner
@@ -836,11 +848,23 @@ static void adv_work_handler(struct k_work *work) {
                     need_connectable ? "connectable" : "non-conn");
             // Fall through to start new ADV below
         } else {
-            // Same type - just update manufacturer data in AD.
-            // For connectable proxy (scannable): Zephyr auto-appends device name to SD.
-            // For non-connectable MODE 2 (not scannable): no SD needed.
-            int err = bt_le_adv_update_data(prospector_ad, ARRAY_SIZE(prospector_ad),
+            // Same type - update AD data.
+            // Periodically send device name instead of manufacturer data so scanner
+            // can learn the name even when SCAN_RSP is blocked by radio congestion.
+            adv_cycle_counter++;
+            uint32_t name_interval = is_active ? NAME_ADV_INTERVAL_ACTIVE : NAME_ADV_INTERVAL_IDLE;
+            bool send_name = (adv_cycle_counter % name_interval == 0) && name_ad[1].data_len > 0;
+
+            int err;
+            if (send_name) {
+                err = bt_le_adv_update_data(name_ad, ARRAY_SIZE(name_ad), NULL, 0);
+                if (err == 0) {
+                    LOG_DBG("📡 Name-in-AD sent: \"%s\"", name_adv_buffer);
+                }
+            } else {
+                err = bt_le_adv_update_data(prospector_ad, ARRAY_SIZE(prospector_ad),
                                             NULL, 0);
+            }
             if (err == -EAGAIN) {
                 // ADV stopped externally (PC connected through proxy, or ZMK took over)
                 prospector_adv_active = false;
@@ -972,6 +996,19 @@ static int init_prospector_status(void) {
         }
     }
 #endif
+
+    // Initialize name-in-AD buffer for periodic name broadcast
+    {
+        const char *adv_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
+        if (strlen(adv_name) == 0) {
+            adv_name = CONFIG_BT_DEVICE_NAME;
+        }
+        size_t name_len = MIN(strlen(adv_name), sizeof(name_adv_buffer) - 1);
+        memcpy(name_adv_buffer, adv_name, name_len);
+        name_adv_buffer[name_len] = '\0';
+        name_ad[1].data_len = name_len;
+        LOG_INF("Name-in-AD initialized: \"%s\" (%d bytes)", name_adv_buffer, (int)name_len);
+    }
 
     // Initialize activity tracking
     last_activity_time = k_uptime_get_32();
