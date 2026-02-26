@@ -11,6 +11,7 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -703,17 +704,33 @@ static void build_manufacturer_payload(void) {
              "L%d", layer % 10);
 #endif
 
-    // Keyboard ID (4 bytes) - hash ALL characters to avoid collisions
-    // Use KEYBOARD_NAME if set, otherwise fall back to BT_DEVICE_NAME
-    const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
-    if (strlen(keyboard_name) == 0) {
-        keyboard_name = CONFIG_BT_DEVICE_NAME;
+    // Keyboard ID (4 bytes) - hardware-unique ID from HWINFO (FICR on nRF52840)
+    // This ensures the same physical device always has the same ID,
+    // even when BLE MAC address changes across profile switches.
+    {
+        uint8_t hwid[16];
+        ssize_t hwid_len = hwinfo_get_device_id(hwid, sizeof(hwid));
+        uint32_t id_hash = 0;
+
+        if (hwid_len > 0) {
+            // Hash hardware device ID to 4 bytes
+            for (ssize_t i = 0; i < hwid_len; i++) {
+                id_hash = id_hash * 31 + hwid[i];
+            }
+            LOG_DBG("keyboard_id from HWINFO (%d bytes): %08X", (int)hwid_len, id_hash);
+        } else {
+            // Fallback: hash keyboard name (for boards without HWINFO)
+            const char *keyboard_name = CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME;
+            if (strlen(keyboard_name) == 0) {
+                keyboard_name = CONFIG_BT_DEVICE_NAME;
+            }
+            for (int i = 0; keyboard_name[i]; i++) {
+                id_hash = id_hash * 31 + keyboard_name[i];
+            }
+            LOG_WRN("HWINFO unavailable, using name-hash for keyboard_id: %08X", id_hash);
+        }
+        memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
     }
-    uint32_t id_hash = 0;
-    for (int i = 0; keyboard_name[i]; i++) {
-        id_hash = id_hash * 31 + keyboard_name[i];
-    }
-    memcpy(manufacturer_data.keyboard_id, &id_hash, 4);
 
     // Modifier keys status - using exact YADS approach
     uint8_t modifier_flags = 0;

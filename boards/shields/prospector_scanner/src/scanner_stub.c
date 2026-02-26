@@ -397,8 +397,7 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
                            (adv_data->keyboard_id[2] << 8) |
                            adv_data->keyboard_id[3];
 
-    /* PRIORITY: Look for existing keyboard by BLE address (unique per device)
-     * This fixes the same-name keyboard conflict issue */
+    /* PRIORITY 1: Look for existing keyboard by BLE address (fastest match) */
     if (ble_addr != NULL) {
         for (int i = 0; i < MAX_KEYBOARDS; i++) {
             if (keyboards[i].active) {
@@ -410,31 +409,27 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
         }
     }
 
-    /* Fallback: look for existing keyboard with same ID (for backward compatibility)
-     * But verify BLE address matches to prevent same-name keyboard collision */
+    /* PRIORITY 2: Find by keyboard_id + device_role
+     * keyboard_id is HWINFO-based (hardware-unique per physical device),
+     * so same ID+role = same keyboard even if BLE MAC changed (e.g., profile switch) */
     if (index < 0) {
+        uint8_t incoming_role = adv_data->device_role;
         for (int i = 0; i < MAX_KEYBOARDS; i++) {
             if (keyboards[i].active) {
                 uint32_t stored_id = (keyboards[i].data.keyboard_id[0] << 24) |
                                      (keyboards[i].data.keyboard_id[1] << 16) |
                                      (keyboards[i].data.keyboard_id[2] << 8) |
                                      keyboards[i].data.keyboard_id[3];
-                if (stored_id == keyboard_id) {
-                    /* If we have a BLE address, check it matches */
-                    if (ble_addr != NULL) {
-                        static const uint8_t zero_addr[6] = {0};
-                        if (memcmp(keyboards[i].ble_addr, zero_addr, 6) == 0 ||
-                            memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
-                            index = i;
-                            break;
-                        }
-                        /* Different BLE addr = different keyboard, skip */
-                        LOG_INF("Same ID=%08X but different BLE addr - treating as new keyboard", keyboard_id);
-                    } else {
-                        /* No BLE address available, use ID match as before */
-                        index = i;
-                        break;
+                if (stored_id == keyboard_id &&
+                    keyboards[i].data.device_role == incoming_role) {
+                    index = i;
+                    /* Update BLE address to the current one */
+                    if (ble_addr != NULL &&
+                        memcmp(keyboards[i].ble_addr, ble_addr, 6) != 0) {
+                        LOG_INF("stub: slot %d BLE addr updated (ID=%08X)", i, keyboard_id);
+                        memcpy(keyboards[i].ble_addr, ble_addr, 6);
                     }
+                    break;
                 }
             }
         }
@@ -445,15 +440,8 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
         for (int i = 0; i < MAX_KEYBOARDS; i++) {
             if (!keyboards[i].active) {
                 index = i;
-                if (ble_addr) {
-                    LOG_INF("New keyboard in slot %d: %s (BLE=%02X:%02X:%02X:%02X:%02X:%02X)",
-                           index, device_name ? device_name : "(null)",
-                           ble_addr[5], ble_addr[4], ble_addr[3],
-                           ble_addr[2], ble_addr[1], ble_addr[0]);
-                } else {
-                    LOG_INF("New keyboard in slot %d: %s (ID=%08X)",
-                           index, device_name ? device_name : "(null)", keyboard_id);
-                }
+                LOG_INF("stub: new slot %d: %s (ID=%08X)",
+                       index, device_name ? device_name : "(null)", keyboard_id);
                 break;
             }
         }

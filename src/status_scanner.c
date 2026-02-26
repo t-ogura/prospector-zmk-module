@@ -171,26 +171,31 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
            addr->a.val[2], addr->a.val[1], addr->a.val[0],
            adv_data->battery_level, adv_data->active_layer);
 
-    // PRIORITY: Find existing keyboard by BLE address first (unique per device)
+    // PRIORITY 1: Find existing keyboard by BLE address (fastest match)
     int index = find_keyboard_by_ble_addr(addr);
     bool is_new = false;
 
-    if (index < 0) {
-        // Fallback: Try to find by ID and role (for backward compatibility)
-        // But only if the BLE address matches - prevents same-name keyboard collision
+    if (index >= 0) {
+        LOG_DBG("Match by BLE addr -> slot %d (name=%s)", index, keyboards[index].ble_name);
+    } else {
+        // PRIORITY 2: Find by keyboard_id + device_role
+        // keyboard_id is now HWINFO-based (hardware-unique per physical device),
+        // so same ID+role = same keyboard even if BLE MAC changed (e.g., profile switch)
         int id_index = find_keyboard_by_id_and_role(keyboard_id, adv_data->device_role);
         if (id_index >= 0) {
-            // Check if this slot's BLE address is unset (all zeros = first time) or matches
-            static const uint8_t zero_addr[6] = {0};
-            if (memcmp(keyboards[id_index].ble_addr, zero_addr, 6) == 0) {
-                // Slot has no BLE address yet - claim it
-                index = id_index;
-            } else if (memcmp(keyboards[id_index].ble_addr, addr->a.val, 6) == 0) {
-                // Same BLE address - same device
-                index = id_index;
-            } else {
-                // Different BLE address with same ID+role = different keyboard
-                LOG_INF("Same ID=%08X but different BLE addr - treating as new keyboard", keyboard_id);
+            index = id_index;
+            // Update BLE address to the current one (MAC may change across profiles)
+            if (memcmp(keyboards[id_index].ble_addr, addr->a.val, 6) != 0) {
+                LOG_INF("Keyboard slot %d: BLE addr updated "
+                       "%02X:%02X:%02X:%02X:%02X:%02X -> %02X:%02X:%02X:%02X:%02X:%02X (ID=%08X)",
+                       id_index,
+                       keyboards[id_index].ble_addr[5], keyboards[id_index].ble_addr[4],
+                       keyboards[id_index].ble_addr[3], keyboards[id_index].ble_addr[2],
+                       keyboards[id_index].ble_addr[1], keyboards[id_index].ble_addr[0],
+                       addr->a.val[5], addr->a.val[4], addr->a.val[3],
+                       addr->a.val[2], addr->a.val[1], addr->a.val[0],
+                       keyboard_id);
+                memcpy(keyboards[id_index].ble_addr, addr->a.val, 6);
             }
         }
     }
@@ -204,10 +209,8 @@ static void process_advertisement_with_name(const struct zmk_status_adv_data *ad
             return;
         }
         is_new = true;
-        LOG_INF("Creating NEW slot %d for %s (%s) BLE=%02X:%02X:%02X:%02X:%02X:%02X",
-               index, role_str, device_name,
-               addr->a.val[5], addr->a.val[4], addr->a.val[3],
-               addr->a.val[2], addr->a.val[1], addr->a.val[0]);
+        LOG_INF("New keyboard slot %d: %s (%s) ID=%08X",
+               index, role_str, device_name, keyboard_id);
     }
 
     // High-priority change detection (before updating data)

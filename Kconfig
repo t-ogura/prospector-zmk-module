@@ -14,6 +14,7 @@ config ZMK_STATUS_ADVERTISEMENT
     bool "Enable ZMK Status Advertisement"
     default n
     depends on ZMK_BLE
+    select HWINFO
     help
       Enable broadcasting of keyboard status information via BLE Advertisement.
       This allows external devices to receive status updates without establishing
