@@ -12,8 +12,9 @@
 /**
  * @brief Send keyboard data received from BLE advertisement
  *
- * Thread-safe function to pass keyboard status data from BLE scan callback
- * to the display update work queue.
+ * Lock-free: pushes data into SPSC ring buffer.
+ * Called from BT RX thread. Data is processed by scanner_process_incoming()
+ * in the LVGL timer context.
  *
  * @param adv_data Parsed advertisement data
  * @param rssi Signal strength
@@ -25,6 +26,15 @@
 int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
                                    int8_t rssi, const char *device_name,
                                    const uint8_t *ble_addr, uint8_t ble_addr_type);
+
+/**
+ * @brief Process incoming advertisements from ring buffer
+ *
+ * Must be called from LVGL timer context (main thread).
+ * Drains ring buffer, manages keyboards[], calculates rates,
+ * checks timeouts, and updates scanner battery.
+ */
+void scanner_process_incoming(void);
 
 /**
  * @brief Trigger timeout check for keyboards
@@ -90,17 +100,6 @@ void scanner_set_selected_keyboard(int index);
  * @return true if valid address available, false otherwise
  */
 bool scanner_get_selected_keyboard_addr(uint8_t *ble_addr_out);
-
-/**
- * @brief Update keyboard name by BLE address
- *
- * Called from status_scanner.c when SCAN_RSP with device name arrives.
- * Updates the local keyboard array entry if name is currently Unknown.
- *
- * @param ble_addr BLE MAC address (6 bytes)
- * @param name Device name to set
- */
-void scanner_update_keyboard_name_by_addr(const uint8_t *ble_addr, const char *name);
 
 /**
  * @brief Send display refresh request

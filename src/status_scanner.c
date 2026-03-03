@@ -403,8 +403,6 @@ static void store_device_name(const bt_addr_le_t *addr, const char *name) {
             }
         }
 
-        // Also update scanner_stub's local array (for main screen display)
-        scanner_update_keyboard_name_by_addr(addr->a.val, name);
     }
 }
 

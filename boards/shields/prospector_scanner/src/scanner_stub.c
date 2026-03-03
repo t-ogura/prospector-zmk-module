@@ -1,8 +1,12 @@
 /**
  * Scanner Message Handler - Connects BLE scanner to display widgets
  *
- * Receives keyboard advertisement data from status_scanner.c and
- * stores it for the display to render.
+ * Architecture (lock-free):
+ *   BT RX thread → ring buffer push (non-blocking, no mutex)
+ *   LVGL timer (100ms) → scanner_process_incoming() → drain ring buffer
+ *                       → manage keyboards[] → set pending_data → widget update
+ *
+ * keyboards[] is accessed ONLY from LVGL timer context (single-threaded).
  */
 
 #include <zephyr/kernel.h>
@@ -25,20 +29,8 @@ LOG_MODULE_REGISTER(scanner_handler, LOG_LEVEL_INF);
 /* External scanner start function (from status_scanner.c) */
 extern int zmk_status_scanner_start(void);
 
-/* Message queue definition (required by status_scanner.c) */
-K_MSGQ_DEFINE(scanner_msgq, sizeof(struct { uint8_t dummy[128]; }), 32, 4);
-
-/* Statistics */
-static uint32_t msgs_sent = 0;
-static uint32_t msgs_dropped = 0;
-static uint32_t msgs_processed = 0;
-
-/* Display update work (deferred to main thread) */
-static void display_update_work_handler(struct k_work *work);
-static K_WORK_DELAYABLE_DEFINE(display_update_work, display_update_work_handler);
-static volatile bool display_update_pending = false;
-
 /* ========== Keyboard Data Storage ========== */
+/* Accessed ONLY from LVGL timer context (main thread) */
 
 #define MAX_KEYBOARDS 3
 #define MAX_NAME_LEN 32
@@ -48,26 +40,60 @@ struct keyboard_state {
     struct zmk_status_adv_data data;
     int8_t rssi;
     char name[MAX_NAME_LEN];
-    uint32_t last_seen;  // k_uptime_get_32()
-    uint8_t ble_addr[6];     // BLE MAC address for unique identification
-    uint8_t ble_addr_type;   // BLE address type
+    uint32_t last_seen;  /* k_uptime_get_32() */
+    uint8_t ble_addr[6];     /* BLE MAC address for unique identification */
+    uint8_t ble_addr_type;   /* BLE address type */
 };
 
 static struct keyboard_state keyboards[MAX_KEYBOARDS];
 static int selected_keyboard = 0;
-static struct k_mutex data_mutex;
-static bool mutex_initialized = false;
 
-/* ========== Pending Display Data (thread-safe flag-based update) ========== */
-/* Work queue sets data + flag, LVGL timer in main thread processes it */
+/* ========== SPSC Ring Buffer (BT RX → LVGL timer) ========== */
+
+#define INCOMING_BUF_SIZE 16  /* Must be power of 2 */
+
+struct incoming_adv {
+    struct zmk_status_adv_data data;
+    int8_t rssi;
+    char name[MAX_NAME_LEN];
+    uint8_t ble_addr[6];
+    uint8_t ble_addr_type;
+};
+
+static struct incoming_adv incoming_buf[INCOMING_BUF_SIZE];
+static volatile uint8_t incoming_write_idx;  /* BT RX only writes */
+static volatile uint8_t incoming_read_idx;   /* LVGL timer only writes */
+
+/* Push one entry from BT RX thread (producer) */
+static int incoming_push(const struct incoming_adv *entry) {
+    uint8_t next = (incoming_write_idx + 1) & (INCOMING_BUF_SIZE - 1);
+    if (next == incoming_read_idx) {
+        return -ENOMEM;  /* Buffer full, drop */
+    }
+    incoming_buf[incoming_write_idx] = *entry;
+    __DMB();  /* ARM memory barrier: ensure data written before index update */
+    incoming_write_idx = next;
+    return 0;
+}
+
+/* Pop one entry from LVGL timer context (consumer) */
+static bool incoming_pop(struct incoming_adv *out) {
+    if (incoming_read_idx == incoming_write_idx) {
+        return false;  /* Empty */
+    }
+    *out = incoming_buf[incoming_read_idx];
+    __DMB();  /* ARM memory barrier: ensure data read before index update */
+    incoming_read_idx = (incoming_read_idx + 1) & (INCOMING_BUF_SIZE - 1);
+    return true;
+}
+
+/* ========== Pending Display Data (set by LVGL timer, read by LVGL timer) ========== */
 
 struct pending_display_data {
-    /* Flags - set by work queue, cleared by LVGL timer */
     volatile bool update_pending;
     volatile bool signal_update_pending;  /* Signal widget updates separately (1Hz) */
     volatile bool no_keyboards;           /* True when all keyboards timed out */
 
-    /* Cached data for LVGL update */
     char device_name[MAX_NAME_LEN];
     char layer_name[4];
     int layer;
@@ -91,25 +117,21 @@ bool scanner_get_pending_update(struct pending_display_data *out) {
     if (!pending_data.update_pending) {
         return false;
     }
-    /* Copy data (atomic enough for our use case) */
     *out = pending_data;
     pending_data.update_pending = false;
-    /* Note: signal_update_pending is checked separately via scanner_get_pending_signal */
     return true;
 }
 
-/* Global signal data - set by work handler, read DIRECTLY by timer callback */
-/* Completely avoiding float function parameters */
+/* Global signal data - set by process_incoming, read by timer callback */
 volatile int8_t scanner_signal_rssi = -100;
 volatile int32_t scanner_signal_rate_x100 = -100;  /* rate * 100, as integer */
 
-/* Called by work handler to set signal data */
 static void set_signal_data(int8_t rssi, float rate_hz) {
     scanner_signal_rssi = rssi;
     scanner_signal_rate_x100 = (int32_t)(rate_hz * 100.0f);
 }
 
-/* Check if signal update is pending (no data returned - caller reads globals directly) */
+/* Check if signal update is pending */
 bool scanner_is_signal_pending(void) {
     if (!pending_data.signal_update_pending) {
         return false;
@@ -128,123 +150,274 @@ bool scanner_get_pending_battery(int *level) {
     return true;
 }
 
-/* ========== Public API for Display ========== */
+/* ========== Public API for Display (LVGL timer context only) ========== */
 
 bool scanner_get_keyboard_data(int index, struct zmk_status_adv_data *data,
                                int8_t *rssi, char *name, size_t name_len) {
-    if (!mutex_initialized || index < 0 || index >= MAX_KEYBOARDS) {
+    if (index < 0 || index >= MAX_KEYBOARDS) {
         return false;
     }
 
-    if (k_mutex_lock(&data_mutex, K_MSEC(10)) != 0) {
+    if (!keyboards[index].active) {
         return false;
     }
 
-    bool result = false;
-    if (keyboards[index].active) {
-        if (data) *data = keyboards[index].data;
-        if (rssi) *rssi = keyboards[index].rssi;
-        if (name && name_len > 0) {
-            strncpy(name, keyboards[index].name, name_len - 1);
-            name[name_len - 1] = '\0';
-        }
-        result = true;
+    if (data) *data = keyboards[index].data;
+    if (rssi) *rssi = keyboards[index].rssi;
+    if (name && name_len > 0) {
+        strncpy(name, keyboards[index].name, name_len - 1);
+        name[name_len - 1] = '\0';
     }
-
-    k_mutex_unlock(&data_mutex);
-    return result;
+    return true;
 }
 
 int scanner_get_active_keyboard_count(void) {
-    if (!mutex_initialized) return 0;
-
-    if (k_mutex_lock(&data_mutex, K_MSEC(10)) != 0) {
-        return 0;
-    }
-
     int count = 0;
     for (int i = 0; i < MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) count++;
     }
-
-    k_mutex_unlock(&data_mutex);
     return count;
-}
-
-/* Update keyboard name by BLE address - called from status_scanner.c when SCAN_RSP arrives */
-void scanner_update_keyboard_name_by_addr(const uint8_t *ble_addr, const char *name) {
-    if (!mutex_initialized || !ble_addr || !name) return;
-
-    if (k_mutex_lock(&data_mutex, K_MSEC(5)) != 0) {
-        return;
-    }
-
-    for (int i = 0; i < MAX_KEYBOARDS; i++) {
-        if (keyboards[i].active && memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
-            /* Only update if current name is empty or generic */
-            if (keyboards[i].name[0] == '\0' ||
-                strncmp(keyboards[i].name, "Keyboard ", 9) == 0 ||
-                strcmp(keyboards[i].name, "Unknown") == 0) {
-                strncpy(keyboards[i].name, name, MAX_NAME_LEN - 1);
-                keyboards[i].name[MAX_NAME_LEN - 1] = '\0';
-                LOG_INF("scanner_stub: Updated keyboard name: %s (slot %d)", name, i);
-            }
-            break;
-        }
-    }
-
-    k_mutex_unlock(&data_mutex);
 }
 
 int scanner_get_selected_keyboard(void) {
     return selected_keyboard;
 }
 
-/* Forward declaration */
-static void schedule_display_update(void);
+/* Helper: populate pending_data from keyboards[selected_keyboard] */
+static void fill_pending_from_selected(void) {
+    struct zmk_status_adv_data *d;
+    if (selected_keyboard < 0 || selected_keyboard >= MAX_KEYBOARDS ||
+        !keyboards[selected_keyboard].active) {
+        return;
+    }
+
+    d = &keyboards[selected_keyboard].data;
+    strncpy(pending_data.device_name, keyboards[selected_keyboard].name, MAX_NAME_LEN - 1);
+    pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
+    memcpy(pending_data.layer_name, d->layer_name, sizeof(pending_data.layer_name));
+    pending_data.layer = d->active_layer;
+    pending_data.wpm = d->wpm_value;
+    pending_data.usb_ready = (d->status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
+    pending_data.ble_connected = (d->status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
+    pending_data.ble_bonded = (d->status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
+    pending_data.profile = d->profile_slot;
+    pending_data.modifiers = d->modifier_flags;
+    pending_data.bat[0] = d->battery_level;
+    pending_data.bat[1] = d->peripheral_battery[0];
+    pending_data.bat[2] = d->peripheral_battery[1];
+    pending_data.bat[3] = d->peripheral_battery[2];
+    pending_data.no_keyboards = false;
+    pending_data.update_pending = true;
+}
 
 void scanner_set_selected_keyboard(int index) {
     if (index >= 0 && index < MAX_KEYBOARDS) {
         selected_keyboard = index;
         LOG_INF("Selected keyboard changed to slot %d", index);
-        /* Immediately update display with new keyboard data */
-        schedule_display_update();
+        fill_pending_from_selected();
     }
 }
 
-/* ========== Display Update Work (runs in system work queue context) ========== */
+/* ========== Rate Calculation State ========== */
 
-/* Rate calculation state - using actual advertisement reception count */
-static atomic_t adv_receive_count = ATOMIC_INIT(0);  /* Incremented on each adv reception */
+static atomic_t adv_receive_count = ATOMIC_INIT(0);  /* Incremented by BT RX (atomic) */
 static uint32_t rate_last_calc_time = 0;
-static int8_t last_rssi = -100;
 
-/* Moving average for smooth rate display */
 #define RATE_HISTORY_SIZE 4
 static float rate_history[RATE_HISTORY_SIZE] = {0};
 static int rate_history_idx = 0;
-static bool rate_history_filled = false;  /* True after first full cycle */
-
-/* External flag from custom_status_screen.c */
-extern volatile bool transition_in_progress;
+static bool rate_history_filled = false;
 
 /* Scanner battery update interval */
 static uint32_t scanner_battery_last_update = 0;
-#define SCANNER_BATTERY_UPDATE_INTERVAL_MS 5000  /* Update every 5 seconds */
+#define SCANNER_BATTERY_UPDATE_INTERVAL_MS 5000
 
-static void display_update_work_handler(struct k_work *work) {
-    ARG_UNUSED(work);
+/* Timeout check interval counter */
+static uint32_t process_call_count = 0;
 
-    display_update_pending = false;
+/* ========== scanner_process_incoming() - Called from LVGL timer ========== */
 
-    /* Skip update if screen transition in progress */
-    if (transition_in_progress) {
-        LOG_DBG("Skipping update - transition in progress");
-        return;
+void scanner_process_incoming(void) {
+    struct incoming_adv entry;
+    bool selected_updated = false;
+
+    /* 1. Drain ring buffer: process all pending advertisements */
+    while (incoming_pop(&entry)) {
+        /* Find existing keyboard or empty slot */
+        int index = -1;
+        uint32_t keyboard_id = (entry.data.keyboard_id[0] << 24) |
+                               (entry.data.keyboard_id[1] << 16) |
+                               (entry.data.keyboard_id[2] << 8) |
+                               entry.data.keyboard_id[3];
+
+        /* PRIORITY 1: BLE address match */
+        for (int i = 0; i < MAX_KEYBOARDS; i++) {
+            if (keyboards[i].active &&
+                memcmp(keyboards[i].ble_addr, entry.ble_addr, 6) == 0) {
+                index = i;
+                break;
+            }
+        }
+
+        /* PRIORITY 2: keyboard_id + device_role match */
+        if (index < 0) {
+            uint8_t incoming_role = entry.data.device_role;
+            for (int i = 0; i < MAX_KEYBOARDS; i++) {
+                if (keyboards[i].active) {
+                    uint32_t stored_id = (keyboards[i].data.keyboard_id[0] << 24) |
+                                         (keyboards[i].data.keyboard_id[1] << 16) |
+                                         (keyboards[i].data.keyboard_id[2] << 8) |
+                                         keyboards[i].data.keyboard_id[3];
+                    if (stored_id == keyboard_id &&
+                        keyboards[i].data.device_role == incoming_role) {
+                        index = i;
+                        if (memcmp(keyboards[i].ble_addr, entry.ble_addr, 6) != 0) {
+                            LOG_INF("stub: slot %d BLE addr updated (ID=%08X)", i, keyboard_id);
+                            memcpy(keyboards[i].ble_addr, entry.ble_addr, 6);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        /* PRIORITY 3: Empty slot */
+        if (index < 0) {
+            for (int i = 0; i < MAX_KEYBOARDS; i++) {
+                if (!keyboards[i].active) {
+                    index = i;
+                    LOG_INF("stub: new slot %d: %s (ID=%08X)",
+                           index, entry.name[0] ? entry.name : "(null)", keyboard_id);
+                    break;
+                }
+            }
+        }
+
+        if (index < 0) {
+            LOG_WRN("No slot for keyboard ID=%08X", keyboard_id);
+            continue;
+        }
+
+        /* Store the data */
+        keyboards[index].active = true;
+        memcpy(&keyboards[index].data, &entry.data, sizeof(struct zmk_status_adv_data));
+        keyboards[index].rssi = entry.rssi;
+        keyboards[index].last_seen = k_uptime_get_32();
+        memcpy(keyboards[index].ble_addr, entry.ble_addr, 6);
+        keyboards[index].ble_addr_type = entry.ble_addr_type;
+
+        /* Update name: preserve real name, don't overwrite with "Unknown" */
+        if (entry.name[0] != '\0') {
+            if (keyboards[index].name[0] == '\0') {
+                strncpy(keyboards[index].name, entry.name, MAX_NAME_LEN - 1);
+                keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
+            } else if (strcmp(entry.name, "Unknown") != 0 &&
+                       strcmp(keyboards[index].name, entry.name) != 0) {
+                strncpy(keyboards[index].name, entry.name, MAX_NAME_LEN - 1);
+                keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
+                LOG_INF("Updated keyboard name: %s (slot %d)", entry.name, index);
+            }
+        } else if (keyboards[index].name[0] == '\0') {
+            snprintf(keyboards[index].name, MAX_NAME_LEN, "Keyboard %d", index);
+        }
+
+        if (index == selected_keyboard) {
+            selected_updated = true;
+        }
     }
 
-    /* Update scanner's own battery periodically (via pending flag, no direct LVGL calls) */
+    /* 2. Set pending_data from selected keyboard */
+    if (selected_updated) {
+        fill_pending_from_selected();
+    }
+
+    /* 3. Rate calculation (1Hz) */
     uint32_t now = k_uptime_get_32();
+
+    if (rate_last_calc_time == 0) {
+        rate_last_calc_time = now;
+    }
+
+    uint32_t elapsed_since_calc = now - rate_last_calc_time;
+    if (elapsed_since_calc >= 1000) {
+        int count = atomic_get(&adv_receive_count);
+        atomic_set(&adv_receive_count, 0);
+
+        float instant_rate = (float)count * 1000.0f / (float)elapsed_since_calc;
+
+        rate_history[rate_history_idx] = instant_rate;
+        rate_history_idx = (rate_history_idx + 1) % RATE_HISTORY_SIZE;
+        if (rate_history_idx == 0) {
+            rate_history_filled = true;
+        }
+
+        float avg_rate = 0.0f;
+        int samples = rate_history_filled ? RATE_HISTORY_SIZE : rate_history_idx;
+        if (samples == 0) samples = 1;
+        for (int i = 0; i < samples; i++) {
+            avg_rate += rate_history[i];
+        }
+        avg_rate /= (float)samples;
+
+        int8_t rssi = (selected_keyboard >= 0 && selected_keyboard < MAX_KEYBOARDS &&
+                       keyboards[selected_keyboard].active)
+                      ? keyboards[selected_keyboard].rssi : -100;
+
+        set_signal_data(rssi, avg_rate);
+        pending_data.signal_update_pending = true;
+        rate_last_calc_time = now;
+    }
+
+    /* 4. Timeout check (every ~10 calls = ~1 second at 100ms timer) */
+    process_call_count++;
+    if ((process_call_count % 10) == 0) {
+#ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
+        const uint32_t timeout_ms = CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS;
+#else
+        const uint32_t timeout_ms = 480000;
+#endif
+        if (timeout_ms > 0) {
+            bool any_timed_out = false;
+            for (int i = 0; i < MAX_KEYBOARDS; i++) {
+                if (keyboards[i].active &&
+                    (now - keyboards[i].last_seen) > timeout_ms) {
+                    LOG_INF("Keyboard in slot %d timed out", i);
+                    keyboards[i].active = false;
+                    keyboards[i].name[0] = '\0';
+                    any_timed_out = true;
+                }
+            }
+
+            if (any_timed_out) {
+                int active_count = scanner_get_active_keyboard_count();
+                if (active_count == 0) {
+                    LOG_INF("No active keyboards - returning to Scanning... state");
+                    pending_data.no_keyboards = true;
+                    pending_data.update_pending = true;
+                    set_signal_data(-100, -1.0f);
+                    pending_data.signal_update_pending = true;
+                    rate_last_calc_time = 0;
+                    atomic_set(&adv_receive_count, 0);
+                    rate_history_filled = false;
+                    rate_history_idx = 0;
+                } else {
+                    /* Selected keyboard timed out - switch to another */
+                    if (!keyboards[selected_keyboard].active) {
+                        for (int i = 0; i < MAX_KEYBOARDS; i++) {
+                            if (keyboards[i].active) {
+                                selected_keyboard = i;
+                                LOG_INF("Switched to keyboard slot %d", i);
+                                fill_pending_from_selected();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* 5. Scanner battery (every ~5 seconds) */
     if (scanner_battery_last_update == 0 ||
         (now - scanner_battery_last_update) >= SCANNER_BATTERY_UPDATE_INTERVAL_MS) {
         int scanner_battery_level = 0;
@@ -257,122 +430,6 @@ static void display_update_work_handler(struct k_work *work) {
         }
         scanner_battery_last_update = now;
     }
-
-    struct zmk_status_adv_data data;
-    int8_t rssi;
-    char name[MAX_NAME_LEN];
-
-    if (!scanner_get_keyboard_data(selected_keyboard, &data, &rssi, name, sizeof(name))) {
-        /* Check if any keyboard is active */
-        int active_count = scanner_get_active_keyboard_count();
-        if (active_count == 0) {
-            /* All keyboards timed out - trigger "Scanning..." display */
-            LOG_INF("No active keyboards - returning to Scanning... state");
-            pending_data.no_keyboards = true;
-            pending_data.update_pending = true;
-
-            /* Reset signal data */
-            set_signal_data(-100, -1.0f);
-            pending_data.signal_update_pending = true;
-
-            /* Reset rate calculation state */
-            rate_last_calc_time = 0;
-            atomic_set(&adv_receive_count, 0);
-            rate_history_filled = false;
-            rate_history_idx = 0;
-        } else {
-            /* Try to switch to another active keyboard */
-            for (int i = 0; i < MAX_KEYBOARDS; i++) {
-                if (i != selected_keyboard) {
-                    struct zmk_status_adv_data tmp_data;
-                    if (scanner_get_keyboard_data(i, &tmp_data, NULL, NULL, 0)) {
-                        selected_keyboard = i;
-                        LOG_INF("Switched to keyboard slot %d", i);
-                        /* Reschedule to update with new keyboard */
-                        k_work_schedule(&display_update_work, K_MSEC(10));
-                        return;
-                    }
-                }
-            }
-        }
-        return;
-    }
-
-    /* Keyboard data available - clear no_keyboards flag */
-    pending_data.no_keyboards = false;
-
-    LOG_INF("Pending display update: %s, Layer=%d, Battery=%d%%",
-            name, data.active_layer, data.battery_level);
-
-    /* Store data in pending structure - NO LVGL calls here! */
-    strncpy(pending_data.device_name, name, MAX_NAME_LEN - 1);
-    pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
-    memcpy(pending_data.layer_name, data.layer_name, sizeof(pending_data.layer_name));
-    pending_data.layer = data.active_layer;
-    pending_data.wpm = data.wpm_value;
-    pending_data.usb_ready = (data.status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
-    pending_data.ble_connected = (data.status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
-    pending_data.ble_bonded = (data.status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
-    pending_data.profile = data.profile_slot;
-    pending_data.modifiers = data.modifier_flags;
-    pending_data.bat[0] = data.battery_level;
-    pending_data.bat[1] = data.peripheral_battery[0];
-    pending_data.bat[2] = data.peripheral_battery[1];
-    pending_data.bat[3] = data.peripheral_battery[2];
-
-    /* Calculate reception rate from actual advertisement count (1Hz update with moving average) */
-    last_rssi = rssi;
-
-    /* Initialize rate calculation on first call */
-    if (rate_last_calc_time == 0) {
-        rate_last_calc_time = now;
-        /* Don't reset counter - let advertisements that arrived before init be counted */
-    }
-
-    /* Check if 1 second has passed since last calculation */
-    uint32_t elapsed_since_calc = now - rate_last_calc_time;
-
-    if (elapsed_since_calc >= 1000) {
-        /* 1 second elapsed - calculate rate from actual advertisement receptions */
-        uint32_t elapsed = now - rate_last_calc_time;
-        int count = atomic_get(&adv_receive_count);
-        atomic_set(&adv_receive_count, 0);  /* Reset for next interval */
-
-        /* Calculate instantaneous rate */
-        float instant_rate = (float)count * 1000.0f / (float)elapsed;
-
-        /* Add to moving average history */
-        rate_history[rate_history_idx] = instant_rate;
-        rate_history_idx = (rate_history_idx + 1) % RATE_HISTORY_SIZE;
-        if (rate_history_idx == 0) {
-            rate_history_filled = true;
-        }
-
-        /* Calculate moving average */
-        float avg_rate = 0.0f;
-        int samples = rate_history_filled ? RATE_HISTORY_SIZE : rate_history_idx;
-        if (samples == 0) samples = 1;  /* Prevent division by zero */
-        for (int i = 0; i < samples; i++) {
-            avg_rate += rate_history[i];
-        }
-        avg_rate /= (float)samples;
-
-        /* Set signal data via global variables (avoids float pointer issues) */
-        set_signal_data(rssi, avg_rate);
-        pending_data.signal_update_pending = true;  /* Signal widget updates at 1Hz */
-        rate_last_calc_time = now;
-    }
-
-    /* Set flag - LVGL timer in main thread will pick this up */
-    pending_data.update_pending = true;
-}
-
-static void schedule_display_update(void) {
-    if (!display_update_pending) {
-        display_update_pending = true;
-        /* Schedule with small delay to batch rapid updates */
-        k_work_schedule(&display_update_work, K_MSEC(50));
-    }
 }
 
 /* ========== Scanner Message Functions ========== */
@@ -380,253 +437,84 @@ static void schedule_display_update(void) {
 int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
                                    int8_t rssi, const char *device_name,
                                    const uint8_t *ble_addr, uint8_t ble_addr_type) {
-    if (!mutex_initialized) {
-        k_mutex_init(&data_mutex);
-        mutex_initialized = true;
-    }
+    struct incoming_adv entry;
+    memcpy(&entry.data, adv_data, sizeof(struct zmk_status_adv_data));
+    entry.rssi = rssi;
 
-    if (k_mutex_lock(&data_mutex, K_MSEC(5)) != 0) {
-        msgs_dropped++;
-        return -EBUSY;
-    }
-
-    /* Find existing keyboard or empty slot */
-    int index = -1;
-    uint32_t keyboard_id = (adv_data->keyboard_id[0] << 24) |
-                           (adv_data->keyboard_id[1] << 16) |
-                           (adv_data->keyboard_id[2] << 8) |
-                           adv_data->keyboard_id[3];
-
-    /* PRIORITY 1: Look for existing keyboard by BLE address (fastest match) */
-    if (ble_addr != NULL) {
-        for (int i = 0; i < MAX_KEYBOARDS; i++) {
-            if (keyboards[i].active) {
-                if (memcmp(keyboards[i].ble_addr, ble_addr, 6) == 0) {
-                    index = i;
-                    break;
-                }
-            }
-        }
-    }
-
-    /* PRIORITY 2: Find by keyboard_id + device_role
-     * keyboard_id is HWINFO-based (hardware-unique per physical device),
-     * so same ID+role = same keyboard even if BLE MAC changed (e.g., profile switch) */
-    if (index < 0) {
-        uint8_t incoming_role = adv_data->device_role;
-        for (int i = 0; i < MAX_KEYBOARDS; i++) {
-            if (keyboards[i].active) {
-                uint32_t stored_id = (keyboards[i].data.keyboard_id[0] << 24) |
-                                     (keyboards[i].data.keyboard_id[1] << 16) |
-                                     (keyboards[i].data.keyboard_id[2] << 8) |
-                                     keyboards[i].data.keyboard_id[3];
-                if (stored_id == keyboard_id &&
-                    keyboards[i].data.device_role == incoming_role) {
-                    index = i;
-                    /* Update BLE address to the current one */
-                    if (ble_addr != NULL &&
-                        memcmp(keyboards[i].ble_addr, ble_addr, 6) != 0) {
-                        LOG_INF("stub: slot %d BLE addr updated (ID=%08X)", i, keyboard_id);
-                        memcpy(keyboards[i].ble_addr, ble_addr, 6);
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    /* If not found, find empty slot */
-    if (index < 0) {
-        for (int i = 0; i < MAX_KEYBOARDS; i++) {
-            if (!keyboards[i].active) {
-                index = i;
-                LOG_INF("stub: new slot %d: %s (ID=%08X)",
-                       index, device_name ? device_name : "(null)", keyboard_id);
-                break;
-            }
-        }
-    }
-
-    if (index < 0) {
-        k_mutex_unlock(&data_mutex);
-        LOG_WRN("No slot for keyboard ID=%08X", keyboard_id);
-        msgs_dropped++;
-        return -ENOMEM;
-    }
-
-    /* Store the data */
-    keyboards[index].active = true;
-    memcpy(&keyboards[index].data, adv_data, sizeof(struct zmk_status_adv_data));
-    keyboards[index].rssi = rssi;
-    keyboards[index].last_seen = k_uptime_get_32();
-
-    /* Store BLE address for unique identification */
-    if (ble_addr) {
-        memcpy(keyboards[index].ble_addr, ble_addr, 6);
-        keyboards[index].ble_addr_type = ble_addr_type;
-    }
-
-    /* Update name: Only overwrite if we have a real name (not "Unknown")
-     * This prevents flickering when ADV packet arrives before SCAN_RSP */
     if (device_name && device_name[0] != '\0') {
-        if (keyboards[index].name[0] == '\0') {
-            /* First time - set whatever we have */
-            strncpy(keyboards[index].name, device_name, MAX_NAME_LEN - 1);
-            keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
-        } else if (strcmp(device_name, "Unknown") != 0 &&
-                   strcmp(keyboards[index].name, device_name) != 0) {
-            /* Real name received - update from Unknown/generic to actual name */
-            strncpy(keyboards[index].name, device_name, MAX_NAME_LEN - 1);
-            keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
-            LOG_INF("Updated keyboard name: %s (slot %d)", device_name, index);
-        }
-        /* If device_name is "Unknown" but we already have a real name, don't overwrite */
-    } else if (keyboards[index].name[0] == '\0') {
-        snprintf(keyboards[index].name, MAX_NAME_LEN, "Keyboard %d", index);
+        strncpy(entry.name, device_name, MAX_NAME_LEN - 1);
+        entry.name[MAX_NAME_LEN - 1] = '\0';
+    } else {
+        entry.name[0] = '\0';
     }
 
-    k_mutex_unlock(&data_mutex);
-    msgs_sent++;
-
-    /* Count advertisement reception for rate calculation */
-    if (index == selected_keyboard) {
-        atomic_inc(&adv_receive_count);
-        schedule_display_update();
+    if (ble_addr) {
+        memcpy(entry.ble_addr, ble_addr, 6);
+        entry.ble_addr_type = ble_addr_type;
+    } else {
+        memset(entry.ble_addr, 0, 6);
+        entry.ble_addr_type = 0;
     }
+
+    int ret = incoming_push(&entry);
+    if (ret != 0) {
+        LOG_WRN("Ring buffer full, advertisement dropped");
+        return ret;
+    }
+
+    /* Count for rate calculation (atomic, safe from any thread) */
+    atomic_inc(&adv_receive_count);
 
     return 0;
 }
 
 int scanner_msg_send_swipe(int direction) {
     LOG_DBG("Swipe gesture: direction=%d", direction);
-    msgs_sent++;
     return 0;
 }
 
 int scanner_msg_send_tap(int16_t x, int16_t y) {
     LOG_DBG("Tap: x=%d, y=%d", x, y);
-    msgs_sent++;
     return 0;
 }
 
 int scanner_msg_send_battery_update(void) {
-    /* Read local scanner battery from ZMK battery API and set pending flag.
-     * Actual LVGL update happens in main thread via pending_update_timer_cb. */
-    int scanner_battery_level = 0;
-
-#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    scanner_battery_level = zmk_battery_state_of_charge();
-#endif
-
-    if (scanner_battery_level > 0) {
-        pending_data.scanner_battery = scanner_battery_level;
-        pending_data.scanner_battery_pending = true;
-    }
-
-    msgs_sent++;
+    /* Scanner battery is now handled by scanner_process_incoming() */
     return 0;
 }
 
 int scanner_msg_send_timeout_check(void) {
-    /* Check for timed-out keyboards */
-    if (!mutex_initialized) return 0;
-
-    uint32_t now = k_uptime_get_32();
-
-    /* Use CONFIG value for timeout (synced with status_scanner.c) */
-#ifdef CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS
-    const uint32_t timeout_ms = CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS;
-#else
-    const uint32_t timeout_ms = 480000;  /* 8 minutes default */
-#endif
-
-    /* Skip if timeout is disabled */
-    if (timeout_ms == 0) {
-        return 0;
-    }
-
-    if (k_mutex_lock(&data_mutex, K_MSEC(5)) != 0) {
-        return -EBUSY;
-    }
-
-    bool any_timed_out = false;
-    for (int i = 0; i < MAX_KEYBOARDS; i++) {
-        if (keyboards[i].active) {
-            if ((now - keyboards[i].last_seen) > timeout_ms) {
-                LOG_INF("Keyboard in slot %d timed out", i);
-                keyboards[i].active = false;
-                keyboards[i].name[0] = '\0';
-                any_timed_out = true;
-            }
-        }
-    }
-
-    k_mutex_unlock(&data_mutex);
-
-    /* Trigger display update if any keyboard timed out */
-    if (any_timed_out) {
-        schedule_display_update();
-    }
-
-    msgs_sent++;
+    /* Timeouts are now handled by scanner_process_incoming() */
     return 0;
 }
 
 int scanner_msg_send_display_refresh(void) {
+    /* Called from LVGL timer context (swipe handler) when returning to MAIN screen.
+     * Fill pending_data directly from current keyboard state. */
     if (scanner_get_active_keyboard_count() > 0) {
-        schedule_display_update();
+        fill_pending_from_selected();
     }
-    msgs_sent++;
     return 0;
 }
 
 int scanner_msg_send_timeout_wake(void) {
-    msgs_sent++;
     return 0;
 }
 
 int scanner_msg_send_brightness_sensor_read(void) {
-    msgs_sent++;
     return 0;
 }
 
 int scanner_msg_send_brightness_set_target(uint8_t target_brightness) {
-    msgs_sent++;
     return 0;
 }
 
 int scanner_msg_send_brightness_fade_step(void) {
-    msgs_sent++;
     return 0;
 }
 
 int scanner_msg_send_brightness_set_auto(bool enabled) {
-    msgs_sent++;
     return 0;
-}
-
-int scanner_msg_get(void *msg, k_timeout_t timeout) {
-    (void)msg;
-    (void)timeout;
-    return -ENOMSG;
-}
-
-void scanner_msg_purge(void) {
-    k_msgq_purge(&scanner_msgq);
-}
-
-void scanner_msg_get_stats(uint32_t *sent, uint32_t *dropped, uint32_t *processed) {
-    if (sent) *sent = msgs_sent;
-    if (dropped) *dropped = msgs_dropped;
-    if (processed) *processed = msgs_processed;
-}
-
-void scanner_msg_increment_processed(void) {
-    msgs_processed++;
-}
-
-uint32_t scanner_msg_get_queue_count(void) {
-    return k_msgq_num_used_get(&scanner_msgq);
 }
 
 /* ========== Scanner Start (delayed after boot) ========== */
@@ -642,13 +530,11 @@ static void scanner_start_work_handler(struct k_work *work) {
         LOG_INF("BLE scanner started successfully");
     } else {
         LOG_ERR("Failed to start BLE scanner: %d", ret);
-        /* Retry after 1 second */
         k_work_schedule(&scanner_start_work, K_SECONDS(1));
     }
 }
 
 static int scanner_init_start(void) {
-    /* Schedule scanner start after 500ms to allow BLE to initialize */
     k_work_schedule(&scanner_start_work, K_MSEC(500));
     return 0;
 }
