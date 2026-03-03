@@ -179,6 +179,18 @@ static bool ble_bonded = false;
 static char cached_device_name[32] = "Scanning...";
 static uint8_t cached_modifiers = 0;
 
+/* Static text buffers for lv_label_set_text_static()
+ * Prevents LVGL internal memory allocation churn that causes
+ * memory pool fragmentation over hours of continuous operation.
+ * Each buffer persists for program lifetime - safe for LVGL static text. */
+static char stbuf_rssi[16] = "?";
+static char stbuf_rate[16] = "-.--Hz";
+static char stbuf_wpm[8] = "0";
+static char stbuf_scanner_bat[8] = "?";
+static char stbuf_kb_bat[MAX_KB_BATTERIES][16] = {"0", "0", "0", "0"};
+static char stbuf_transport[48] = "";
+static char stbuf_modifier[64] = "";
+
 /* ========== PWM Backlight Control ========== */
 #if DT_HAS_COMPAT_STATUS_OKAY(pwm_leds)
 #define BACKLIGHT_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(pwm_leds)
@@ -497,6 +509,11 @@ static char last_keyboard_name[MAX_NAME_LEN] = "";  /* Track keyboard changes */
 static void pending_update_timer_cb(lv_timer_t *timer) {
     ARG_UNUSED(timer);
 
+    /* Skip during screen transitions (defensive guard) */
+    if (transition_in_progress) {
+        return;
+    }
+
     /* Only process updates on main screen or prospector display */
     if (current_screen != SCREEN_MAIN && current_screen != SCREEN_PROSPECTOR_DISPLAY) {
         return;
@@ -602,21 +619,19 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
             lv_obj_set_style_bg_color(rssi_bar, get_rssi_color(bars), LV_PART_INDICATOR);
         }
         if (rssi_label) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%ddBm", sig_rssi);
-            lv_label_set_text(rssi_label, buf);
+            snprintf(stbuf_rssi, sizeof(stbuf_rssi), "%ddBm", sig_rssi);
+            lv_label_set_text_static(rssi_label, stbuf_rssi);
         }
         if (rate_label) {
-            char buf[16];
             if (sig_rate_x100 < 0) {
-                snprintf(buf, sizeof(buf), "-.--Hz");
+                snprintf(stbuf_rate, sizeof(stbuf_rate), "-.--Hz");
             } else {
                 /* Display from integer directly: rate_x100 / 100 . rate_x100 % 100 */
                 int whole = sig_rate_x100 / 100;
                 int frac = (sig_rate_x100 % 100) / 10;  /* One decimal place */
-                snprintf(buf, sizeof(buf), "%d.%dHz", whole, frac);
+                snprintf(stbuf_rate, sizeof(stbuf_rate), "%d.%dHz", whole, frac);
             }
-            lv_label_set_text(rate_label, buf);
+            lv_label_set_text_static(rate_label, stbuf_rate);
         }
     }
 
@@ -939,7 +954,7 @@ void display_update_device_name(const char *name) {
         cached_device_name[sizeof(cached_device_name) - 1] = '\0';
     }
     if (device_name_label && name) {
-        lv_label_set_text(device_name_label, name);
+        lv_label_set_text_static(device_name_label, cached_device_name);
     }
 }
 
@@ -968,10 +983,10 @@ void display_update_scanner_battery(int level) {
             /* Show charge symbol + battery icon, move 3px left to accommodate wider icon */
             static char combined_icon[16];
             snprintf(combined_icon, sizeof(combined_icon), LV_SYMBOL_CHARGE "%s", get_battery_icon(level));
-            lv_label_set_text(scanner_bat_icon, combined_icon);
+            lv_label_set_text_static(scanner_bat_icon, combined_icon);
             lv_obj_set_pos(scanner_bat_icon, 213, 4);  /* 3px left when charging */
         } else {
-            lv_label_set_text(scanner_bat_icon, get_battery_icon(level));
+            lv_label_set_text_static(scanner_bat_icon, get_battery_icon(level));
             lv_obj_set_pos(scanner_bat_icon, 216, 4);  /* Normal position */
         }
         lv_obj_set_style_text_color(scanner_bat_icon, display_color, 0);
@@ -979,9 +994,8 @@ void display_update_scanner_battery(int level) {
 
     if (scanner_bat_pct) {
         lv_obj_set_style_opa(scanner_bat_pct, 255, 0);  /* Ensure visible */
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%d", level);
-        lv_label_set_text(scanner_bat_pct, buf);
+        snprintf(stbuf_scanner_bat, sizeof(stbuf_scanner_bat), "%d", level);
+        lv_label_set_text_static(scanner_bat_pct, stbuf_scanner_bat);
         lv_obj_set_style_text_color(scanner_bat_pct, display_color, 0);
     }
 }
@@ -1520,9 +1534,8 @@ void display_update_layer(int layer) {
 void display_update_wpm(int wpm) {
     wpm_value = wpm;  /* Cache for screen transitions */
     if (wpm_value_label) {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%d", wpm);
-        lv_label_set_text(wpm_value_label, buf);
+        snprintf(stbuf_wpm, sizeof(stbuf_wpm), "%d", wpm);
+        lv_label_set_text_static(wpm_value_label, stbuf_wpm);
     }
 }
 
@@ -1536,7 +1549,7 @@ void display_update_connection(bool usb_rdy, bool ble_conn, bool ble_bond, int p
         /* Exclusive display: USB or BLE (not both) */
         if (usb_ready) {
             /* USB connected - show USB only */
-            lv_label_set_text(transport_label, "#ffffff USB#");
+            snprintf(stbuf_transport, sizeof(stbuf_transport), "#ffffff USB#");
         } else {
             /* USB not connected - show BLE with profile number on new line
              * BLE text colors:
@@ -1553,41 +1566,40 @@ void display_update_connection(bool usb_rdy, bool ble_conn, bool ble_bond, int p
             } else {
                 ble_color = "ffffff";  /* White - not bonded */
             }
-            char transport_text[32];
-            snprintf(transport_text, sizeof(transport_text),
+            snprintf(stbuf_transport, sizeof(stbuf_transport),
                     "#%s BLE#\n#ffffff %d#", ble_color, profile);
-            lv_label_set_text(transport_label, transport_text);
         }
+        lv_label_set_text_static(transport_label, stbuf_transport);
     }
 
     /* Hide profile label - now integrated into transport_label */
     if (ble_profile_label) {
-        lv_label_set_text(ble_profile_label, "");
+        lv_label_set_text_static(ble_profile_label, "");
     }
 }
 
 void display_update_modifiers(uint8_t mods) {
     cached_modifiers = mods;  /* Cache for screen transitions */
     if (modifier_label) {
-        char mod_text[64] = "";
         int pos = 0;
+        stbuf_modifier[0] = '\0';
 
         /* Build NerdFont icon string - YADS style */
         if (mods & (ZMK_MOD_FLAG_LCTL | ZMK_MOD_FLAG_RCTL)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[0]);
+            pos += snprintf(stbuf_modifier + pos, sizeof(stbuf_modifier) - pos, "%s", mod_symbols[0]);
         }
         if (mods & (ZMK_MOD_FLAG_LSFT | ZMK_MOD_FLAG_RSFT)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[1]);
+            pos += snprintf(stbuf_modifier + pos, sizeof(stbuf_modifier) - pos, "%s", mod_symbols[1]);
         }
         if (mods & (ZMK_MOD_FLAG_LALT | ZMK_MOD_FLAG_RALT)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[2]);
+            pos += snprintf(stbuf_modifier + pos, sizeof(stbuf_modifier) - pos, "%s", mod_symbols[2]);
         }
         if (mods & (ZMK_MOD_FLAG_LGUI | ZMK_MOD_FLAG_RGUI)) {
-            pos += snprintf(mod_text + pos, sizeof(mod_text) - pos, "%s", mod_symbols[3]);
+            pos += snprintf(stbuf_modifier + pos, sizeof(stbuf_modifier) - pos, "%s", mod_symbols[3]);
         }
 
         /* Empty string when no modifiers active */
-        lv_label_set_text(modifier_label, mod_text);
+        lv_label_set_text_static(modifier_label, stbuf_modifier);
     }
 }
 
@@ -1726,9 +1738,8 @@ void display_update_keyboard_battery_4(int bat0, int bat1, int bat2, int bat3) {
             }
             if (kb_bat_pct[i]) {
                 lv_obj_set_style_opa(kb_bat_pct[i], 255, 0);
-                char buf[16];
-                snprintf(buf, sizeof(buf), "%d", val);
-                lv_label_set_text(kb_bat_pct[i], buf);
+                snprintf(stbuf_kb_bat[i], sizeof(stbuf_kb_bat[i]), "%d", val);
+                lv_label_set_text_static(kb_bat_pct[i], stbuf_kb_bat[i]);
                 lv_obj_set_style_text_color(kb_bat_pct[i], get_keyboard_battery_color(val), 0);
             }
             if (kb_bat_name[i]) {
@@ -1775,27 +1786,25 @@ void display_update_signal(int8_t rssi_val, float rate) {
     }
 
     if (rssi_label) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%ddBm", rssi_val);
-        lv_label_set_text(rssi_label, buf);
+        snprintf(stbuf_rssi, sizeof(stbuf_rssi), "%ddBm", rssi_val);
+        lv_label_set_text_static(rssi_label, stbuf_rssi);
     }
 
     if (rate_label) {
-        char buf[16];
         /* Robust rate display: handle invalid/out-of-range values */
         if (rate < 0.0f) {
             /* Negative = no data yet */
-            snprintf(buf, sizeof(buf), "-.--Hz");
+            snprintf(stbuf_rate, sizeof(stbuf_rate), "-.--Hz");
         } else if (rate > 999.9f || rate != rate) {  /* rate != rate checks for NaN */
             LOG_WRN("Invalid rate value: %.2f, displaying as -.--", (double)rate);
-            snprintf(buf, sizeof(buf), "-.--Hz");
+            snprintf(stbuf_rate, sizeof(stbuf_rate), "-.--Hz");
         } else {
             /* Safe conversion with rounding */
             int rate_int = (int)(rate * 10.0f + 0.5f);
             if (rate_int > 9999) rate_int = 9999;  /* Cap at 999.9Hz */
-            snprintf(buf, sizeof(buf), "%d.%dHz", rate_int / 10, rate_int % 10);
+            snprintf(stbuf_rate, sizeof(stbuf_rate), "%d.%dHz", rate_int / 10, rate_int % 10);
         }
-        lv_label_set_text(rate_label, buf);
+        lv_label_set_text_static(rate_label, stbuf_rate);
     }
 }
 

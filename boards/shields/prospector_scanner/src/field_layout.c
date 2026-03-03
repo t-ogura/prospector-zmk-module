@@ -227,6 +227,11 @@ static lv_obj_t *mod_labels[4] = {NULL};
 static lv_timer_t *anim_timer = NULL;
 static bool layout_created = false;
 
+/* Static text buffers for lv_label_set_text_static() */
+static char fl_stbuf_battery[16] = "-";
+static char fl_stbuf_output[8] = "";
+static char fl_stbuf_layer[16] = "BASE";
+
 /* Cached state */
 static struct {
     uint8_t active_layer;
@@ -521,16 +526,15 @@ static void update_layer(const char *layer_name) {
     const field_color_palette_t *p = &color_palettes[current_palette];
 
     if (layer_name && layer_name[0]) {
-        static char upper[32];
         int i;
-        for (i = 0; layer_name[i] && i < 31; i++) {
-            upper[i] = (layer_name[i] >= 'a' && layer_name[i] <= 'z')
+        for (i = 0; layer_name[i] && i < (int)(sizeof(fl_stbuf_layer) - 1); i++) {
+            fl_stbuf_layer[i] = (layer_name[i] >= 'a' && layer_name[i] <= 'z')
                         ? layer_name[i] - 32 : layer_name[i];
         }
-        upper[i] = '\0';
-        lv_label_set_text(layer_label, upper);
+        fl_stbuf_layer[i] = '\0';
+        lv_label_set_text_static(layer_label, fl_stbuf_layer);
     } else {
-        lv_label_set_text(layer_label, "BASE");
+        lv_label_set_text_static(layer_label, "BASE");
     }
     lv_obj_set_style_text_color(layer_label, lv_color_hex(p->layer_text), LV_PART_MAIN);
 }
@@ -559,15 +563,14 @@ static void update_battery(uint8_t central, bool central_ok,
     if (!battery_label) return;
     const field_color_palette_t *p = &color_palettes[current_palette];
 
-    char buf[16];
     if (central_ok && peripheral_ok && peripheral > 0) {
-        snprintf(buf, sizeof(buf), "%d/%d", central, peripheral);
+        snprintf(fl_stbuf_battery, sizeof(fl_stbuf_battery), "%d/%d", central, peripheral);
     } else if (central_ok && central > 0) {
-        snprintf(buf, sizeof(buf), "%d", central);
+        snprintf(fl_stbuf_battery, sizeof(fl_stbuf_battery), "%d", central);
     } else {
-        snprintf(buf, sizeof(buf), "-");
+        snprintf(fl_stbuf_battery, sizeof(fl_stbuf_battery), "-");
     }
-    lv_label_set_text(battery_label, buf);
+    lv_label_set_text_static(battery_label, fl_stbuf_battery);
     lv_obj_set_style_text_color(battery_label, lv_color_hex(p->battery_text), LV_PART_MAIN);
 }
 
@@ -576,12 +579,12 @@ static void update_output(bool usb_connected, uint8_t ble_profile, bool ble_conn
     const field_color_palette_t *p = &color_palettes[current_palette];
 
     if (usb_connected) {
-        lv_label_set_text(output_label, "USB");
+        snprintf(fl_stbuf_output, sizeof(fl_stbuf_output), "USB");
+        lv_label_set_text_static(output_label, fl_stbuf_output);
         lv_obj_set_style_text_color(output_label, lv_color_hex(p->output_active), LV_PART_MAIN);
     } else {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "BLE %d", ble_profile);
-        lv_label_set_text(output_label, buf);
+        snprintf(fl_stbuf_output, sizeof(fl_stbuf_output), "BLE %d", ble_profile);
+        lv_label_set_text_static(output_label, fl_stbuf_output);
         lv_obj_set_style_text_color(output_label,
             lv_color_hex(ble_connected ? p->output_active : p->output_inactive), LV_PART_MAIN);
     }

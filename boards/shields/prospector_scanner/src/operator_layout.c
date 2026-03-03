@@ -262,6 +262,16 @@ static struct {
     bool initialized;
 } cached_state = {0};
 
+/* Static text buffers for lv_label_set_text_static()
+ * Prevents LVGL internal memory allocation churn that causes
+ * memory pool fragmentation over hours of continuous operation. */
+static char op_stbuf_wpm[8] = "0";
+static char op_stbuf_layer[32] = "";
+static char op_stbuf_bat_central[4] = "-";
+static char op_stbuf_bat_peripheral[4] = "-";
+#define MAX_BAR_BATTERIES (OPERATOR_MAX_PERIPHERALS + 1)
+static char op_stbuf_bat_bar[MAX_BAR_BATTERIES][4] = {{"-"}, {"-"}, {"-"}, {"-"}};
+
 /* ========== Modifier Indicator ========== */
 
 static const char *modifier_texts[] = {"CTRL", "ALT", "SHFT", "GUI"};
@@ -400,15 +410,16 @@ static void update_wpm_meter(uint8_t wpm, const char *layer_name) {
     }
 
     /* Update WPM label */
-    char wpm_text[8];
-    snprintf(wpm_text, sizeof(wpm_text), "%d", wpm);
-    lv_label_set_text(wpm_widgets.wpm_label, wpm_text);
+    snprintf(op_stbuf_wpm, sizeof(op_stbuf_wpm), "%d", wpm);
+    lv_label_set_text_static(wpm_widgets.wpm_label, op_stbuf_wpm);
 
     /* Update layer label */
     if (layer_name && layer_name[0]) {
-        lv_label_set_text(wpm_widgets.layer_label, layer_name);
+        strncpy(op_stbuf_layer, layer_name, sizeof(op_stbuf_layer) - 1);
+        op_stbuf_layer[sizeof(op_stbuf_layer) - 1] = '\0';
+        lv_label_set_text_static(wpm_widgets.layer_label, op_stbuf_layer);
     } else {
-        lv_label_set_text(wpm_widgets.layer_label, "BASE");
+        lv_label_set_text_static(wpm_widgets.layer_label, "BASE");
     }
 }
 
@@ -588,6 +599,7 @@ static void create_battery_circles(lv_obj_t *parent) {
 }
 
 static void update_battery_arc(lv_obj_t *arc, lv_obj_t *label_box, lv_obj_t *label,
+                               char *text_buf, size_t text_buf_size,
                                uint8_t level, bool connected) {
     const operator_color_palette_t *p = &color_palettes[current_palette];
     bool low_battery = connected && level > 0 && level <= LOW_BATTERY_THRESHOLD;
@@ -617,14 +629,13 @@ static void update_battery_arc(lv_obj_t *arc, lv_obj_t *label_box, lv_obj_t *lab
     /* Update label box color */
     lv_obj_set_style_bg_color(label_box, lv_color_hex(fill_color), LV_PART_MAIN);
 
-    /* Update label */
-    char text[4];
+    /* Update label (use static buffer to avoid LVGL memory churn) */
     if (connected && level > 0) {
-        snprintf(text, sizeof(text), "%d", level);
+        snprintf(text_buf, text_buf_size, "%d", level);
     } else {
-        snprintf(text, sizeof(text), "-");
+        snprintf(text_buf, text_buf_size, "-");
     }
-    lv_label_set_text(label, text);
+    lv_label_set_text_static(label, text_buf);
 
     /* Update label color */
     uint32_t label_color = connected ? 0x000000 : DISPLAY_COLOR_BATTERY_DISCONNECTED_LABEL;
@@ -634,9 +645,13 @@ static void update_battery_arc(lv_obj_t *arc, lv_obj_t *label_box, lv_obj_t *lab
 static void update_battery_circles(uint8_t central_level, bool central_connected,
                                    uint8_t peripheral_level, bool peripheral_connected) {
     update_battery_arc(battery_widgets.central_arc, battery_widgets.central_label_box,
-                       battery_widgets.central_label, central_level, central_connected);
+                       battery_widgets.central_label,
+                       op_stbuf_bat_central, sizeof(op_stbuf_bat_central),
+                       central_level, central_connected);
     update_battery_arc(battery_widgets.peripheral_arc, battery_widgets.peripheral_label_box,
-                       battery_widgets.peripheral_label, peripheral_level, peripheral_connected);
+                       battery_widgets.peripheral_label,
+                       op_stbuf_bat_peripheral, sizeof(op_stbuf_bat_peripheral),
+                       peripheral_level, peripheral_connected);
 }
 
 /* ========== Battery Bars (3+ batteries) ========== */
@@ -755,14 +770,13 @@ static void update_battery_bar(int index, uint8_t level, bool connected) {
     lv_obj_set_style_text_color(battery_widgets.bar_labels[index],
                                 lv_color_hex(label_color), LV_PART_MAIN);
 
-    /* Update percentage label */
-    char text[4];
+    /* Update percentage label (use static buffer to avoid LVGL memory churn) */
     if (connected && level > 0) {
-        snprintf(text, sizeof(text), "%d", level);
+        snprintf(op_stbuf_bat_bar[index], sizeof(op_stbuf_bat_bar[index]), "%d", level);
     } else {
-        snprintf(text, sizeof(text), "-");
+        snprintf(op_stbuf_bat_bar[index], sizeof(op_stbuf_bat_bar[index]), "-");
     }
-    lv_label_set_text(battery_widgets.bar_pct_labels[index], text);
+    lv_label_set_text_static(battery_widgets.bar_pct_labels[index], op_stbuf_bat_bar[index]);
     lv_obj_set_style_text_color(battery_widgets.bar_pct_labels[index],
                                 lv_color_hex(fill_color), LV_PART_MAIN);
     /* Re-align after text change (text width changes shift position) */
@@ -1211,8 +1225,9 @@ void operator_layout_update(uint8_t active_layer, const char *layer_name,
 
     cached_state.initialized = true;
 
-    /* Force LVGL to redraw updated widgets */
-    lv_obj_invalidate(layout_container);
+    /* Note: individual LVGL update functions (lv_label_set_text_static, lv_arc_set_value, etc.)
+     * already invalidate their own areas when state changes. No blanket invalidation needed.
+     * Removing unconditional lv_obj_invalidate() reduces unnecessary full-screen redraws. */
 }
 
 void operator_layout_destroy(void) {

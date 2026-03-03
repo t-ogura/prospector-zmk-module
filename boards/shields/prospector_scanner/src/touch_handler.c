@@ -106,7 +106,7 @@ extern void touch_handler_late_register_callback(touch_event_callback_t callback
 
 static void touch_input_callback(struct input_event *evt, void *user_data) {
     ARG_UNUSED(user_data);
-    LOG_INF("📥 INPUT EVENT: type=%d code=%d value=%d", evt->type, evt->code, evt->value);
+    LOG_DBG("INPUT EVENT: type=%d code=%d value=%d", evt->type, evt->code, evt->value);
 
     switch (evt->code) {
         case INPUT_KEY_DOWN:
@@ -128,7 +128,6 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
 
         case INPUT_KEY_LEFT:
             if (evt->value == 1) {
-                // Direct mapping - no swap needed with corrected coordinate transform
                 LOG_INF("HW GESTURE: Swipe LEFT");
                 swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_LEFT);
@@ -137,7 +136,6 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
 
         case INPUT_KEY_RIGHT:
             if (evt->value == 1) {
-                // Direct mapping - no swap needed with corrected coordinate transform
                 LOG_INF("HW GESTURE: Swipe RIGHT");
                 swipe_already_raised = true;
                 raise_swipe_event(SWIPE_DIRECTION_RIGHT);
@@ -148,25 +146,25 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
             // Store X coordinate
             current_x = (uint16_t)evt->value;
             x_updated = true;
-            LOG_INF("📍 X: %d", current_x);
+            LOG_DBG("X: %d", current_x);
             break;
 
         case INPUT_ABS_Y:
             // Store Y coordinate
             current_y = (uint16_t)evt->value;
             y_updated = true;
-            LOG_INF("📍 Y: %d", current_y);
+            LOG_DBG("Y: %d", current_y);
             break;
 
         case INPUT_BTN_TOUCH:
             // Touch state changed
             touch_active = (evt->value != 0);
-            LOG_INF("🔔 BTN_TOUCH event: value=%d, prev_active=%d, new_active=%d",
+            LOG_DBG("BTN_TOUCH event: value=%d, prev_active=%d, new_active=%d",
                     evt->value, prev_touch_active, touch_active);
 
             // Wait for coordinates to be updated
             if (!x_updated || !y_updated) {
-                LOG_WRN("⚠️  Touch event before coordinates updated, using previous values");
+                LOG_DBG("Touch event before coordinates updated, using previous values");
             }
 
             // Update last event with complete coordinates
@@ -189,7 +187,7 @@ static void touch_input_callback(struct input_event *evt, void *user_data) {
                 swipe_state.in_progress = true;
                 swipe_already_raised = false;  // Clear for new touch sequence
 
-                LOG_INF("Touch DOWN at (%d, %d)", current_x, current_y);
+                LOG_DBG("Touch DOWN at (%d, %d)", current_x, current_y);
 
                 // Reset coordinate update flags for next touch
                 x_updated = false;
