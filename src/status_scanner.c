@@ -45,25 +45,34 @@ static struct {
 
 static void store_device_name(const bt_addr_le_t *addr, const char *name) {
     uint32_t now = k_uptime_get_32();
+    int oldest_idx = 0;
+    uint32_t oldest_time = UINT32_MAX;
 
     for (int i = 0; i < 5; i++) {
-        if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0 ||
-            (now - temp_device_names[i].timestamp) > 5000) {
-
-            bt_addr_le_copy(&temp_device_names[i].addr, addr);
+        /* Exact match: update existing entry */
+        if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0) {
             strncpy(temp_device_names[i].name, name, sizeof(temp_device_names[i].name) - 1);
             temp_device_names[i].name[sizeof(temp_device_names[i].name) - 1] = '\0';
             temp_device_names[i].timestamp = now;
-            break;
+            return;
+        }
+        /* Track oldest entry for LRU eviction */
+        if (temp_device_names[i].timestamp < oldest_time) {
+            oldest_time = temp_device_names[i].timestamp;
+            oldest_idx = i;
         }
     }
+
+    /* No match found: evict oldest entry (LRU) */
+    bt_addr_le_copy(&temp_device_names[oldest_idx].addr, addr);
+    strncpy(temp_device_names[oldest_idx].name, name, sizeof(temp_device_names[oldest_idx].name) - 1);
+    temp_device_names[oldest_idx].name[sizeof(temp_device_names[oldest_idx].name) - 1] = '\0';
+    temp_device_names[oldest_idx].timestamp = now;
 }
 
 static const char *get_device_name(const bt_addr_le_t *addr) {
-    uint32_t now = k_uptime_get_32();
     for (int i = 0; i < 5; i++) {
-        if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0 &&
-            (now - temp_device_names[i].timestamp) <= 5000) {
+        if (bt_addr_le_cmp(&temp_device_names[i].addr, addr) == 0) {
             return temp_device_names[i].name;
         }
     }
@@ -112,7 +121,7 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 
             if (ad_type == BT_DATA_NAME_SHORTENED && strncmp(device_name, "LalaPad", 7) == 0) {
                 strcpy(device_name, "LalaPadmini");
-                printk("*** PROSPECTOR SCANNER: Expanded shortened name to: %s ***\n", device_name);
+                LOG_INF("Expanded shortened name to: %s", device_name);
             }
 
             store_device_name(addr, device_name);
@@ -151,8 +160,8 @@ static void scan_callback(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                         LOG_DBG("Valid Prospector data: Ch:%d->%d Ver=%d Bat=%d%%",
                                keyboard_channel, scanner_channel, data->version, data->battery_level);
                     } else {
-                        printk("*** SCANNER: Channel mismatch - KB Ch:%d, Scanner Ch:%d (filtered) ***\n",
-                               keyboard_channel, scanner_channel);
+                        LOG_DBG("Channel mismatch - KB Ch:%d, Scanner Ch:%d (filtered)",
+                                keyboard_channel, scanner_channel);
                     }
                 } else {
                     LOG_DBG("Non-Prospector device: %02X%02X %02X%02X",

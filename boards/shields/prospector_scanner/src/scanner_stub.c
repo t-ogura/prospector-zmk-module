@@ -58,11 +58,13 @@ static volatile uint8_t incoming_read_idx;   /* LVGL timer only writes */
 
 /* Push one entry from BT RX thread (producer) */
 static int incoming_push(const struct incoming_adv *entry) {
-    uint8_t next = (incoming_write_idx + 1) & (INCOMING_BUF_SIZE - 1);
-    if (next == incoming_read_idx) {
+    uint8_t wi = incoming_write_idx & (INCOMING_BUF_SIZE - 1);
+    uint8_t next = (wi + 1) & (INCOMING_BUF_SIZE - 1);
+    uint8_t ri = incoming_read_idx & (INCOMING_BUF_SIZE - 1);
+    if (next == ri) {
         return -ENOMEM;  /* Buffer full, drop */
     }
-    incoming_buf[incoming_write_idx] = *entry;
+    incoming_buf[wi] = *entry;
     __DMB();  /* ARM memory barrier: ensure data written before index update */
     incoming_write_idx = next;
     return 0;
@@ -70,12 +72,14 @@ static int incoming_push(const struct incoming_adv *entry) {
 
 /* Pop one entry from LVGL timer context (consumer) */
 static bool incoming_pop(struct incoming_adv *out) {
-    if (incoming_read_idx == incoming_write_idx) {
+    uint8_t ri = incoming_read_idx & (INCOMING_BUF_SIZE - 1);
+    uint8_t wi = incoming_write_idx & (INCOMING_BUF_SIZE - 1);
+    if (ri == wi) {
         return false;  /* Empty */
     }
-    *out = incoming_buf[incoming_read_idx];
+    *out = incoming_buf[ri];
     __DMB();  /* ARM memory barrier: ensure data read before index update */
-    incoming_read_idx = (incoming_read_idx + 1) & (INCOMING_BUF_SIZE - 1);
+    incoming_read_idx = (ri + 1) & (INCOMING_BUF_SIZE - 1);
     return true;
 }
 
@@ -118,9 +122,9 @@ bool scanner_get_pending_update(struct pending_display_data *out) {
 volatile int8_t scanner_signal_rssi = -100;
 volatile int32_t scanner_signal_rate_x100 = -100;  /* rate * 100, as integer */
 
-static void set_signal_data(int8_t rssi, float rate_hz) {
+static void set_signal_data(int8_t rssi, int32_t rate_x100) {
     scanner_signal_rssi = rssi;
-    scanner_signal_rate_x100 = (int32_t)(rate_hz * 100.0f);
+    scanner_signal_rate_x100 = rate_x100;
 }
 
 /* Check if signal update is pending */
@@ -223,7 +227,7 @@ static atomic_t adv_receive_count = ATOMIC_INIT(0);  /* Incremented by BT RX (at
 static uint32_t rate_last_calc_time = 0;
 
 #define RATE_HISTORY_SIZE 4
-static float rate_history[RATE_HISTORY_SIZE] = {0};
+static int32_t rate_history_x100[RATE_HISTORY_SIZE] = {0};  /* rate × 100, integer */
 static int rate_history_idx = 0;
 static bool rate_history_filled = false;
 
@@ -240,8 +244,10 @@ void scanner_process_incoming(void) {
     struct incoming_adv entry;
     bool selected_updated = false;
 
-    /* 1. Drain ring buffer: process all pending advertisements */
-    while (incoming_pop(&entry)) {
+    /* 1. Drain ring buffer: process all pending advertisements
+     * Bounded to INCOMING_BUF_SIZE to prevent infinite loop if indices are corrupted */
+    int drain_limit = INCOMING_BUF_SIZE;
+    while (drain_limit-- > 0 && incoming_pop(&entry)) {
         /* Find existing keyboard or empty slot */
         int index = -1;
         uint32_t keyboard_id = (entry.data.keyboard_id[0] << 24) |
@@ -342,27 +348,30 @@ void scanner_process_incoming(void) {
         int count = atomic_get(&adv_receive_count);
         atomic_set(&adv_receive_count, 0);
 
-        float instant_rate = (float)count * 1000.0f / (float)elapsed_since_calc;
+        /* Integer-only rate calculation: rate_x100 = count * 100000 / elapsed_ms */
+        int32_t instant_rate_x100 = (elapsed_since_calc > 0)
+            ? (int32_t)((uint32_t)count * 100000U / elapsed_since_calc)
+            : 0;
 
-        rate_history[rate_history_idx] = instant_rate;
+        rate_history_x100[rate_history_idx] = instant_rate_x100;
         rate_history_idx = (rate_history_idx + 1) % RATE_HISTORY_SIZE;
         if (rate_history_idx == 0) {
             rate_history_filled = true;
         }
 
-        float avg_rate = 0.0f;
+        int32_t avg_rate_x100 = 0;
         int samples = rate_history_filled ? RATE_HISTORY_SIZE : rate_history_idx;
         if (samples == 0) samples = 1;
         for (int i = 0; i < samples; i++) {
-            avg_rate += rate_history[i];
+            avg_rate_x100 += rate_history_x100[i];
         }
-        avg_rate /= (float)samples;
+        avg_rate_x100 /= samples;
 
         int8_t rssi = (selected_keyboard >= 0 && selected_keyboard < MAX_KEYBOARDS &&
                        keyboards[selected_keyboard].active)
                       ? keyboards[selected_keyboard].rssi : -100;
 
-        set_signal_data(rssi, avg_rate);
+        set_signal_data(rssi, avg_rate_x100);
         pending_data.signal_update_pending = true;
         rate_last_calc_time = now;
     }
@@ -393,7 +402,7 @@ void scanner_process_incoming(void) {
                     LOG_INF("No active keyboards - returning to Scanning... state");
                     pending_data.no_keyboards = true;
                     pending_data.update_pending = true;
-                    set_signal_data(-100, -1.0f);
+                    set_signal_data(-100, -100);
                     pending_data.signal_update_pending = true;
                     rate_last_calc_time = 0;
                     atomic_set(&adv_receive_count, 0);

@@ -510,6 +510,12 @@ static char last_keyboard_name[MAX_NAME_LEN] = "";  /* Track keyboard changes */
 static void pending_update_timer_cb(lv_timer_t *timer) {
     ARG_UNUSED(timer);
 
+    /* Heartbeat: log every 30 seconds to detect display thread hangs */
+    static uint32_t heartbeat_counter = 0;
+    if (++heartbeat_counter % 300 == 0) {  /* 300 × 100ms = 30s */
+        LOG_INF("Display heartbeat #%u (screen=%d)", heartbeat_counter / 300, current_screen);
+    }
+
     /* Always drain ring buffer (even during transitions, to prevent overflow) */
     scanner_process_incoming();
 
