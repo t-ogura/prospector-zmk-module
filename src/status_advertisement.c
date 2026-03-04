@@ -853,7 +853,10 @@ static void adv_work_handler(struct k_work *work) {
             // can learn the name even when SCAN_RSP is blocked by radio congestion.
             adv_cycle_counter++;
             uint32_t name_interval = is_active ? NAME_ADV_INTERVAL_ACTIVE : NAME_ADV_INTERVAL_IDLE;
-            bool send_name = (adv_cycle_counter % name_interval == 0) && name_ad[1].data_len > 0;
+            bool in_burst = (atomic_get(&burst_remaining) > 0);
+            bool send_name = !in_burst &&
+                             (adv_cycle_counter % name_interval == 0) &&
+                             name_ad[1].data_len > 0;
 
             int err;
             if (send_name) {
