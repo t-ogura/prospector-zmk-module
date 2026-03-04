@@ -13,6 +13,7 @@
 #include <zephyr/init.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+#include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
 #include <lvgl.h>
 
@@ -31,21 +32,12 @@ extern int zmk_status_scanner_start(void);
 
 /* ========== Keyboard Data Storage ========== */
 /* Accessed ONLY from LVGL timer context (main thread) */
+/* Uses struct zmk_keyboard_status from zmk/status_scanner.h as single source of truth */
 
-#define MAX_KEYBOARDS 3
+#define MAX_KEYBOARDS ZMK_STATUS_SCANNER_MAX_KEYBOARDS
 #define MAX_NAME_LEN 32
 
-struct keyboard_state {
-    bool active;
-    struct zmk_status_adv_data data;
-    int8_t rssi;
-    char name[MAX_NAME_LEN];
-    uint32_t last_seen;  /* k_uptime_get_32() */
-    uint8_t ble_addr[6];     /* BLE MAC address for unique identification */
-    uint8_t ble_addr_type;   /* BLE address type */
-};
-
-static struct keyboard_state keyboards[MAX_KEYBOARDS];
+static struct zmk_keyboard_status keyboards[MAX_KEYBOARDS];
 static int selected_keyboard = 0;
 
 /* ========== SPSC Ring Buffer (BT RX → LVGL timer) ========== */
@@ -165,7 +157,7 @@ bool scanner_get_keyboard_data(int index, struct zmk_status_adv_data *data,
     if (data) *data = keyboards[index].data;
     if (rssi) *rssi = keyboards[index].rssi;
     if (name && name_len > 0) {
-        strncpy(name, keyboards[index].name, name_len - 1);
+        strncpy(name, keyboards[index].ble_name, name_len - 1);
         name[name_len - 1] = '\0';
     }
     return true;
@@ -183,6 +175,13 @@ int scanner_get_selected_keyboard(void) {
     return selected_keyboard;
 }
 
+struct zmk_keyboard_status *scanner_get_keyboard_status(int index) {
+    if (index < 0 || index >= MAX_KEYBOARDS) {
+        return NULL;
+    }
+    return keyboards[index].active ? &keyboards[index] : NULL;
+}
+
 /* Helper: populate pending_data from keyboards[selected_keyboard] */
 static void fill_pending_from_selected(void) {
     struct zmk_status_adv_data *d;
@@ -192,7 +191,7 @@ static void fill_pending_from_selected(void) {
     }
 
     d = &keyboards[selected_keyboard].data;
-    strncpy(pending_data.device_name, keyboards[selected_keyboard].name, MAX_NAME_LEN - 1);
+    strncpy(pending_data.device_name, keyboards[selected_keyboard].ble_name, MAX_NAME_LEN - 1);
     pending_data.device_name[MAX_NAME_LEN - 1] = '\0';
     memcpy(pending_data.layer_name, d->layer_name, sizeof(pending_data.layer_name));
     pending_data.layer = d->active_layer;
@@ -308,17 +307,17 @@ void scanner_process_incoming(void) {
 
         /* Update name: preserve real name, don't overwrite with "Unknown" */
         if (entry.name[0] != '\0') {
-            if (keyboards[index].name[0] == '\0') {
-                strncpy(keyboards[index].name, entry.name, MAX_NAME_LEN - 1);
-                keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
+            if (keyboards[index].ble_name[0] == '\0') {
+                strncpy(keyboards[index].ble_name, entry.name, MAX_NAME_LEN - 1);
+                keyboards[index].ble_name[MAX_NAME_LEN - 1] = '\0';
             } else if (strcmp(entry.name, "Unknown") != 0 &&
-                       strcmp(keyboards[index].name, entry.name) != 0) {
-                strncpy(keyboards[index].name, entry.name, MAX_NAME_LEN - 1);
-                keyboards[index].name[MAX_NAME_LEN - 1] = '\0';
+                       strcmp(keyboards[index].ble_name, entry.name) != 0) {
+                strncpy(keyboards[index].ble_name, entry.name, MAX_NAME_LEN - 1);
+                keyboards[index].ble_name[MAX_NAME_LEN - 1] = '\0';
                 LOG_INF("Updated keyboard name: %s (slot %d)", entry.name, index);
             }
-        } else if (keyboards[index].name[0] == '\0') {
-            snprintf(keyboards[index].name, MAX_NAME_LEN, "Keyboard %d", index);
+        } else if (keyboards[index].ble_name[0] == '\0') {
+            snprintf(keyboards[index].ble_name, MAX_NAME_LEN, "Keyboard %d", index);
         }
 
         if (index == selected_keyboard) {
@@ -383,7 +382,7 @@ void scanner_process_incoming(void) {
                     (now - keyboards[i].last_seen) > timeout_ms) {
                     LOG_INF("Keyboard in slot %d timed out", i);
                     keyboards[i].active = false;
-                    keyboards[i].name[0] = '\0';
+                    keyboards[i].ble_name[0] = '\0';
                     any_timed_out = true;
                 }
             }
