@@ -1,12 +1,15 @@
 /**
  * Scanner Message Handler - Connects BLE scanner to display widgets
  *
- * Architecture (lock-free):
+ * Architecture (ring buffer + work handler, matching v2.1.0 timing):
  *   BT RX thread → ring buffer push (non-blocking, no mutex)
- *   LVGL timer (100ms) → scanner_process_incoming() → drain ring buffer
- *                       → manage keyboards[] → set pending_data → widget update
+ *   Work handler (100ms) → scanner_process_incoming() → drain ring buffer
+ *                         → manage keyboards[] → set pending_data
+ *   LVGL timer (100ms)   → read pending_data → widget update (display only)
  *
- * keyboards[] is accessed ONLY from LVGL timer context (single-threaded).
+ * Key design: Data processing (work handler) is separated from display
+ * rendering (LVGL timer), matching v2.1.0's proven architecture.
+ * The ring buffer eliminates mutex on the BT RX hot path.
  */
 
 #include <zephyr/kernel.h>
@@ -31,7 +34,7 @@ LOG_MODULE_REGISTER(scanner_handler, LOG_LEVEL_INF);
 extern int zmk_status_scanner_start(void);
 
 /* ========== Keyboard Data Storage ========== */
-/* Accessed ONLY from LVGL timer context (main thread) */
+/* Protected by data_mutex: work handler writes, LVGL timer reads */
 /* Uses struct zmk_keyboard_status from zmk/status_scanner.h as single source of truth */
 
 #define MAX_KEYBOARDS ZMK_STATUS_SCANNER_MAX_KEYBOARDS
@@ -39,6 +42,8 @@ extern int zmk_status_scanner_start(void);
 
 static struct zmk_keyboard_status keyboards[MAX_KEYBOARDS];
 static int selected_keyboard = 0;
+static struct k_mutex data_mutex;
+static bool mutex_initialized = false;
 
 /* ========== SPSC Ring Buffer (BT RX → LVGL timer) ========== */
 
@@ -54,7 +59,7 @@ struct incoming_adv {
 
 static struct incoming_adv incoming_buf[INCOMING_BUF_SIZE];
 static volatile uint8_t incoming_write_idx;  /* BT RX only writes */
-static volatile uint8_t incoming_read_idx;   /* LVGL timer only writes */
+static volatile uint8_t incoming_read_idx;   /* Work handler only writes */
 
 /* Push one entry from BT RX thread (producer) */
 static int incoming_push(const struct incoming_adv *entry) {
@@ -146,32 +151,47 @@ bool scanner_get_pending_battery(int *level) {
     return true;
 }
 
-/* ========== Public API for Display (LVGL timer context only) ========== */
+/* ========== Public API for Display ========== */
+/* All functions accessing keyboards[] are mutex-protected (matching v2.2a) */
 
 bool scanner_get_keyboard_data(int index, struct zmk_status_adv_data *data,
                                int8_t *rssi, char *name, size_t name_len) {
-    if (index < 0 || index >= MAX_KEYBOARDS) {
+    if (!mutex_initialized || index < 0 || index >= MAX_KEYBOARDS) {
         return false;
     }
 
-    if (!keyboards[index].active) {
+    if (k_mutex_lock(&data_mutex, K_MSEC(10)) != 0) {
         return false;
     }
 
-    if (data) *data = keyboards[index].data;
-    if (rssi) *rssi = keyboards[index].rssi;
-    if (name && name_len > 0) {
-        strncpy(name, keyboards[index].ble_name, name_len - 1);
-        name[name_len - 1] = '\0';
+    bool result = false;
+    if (keyboards[index].active) {
+        if (data) *data = keyboards[index].data;
+        if (rssi) *rssi = keyboards[index].rssi;
+        if (name && name_len > 0) {
+            strncpy(name, keyboards[index].ble_name, name_len - 1);
+            name[name_len - 1] = '\0';
+        }
+        result = true;
     }
-    return true;
+
+    k_mutex_unlock(&data_mutex);
+    return result;
 }
 
 int scanner_get_active_keyboard_count(void) {
+    if (!mutex_initialized) return 0;
+
+    if (k_mutex_lock(&data_mutex, K_MSEC(10)) != 0) {
+        return 0;
+    }
+
     int count = 0;
     for (int i = 0; i < MAX_KEYBOARDS; i++) {
         if (keyboards[i].active) count++;
     }
+
+    k_mutex_unlock(&data_mutex);
     return count;
 }
 
@@ -180,10 +200,21 @@ int scanner_get_selected_keyboard(void) {
 }
 
 struct zmk_keyboard_status *scanner_get_keyboard_status(int index) {
-    if (index < 0 || index >= MAX_KEYBOARDS) {
+    /* Note: Returns pointer under mutex protection. Caller must not hold
+     * the pointer across long operations. For keyboard selection screen,
+     * copy the data immediately. */
+    if (!mutex_initialized || index < 0 || index >= MAX_KEYBOARDS) {
         return NULL;
     }
-    return keyboards[index].active ? &keyboards[index] : NULL;
+
+    if (k_mutex_lock(&data_mutex, K_MSEC(10)) != 0) {
+        return NULL;
+    }
+
+    struct zmk_keyboard_status *result = keyboards[index].active ? &keyboards[index] : NULL;
+
+    k_mutex_unlock(&data_mutex);
+    return result;
 }
 
 /* Helper: populate pending_data from keyboards[selected_keyboard] */
@@ -215,9 +246,27 @@ static void fill_pending_from_selected(void) {
 
 void scanner_set_selected_keyboard(int index) {
     if (index >= 0 && index < MAX_KEYBOARDS) {
-        selected_keyboard = index;
-        LOG_INF("Selected keyboard changed to slot %d", index);
-        fill_pending_from_selected();
+        if (mutex_initialized && k_mutex_lock(&data_mutex, K_MSEC(10)) == 0) {
+            selected_keyboard = index;
+            LOG_INF("Selected keyboard changed to slot %d", index);
+            fill_pending_from_selected();
+            k_mutex_unlock(&data_mutex);
+        }
+    }
+}
+
+/* ========== Periodic Process Work (drains ring buffer, updates keyboards[]) ========== */
+/* Runs in system work queue context, separated from LVGL rendering thread */
+
+static void process_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(process_work, process_work_handler);
+static volatile bool process_pending = false;
+
+static void schedule_process(void) {
+    if (!process_pending) {
+        process_pending = true;
+        /* Batch rapid advertisements with 50ms delay (same as v2.1.0) */
+        k_work_schedule(&process_work, K_MSEC(50));
     }
 }
 
@@ -440,6 +489,21 @@ void scanner_process_incoming(void) {
     }
 }
 
+/* ========== Process Work Handler ========== */
+
+static void process_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    process_pending = false;
+
+    if (mutex_initialized && k_mutex_lock(&data_mutex, K_MSEC(50)) == 0) {
+        scanner_process_incoming();
+        k_mutex_unlock(&data_mutex);
+    }
+
+    /* Reschedule periodically (rate calc, timeout checks, battery) */
+    k_work_schedule(&process_work, K_MSEC(100));
+}
+
 /* ========== Scanner Message Functions ========== */
 
 int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
@@ -473,6 +537,9 @@ int scanner_msg_send_keyboard_data(const struct zmk_status_adv_data *adv_data,
     /* Count for rate calculation (atomic, safe from any thread) */
     atomic_inc(&adv_receive_count);
 
+    /* Trigger work handler to process (batched with 50ms delay like v2.1.0) */
+    schedule_process();
+
     return 0;
 }
 
@@ -499,9 +566,18 @@ int scanner_msg_send_timeout_check(void) {
 int scanner_msg_send_display_refresh(void) {
     /* Called from LVGL timer context (swipe handler) when returning to MAIN screen.
      * Fill pending_data directly from current keyboard state. */
-    if (scanner_get_active_keyboard_count() > 0) {
+    if (!mutex_initialized) return 0;
+    if (k_mutex_lock(&data_mutex, K_MSEC(10)) != 0) return 0;
+
+    int active = 0;
+    for (int i = 0; i < MAX_KEYBOARDS; i++) {
+        if (keyboards[i].active) active++;
+    }
+    if (active > 0) {
         fill_pending_from_selected();
     }
+
+    k_mutex_unlock(&data_mutex);
     return 0;
 }
 
@@ -543,7 +619,11 @@ static void scanner_start_work_handler(struct k_work *work) {
 }
 
 static int scanner_init_start(void) {
+    k_mutex_init(&data_mutex);
+    mutex_initialized = true;
     k_work_schedule(&scanner_start_work, K_MSEC(500));
+    /* Start periodic processing after scanner starts */
+    k_work_schedule(&process_work, K_MSEC(600));
     return 0;
 }
 

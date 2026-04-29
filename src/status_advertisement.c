@@ -1020,8 +1020,9 @@ static int init_prospector_status(void) {
     // Register disconnect callback for clean handoff between own ADV and ZMK
     bt_conn_cb_register(&prospector_conn_callbacks);
 
-    // Start hybrid advertising
+    // Start hybrid advertising with initial burst for immediate scanner detection
     adv_started = true;
+    atomic_set(&burst_remaining, BURST_COUNT);  // Burst on boot so scanner shows profile immediately
     k_work_schedule(&adv_work, K_SECONDS(1)); // Wait for ZMK BLE to start
     LOG_INF("Prospector: Hybrid mode - piggyback when disconnected, own ADV when connected");
 

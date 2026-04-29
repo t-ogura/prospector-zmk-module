@@ -63,7 +63,6 @@ struct pending_display_data {
 };
 
 /* Defined in scanner_stub.c */
-extern void scanner_process_incoming(void);
 extern bool scanner_get_pending_update(struct pending_display_data *out);
 extern bool scanner_is_signal_pending(void);
 extern volatile int8_t scanner_signal_rssi;
@@ -516,8 +515,8 @@ static void pending_update_timer_cb(lv_timer_t *timer) {
         LOG_INF("Display heartbeat #%u (screen=%d)", heartbeat_counter / 300, current_screen);
     }
 
-    /* Always drain ring buffer (even during transitions, to prevent overflow) */
-    scanner_process_incoming();
+    /* Ring buffer is drained by process_work in scanner_stub.c (work queue context).
+     * LVGL timer only handles display updates from pending_data. */
 
     /* Skip display updates during screen transitions (defensive guard) */
     if (transition_in_progress) {
