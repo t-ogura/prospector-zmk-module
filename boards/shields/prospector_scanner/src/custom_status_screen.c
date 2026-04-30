@@ -2673,7 +2673,11 @@ static void create_system_settings_widgets(void) {
     ss_version_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(ss_version_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ss_version_label, lv_color_hex(0x808080), 0);
+#ifdef PROSPECTOR_GIT_VERSION
+    lv_label_set_text(ss_version_label, "Scanner " PROSPECTOR_GIT_VERSION);
+#else
     lv_label_set_text(ss_version_label, "Scanner v" PROSPECTOR_VERSION_STRING);
+#endif
     lv_obj_align(ss_version_label, LV_ALIGN_TOP_MID, 0, 48);
 
     /* Keyboard version label - shows connected keyboard's firmware version */

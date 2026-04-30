@@ -13,6 +13,20 @@ endif()
 # Add scanner mode support
 if(CONFIG_PROSPECTOR_MODE_SCANNER)
         target_sources(app PRIVATE src/status_scanner.c)
+
+        # Get git describe for scanner version display
+        execute_process(
+                COMMAND git describe --tags --always
+                WORKING_DIRECTORY ${ZEPHYR_CURRENT_MODULE_DIR}
+                OUTPUT_VARIABLE PROSPECTOR_GIT_DESCRIBE
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+                RESULT_VARIABLE GIT_RESULT
+        )
+        if(GIT_RESULT EQUAL 0 AND PROSPECTOR_GIT_DESCRIBE)
+                zephyr_compile_definitions(PROSPECTOR_GIT_VERSION="${PROSPECTOR_GIT_DESCRIBE}")
+                message(STATUS "Prospector module version: ${PROSPECTOR_GIT_DESCRIBE}")
+        endif()
 endif()
 
 # DISABLED FOR DEBUG: Custom display/LVGL drivers may be causing boot issues
