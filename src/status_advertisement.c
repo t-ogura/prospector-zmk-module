@@ -565,7 +565,7 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.manufacturer_id[1] = 0xFF;
     manufacturer_data.service_uuid[0] = 0xAB;
     manufacturer_data.service_uuid[1] = 0xCD;
-    manufacturer_data.version = ZMK_STATUS_ADV_VERSION;
+    manufacturer_data.version = PROSPECTOR_ENCODE_VERSION();
 
     // Central/Standalone battery level
     uint8_t battery_level = zmk_battery_state_of_charge();
@@ -594,8 +594,9 @@ static void build_manufacturer_payload(void) {
     manufacturer_data.active_layer = layer;
 
     // Profile slot (0-4) as selected in ZMK's settings
-    manufacturer_data.profile_slot = get_active_profile_slot();
-    LOG_DBG("📡 Active profile slot: %d", manufacturer_data.profile_slot);
+    manufacturer_data.profile_slot = PROSPECTOR_ENCODE_PROFILE_SLOT(get_active_profile_slot());
+    LOG_DBG("📡 Active profile slot: %d (raw: 0x%02X)",
+            get_active_profile_slot(), manufacturer_data.profile_slot);
 
     // Connection count approximation - count active BLE connections + USB
     uint8_t connection_count = 1; // Assume at least one connection (BLE advertising implies connection capability)

@@ -22,10 +22,10 @@ extern "C" {
 struct zmk_status_adv_data {
     uint8_t manufacturer_id[2];    // 0xFF, 0xFF (Company ID: 0xFFFF = Reserved)
     uint8_t service_uuid[2];       // 0xAB, 0xCD (Custom UUID for Prospector)
-    uint8_t version;               // Protocol version
+    uint8_t version;               // [7:4]=module major, [3:0]=module minor
     uint8_t battery_level;         // Central/Standalone battery level 0-100%
     uint8_t active_layer;          // Current active layer 0-15
-    uint8_t profile_slot;          // Active profile slot 0-4
+    uint8_t profile_slot;          // [7]=unused, [6]=dev flag, [5:3]=patch, [2:0]=profile 0-4
     uint8_t connection_count;      // Number of connected devices 0-5
     uint8_t status_flags;          // Status flags (bit field)
     uint8_t device_role;           // Device role (CENTRAL/PERIPHERAL/STANDALONE)
@@ -69,9 +69,56 @@ struct zmk_status_adv_data {
 #define ZMK_DEVICE_ROLE_PERIPHERAL   2  // Split keyboard peripheral side
 
 /**
- * @brief Protocol version
+ * @brief Protocol version (legacy, kept for reference)
  */
 #define ZMK_STATUS_ADV_VERSION 1
+
+/**
+ * @brief Module version encoding
+ *
+ * version byte:      [7:4] = major (0-15), [3:0] = minor (0-15)
+ * profile_slot byte: [6] = dev flag, [5:3] = patch (0-7), [2:0] = profile (0-4)
+ *
+ * Backward compatible: old scanners read profile_slot & 0x07 implicitly
+ * (patch=0, dev=0 leaves upper bits zero for release versions)
+ */
+/* Ensure STRINGIFY is available */
+#ifndef STRINGIFY
+#define _PROSPECTOR_STRINGIFY(x) #x
+#define STRINGIFY(x) _PROSPECTOR_STRINGIFY(x)
+#endif
+
+#define PROSPECTOR_MODULE_VERSION_MAJOR  2
+#define PROSPECTOR_MODULE_VERSION_MINOR  2
+#define PROSPECTOR_MODULE_VERSION_PATCH  0
+#define PROSPECTOR_MODULE_VERSION_DEV    0  /* 0=release, 1=dev */
+
+#if PROSPECTOR_MODULE_VERSION_DEV
+#define PROSPECTOR_VERSION_STRING \
+    STRINGIFY(PROSPECTOR_MODULE_VERSION_MAJOR) "." \
+    STRINGIFY(PROSPECTOR_MODULE_VERSION_MINOR) "." \
+    STRINGIFY(PROSPECTOR_MODULE_VERSION_PATCH) "-dev"
+#else
+#define PROSPECTOR_VERSION_STRING \
+    STRINGIFY(PROSPECTOR_MODULE_VERSION_MAJOR) "." \
+    STRINGIFY(PROSPECTOR_MODULE_VERSION_MINOR) "." \
+    STRINGIFY(PROSPECTOR_MODULE_VERSION_PATCH)
+#endif
+
+#define PROSPECTOR_ENCODE_VERSION() \
+    ((PROSPECTOR_MODULE_VERSION_MAJOR << 4) | PROSPECTOR_MODULE_VERSION_MINOR)
+
+#define PROSPECTOR_ENCODE_PROFILE_SLOT(profile) \
+    (((PROSPECTOR_MODULE_VERSION_DEV & 0x01) << 6) | \
+     ((PROSPECTOR_MODULE_VERSION_PATCH & 0x07) << 3) | \
+     ((profile) & 0x07))
+
+/* Decoder macros (for scanner side) */
+#define PROSPECTOR_DECODE_VERSION_MAJOR(ver)    ((ver) >> 4)
+#define PROSPECTOR_DECODE_VERSION_MINOR(ver)    ((ver) & 0x0F)
+#define PROSPECTOR_DECODE_PATCH(prof_slot)      (((prof_slot) >> 3) & 0x07)
+#define PROSPECTOR_DECODE_DEV(prof_slot)        (((prof_slot) >> 6) & 0x01)
+#define PROSPECTOR_DECODE_PROFILE(prof_slot)    ((prof_slot) & 0x07)
 
 /**
  * @brief Service UUID for Prospector status advertisement

@@ -68,6 +68,8 @@ extern bool scanner_is_signal_pending(void);
 extern volatile int8_t scanner_signal_rssi;
 extern volatile int32_t scanner_signal_rate_x100;  /* rate * 100 */
 extern bool scanner_get_pending_battery(int *level);
+extern bool scanner_get_kb_version(uint8_t *major, uint8_t *minor, uint8_t *patch,
+                                    bool *is_dev, char *name, size_t name_len);
 
 /* LVGL timer for processing pending updates in main thread */
 static lv_timer_t *pending_update_timer = NULL;
@@ -341,6 +343,7 @@ static bool lvgl_indev_registered = false;
 /* ========== System Settings Screen Widgets (NO CONTAINER) ========== */
 static lv_obj_t *ss_title_label = NULL;
 static lv_obj_t *ss_version_label = NULL;
+static lv_obj_t *ss_kb_version_label = NULL;
 static lv_obj_t *ss_bootloader_btn = NULL;
 static lv_obj_t *ss_reset_btn = NULL;
 static lv_obj_t *ss_nav_hint = NULL;
@@ -2649,6 +2652,7 @@ static void destroy_system_settings_widgets(void) {
     if (ss_nav_hint) { lv_obj_del(ss_nav_hint); ss_nav_hint = NULL; }
     if (ss_reset_btn) { lv_obj_del(ss_reset_btn); ss_reset_btn = NULL; }
     if (ss_bootloader_btn) { lv_obj_del(ss_bootloader_btn); ss_bootloader_btn = NULL; }
+    if (ss_kb_version_label) { lv_obj_del(ss_kb_version_label); ss_kb_version_label = NULL; }
     if (ss_version_label) { lv_obj_del(ss_version_label); ss_version_label = NULL; }
     if (ss_title_label) { lv_obj_del(ss_title_label); ss_title_label = NULL; }
     LOG_INF("System settings widgets destroyed");
@@ -2665,17 +2669,41 @@ static void create_system_settings_widgets(void) {
     lv_label_set_text(ss_title_label, "Quick Actions");
     lv_obj_align(ss_title_label, LV_ALIGN_TOP_MID, 0, 20);
 
-    /* Version label - gray, small, centered between title and bootloader button */
+    /* Scanner version label */
     ss_version_label = lv_label_create(screen_obj);
     lv_obj_set_style_text_font(ss_version_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ss_version_label, lv_color_hex(0x808080), 0);
-    lv_label_set_text(ss_version_label, "Prospector Scanner v2.2b");
-    lv_obj_align(ss_version_label, LV_ALIGN_TOP_MID, 0, 52);
+    lv_label_set_text(ss_version_label, "Scanner v" PROSPECTOR_VERSION_STRING);
+    lv_obj_align(ss_version_label, LV_ALIGN_TOP_MID, 0, 48);
 
-    /* Bootloader button (blue) - position matches original system_settings_widget.c */
+    /* Keyboard version label - shows connected keyboard's firmware version */
+    ss_kb_version_label = lv_label_create(screen_obj);
+    lv_obj_set_style_text_font(ss_kb_version_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(ss_kb_version_label, lv_color_hex(0x606060), 0);
+    {
+        static char kb_ver_buf[48];
+        uint8_t kb_maj, kb_min, kb_pat;
+        bool kb_dev;
+        char kb_name[MAX_NAME_LEN];
+        if (scanner_get_kb_version(&kb_maj, &kb_min, &kb_pat, &kb_dev, kb_name, sizeof(kb_name))) {
+            if (kb_maj == 0) {
+                /* Legacy protocol (version=0x01): major decodes as 0, which never existed */
+                snprintf(kb_ver_buf, sizeof(kb_ver_buf), "KB: %s (< v2.2)", kb_name);
+            } else {
+                snprintf(kb_ver_buf, sizeof(kb_ver_buf), "KB: %s v%d.%d.%d%s",
+                         kb_name, kb_maj, kb_min, kb_pat, kb_dev ? "-dev" : "");
+            }
+        } else {
+            snprintf(kb_ver_buf, sizeof(kb_ver_buf), "KB: not connected");
+        }
+        lv_label_set_text(ss_kb_version_label, kb_ver_buf);
+    }
+    lv_obj_align(ss_kb_version_label, LV_ALIGN_TOP_MID, 0, 65);
+
+    /* Bootloader button (blue) - compact for version info space */
     ss_bootloader_btn = lv_btn_create(screen_obj);
-    lv_obj_set_size(ss_bootloader_btn, 200, 60);
-    lv_obj_align(ss_bootloader_btn, LV_ALIGN_CENTER, 0, -15);  /* Original position */
+    lv_obj_set_size(ss_bootloader_btn, 200, 50);
+    lv_obj_align(ss_bootloader_btn, LV_ALIGN_CENTER, 0, -10);
     lv_obj_set_style_bg_color(ss_bootloader_btn, lv_color_hex(0x4A90E2), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(ss_bootloader_btn, lv_color_hex(0x357ABD), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(ss_bootloader_btn, LV_OPA_COVER, LV_STATE_DEFAULT);
@@ -2692,14 +2720,14 @@ static void create_system_settings_widgets(void) {
 
     lv_obj_t *bl_label = lv_label_create(ss_bootloader_btn);
     lv_label_set_text(bl_label, "Enter Bootloader");
-    lv_obj_set_style_text_font(bl_label, &lv_font_montserrat_18, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(bl_label, &lv_font_montserrat_16, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(bl_label, lv_color_white(), LV_STATE_DEFAULT);
     lv_obj_center(bl_label);
 
-    /* Reset button (red) - position matches original system_settings_widget.c */
+    /* Reset button (red) - compact for version info space */
     ss_reset_btn = lv_btn_create(screen_obj);
-    lv_obj_set_size(ss_reset_btn, 200, 60);
-    lv_obj_align(ss_reset_btn, LV_ALIGN_CENTER, 0, 55);  /* Original position */
+    lv_obj_set_size(ss_reset_btn, 200, 50);
+    lv_obj_align(ss_reset_btn, LV_ALIGN_CENTER, 0, 50);
     lv_obj_set_style_bg_color(ss_reset_btn, lv_color_hex(0xE24A4A), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(ss_reset_btn, lv_color_hex(0xC93A3A), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(ss_reset_btn, LV_OPA_COVER, LV_STATE_DEFAULT);
@@ -2716,7 +2744,7 @@ static void create_system_settings_widgets(void) {
 
     lv_obj_t *rst_label = lv_label_create(ss_reset_btn);
     lv_label_set_text(rst_label, "System Reset");
-    lv_obj_set_style_text_font(rst_label, &lv_font_montserrat_18, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(rst_label, &lv_font_montserrat_16, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(rst_label, lv_color_white(), LV_STATE_DEFAULT);
     lv_obj_center(rst_label);
 

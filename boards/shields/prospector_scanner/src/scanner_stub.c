@@ -109,6 +109,13 @@ struct pending_display_data {
     float rate_hz;
     int scanner_battery;
     bool scanner_battery_pending;
+
+    /* Keyboard firmware version (decoded from version + profile_slot fields) */
+    uint8_t kb_version_major;
+    uint8_t kb_version_minor;
+    uint8_t kb_version_patch;
+    bool kb_version_dev;
+    bool kb_version_valid;       /* True after first keyboard data received */
 };
 
 static struct pending_display_data pending_data = {0};
@@ -138,6 +145,23 @@ bool scanner_is_signal_pending(void) {
         return false;
     }
     pending_data.signal_update_pending = false;
+    return true;
+}
+
+/* Get keyboard firmware version (from last received advertisement) */
+bool scanner_get_kb_version(uint8_t *major, uint8_t *minor, uint8_t *patch,
+                            bool *is_dev, char *name, size_t name_len) {
+    if (!pending_data.kb_version_valid) {
+        return false;
+    }
+    if (major) *major = pending_data.kb_version_major;
+    if (minor) *minor = pending_data.kb_version_minor;
+    if (patch) *patch = pending_data.kb_version_patch;
+    if (is_dev) *is_dev = pending_data.kb_version_dev;
+    if (name && name_len > 0) {
+        strncpy(name, pending_data.device_name, name_len - 1);
+        name[name_len - 1] = '\0';
+    }
     return true;
 }
 
@@ -234,12 +258,20 @@ static void fill_pending_from_selected(void) {
     pending_data.usb_ready = (d->status_flags & ZMK_STATUS_FLAG_USB_HID_READY) != 0;
     pending_data.ble_connected = (d->status_flags & ZMK_STATUS_FLAG_BLE_CONNECTED) != 0;
     pending_data.ble_bonded = (d->status_flags & ZMK_STATUS_FLAG_BLE_BONDED) != 0;
-    pending_data.profile = d->profile_slot;
+    pending_data.profile = PROSPECTOR_DECODE_PROFILE(d->profile_slot);
     pending_data.modifiers = d->modifier_flags;
     pending_data.bat[0] = d->battery_level;
     pending_data.bat[1] = d->peripheral_battery[0];
     pending_data.bat[2] = d->peripheral_battery[1];
     pending_data.bat[3] = d->peripheral_battery[2];
+
+    /* Decode keyboard firmware version */
+    pending_data.kb_version_major = PROSPECTOR_DECODE_VERSION_MAJOR(d->version);
+    pending_data.kb_version_minor = PROSPECTOR_DECODE_VERSION_MINOR(d->version);
+    pending_data.kb_version_patch = PROSPECTOR_DECODE_PATCH(d->profile_slot);
+    pending_data.kb_version_dev = PROSPECTOR_DECODE_DEV(d->profile_slot);
+    pending_data.kb_version_valid = true;
+
     pending_data.no_keyboards = false;
     pending_data.update_pending = true;
 }
