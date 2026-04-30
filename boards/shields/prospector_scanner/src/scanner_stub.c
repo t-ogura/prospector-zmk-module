@@ -319,11 +319,16 @@ static uint32_t scanner_battery_last_update = 0;
 /* Timeout check interval counter */
 static uint32_t process_call_count = 0;
 
-/* ========== scanner_process_incoming() - Called from LVGL timer ========== */
+/* Low-priority update timer (1Hz) for WPM/battery display updates */
+static uint32_t low_priority_last_update = 0;
+#define LOW_PRIORITY_UPDATE_INTERVAL_MS 1000
+
+/* ========== scanner_process_incoming() - Called from work handler ========== */
 
 void scanner_process_incoming(void) {
     struct incoming_adv entry;
-    bool selected_updated = false;
+    bool high_priority_change = false;
+    bool any_selected_data = false;
 
     /* 1. Drain ring buffer: process all pending advertisements
      * Bounded to INCOMING_BUF_SIZE to prevent infinite loop if indices are corrupted */
@@ -384,6 +389,25 @@ void scanner_process_incoming(void) {
             continue;
         }
 
+        /* High-priority change detection BEFORE updating keyboards[]
+         * Only checks selected keyboard - no LVGL calls here, just flag setting */
+        if (index == selected_keyboard && keyboards[index].active) {
+            uint8_t old_profile = PROSPECTOR_DECODE_PROFILE(keyboards[index].data.profile_slot);
+            uint8_t new_profile = PROSPECTOR_DECODE_PROFILE(entry.data.profile_slot);
+            if (keyboards[index].data.active_layer != entry.data.active_layer ||
+                keyboards[index].data.modifier_flags != entry.data.modifier_flags ||
+                old_profile != new_profile ||
+                (keyboards[index].data.status_flags & (ZMK_STATUS_FLAG_USB_HID_READY |
+                    ZMK_STATUS_FLAG_BLE_CONNECTED)) !=
+                (entry.data.status_flags & (ZMK_STATUS_FLAG_USB_HID_READY |
+                    ZMK_STATUS_FLAG_BLE_CONNECTED))) {
+                high_priority_change = true;
+            }
+        } else if (index == selected_keyboard && !keyboards[index].active) {
+            /* New keyboard appearing in selected slot = high priority */
+            high_priority_change = true;
+        }
+
         /* Store the data */
         keyboards[index].active = true;
         memcpy(&keyboards[index].data, &entry.data, sizeof(struct zmk_status_adv_data));
@@ -408,17 +432,32 @@ void scanner_process_incoming(void) {
         }
 
         if (index == selected_keyboard) {
-            selected_updated = true;
+            any_selected_data = true;
         }
     }
 
-    /* 2. Set pending_data from selected keyboard */
-    if (selected_updated) {
+    /* 2. Display update scheduling (no LVGL calls - just set pending_data flags)
+     *    High-priority (layer/modifier/profile/connection): immediate
+     *    Low-priority (WPM/battery): 1Hz interval */
+    if (high_priority_change) {
         fill_pending_from_selected();
+        LOG_DBG("⚡ High-priority display update (layer/mod/profile change)");
+    } else if (any_selected_data) {
+        /* Low-priority data received - update keyboards[] is done above,
+         * pending_data will be refreshed on 1Hz cycle below */
+    }
+
+    /* 1Hz low-priority update: push WPM/battery/etc to display */
+    uint32_t now = k_uptime_get_32();
+    if ((now - low_priority_last_update) >= LOW_PRIORITY_UPDATE_INTERVAL_MS) {
+        if (selected_keyboard >= 0 && selected_keyboard < MAX_KEYBOARDS &&
+            keyboards[selected_keyboard].active) {
+            fill_pending_from_selected();
+        }
+        low_priority_last_update = now;
     }
 
     /* 3. Rate calculation (1Hz) */
-    uint32_t now = k_uptime_get_32();
 
     if (rate_last_calc_time == 0) {
         rate_last_calc_time = now;

@@ -2685,7 +2685,7 @@ static void create_system_settings_widgets(void) {
     lv_obj_set_style_text_font(ss_kb_version_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ss_kb_version_label, lv_color_hex(0x606060), 0);
     {
-        static char kb_ver_buf[48];
+        static char kb_ver_buf[64];
         uint8_t kb_maj, kb_min, kb_pat;
         bool kb_dev;
         char kb_name[MAX_NAME_LEN];

@@ -192,8 +192,9 @@ ZMK_SUBSCRIPTION(prospector_position_listener, zmk_position_state_changed);
 
 // Profile change listener for immediate advertisement updates
 static int profile_changed_listener(const zmk_event_t *eh) {
-    LOG_DBG("📡 BLE profile changed - updating advertisement");
+    LOG_DBG("📡 BLE profile changed - triggering burst advertisement");
     if (adv_started) {
+        atomic_set(&burst_remaining, BURST_COUNT);
         k_work_cancel_delayable(&adv_work);
         k_work_schedule(&adv_work, K_NO_WAIT);
     }
@@ -238,11 +239,10 @@ static int modifiers_changed_listener(const zmk_event_t *eh) {
     const struct zmk_modifiers_state_changed *ev = as_zmk_modifiers_state_changed(eh);
     if (ev) {
         // Trigger on both press (state=true) and release (state=false)
-        // Single immediate update only (no burst) to allow scan responses
-        LOG_DBG("🎹 Modifiers %s (0x%02x) - triggering immediate advertisement",
+        LOG_DBG("🎹 Modifiers %s (0x%02x) - triggering burst advertisement",
                 ev->state ? "pressed" : "released", ev->modifiers);
         if (adv_started) {
-            // Don't use burst for modifiers - they're too frequent
+            atomic_set(&burst_remaining, BURST_COUNT);
             k_work_cancel_delayable(&adv_work);
             k_work_schedule(&adv_work, K_NO_WAIT);
         }
