@@ -19,6 +19,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/ble.h>
 
 #include <zmk/events/split_central_status_changed.h>
+#include <zmk/prospector_compat.h>
 
 enum psptr_peripheral_slot_state {
     PERIPHERAL_SLOT_STATE_OPEN,
@@ -188,7 +189,8 @@ static struct bt_conn_cb conn_callbacks = {
     .disconnected = split_central_disconnected,
 };
 
-static int zmk_split_bt_central_init(void) {
+static int zmk_split_bt_central_init(PROSPECTOR_SYS_INIT_ARGS) {
+    PROSPECTOR_SYS_INIT_UNUSED;
     bt_conn_cb_register(&conn_callbacks);
     return 0;
 }

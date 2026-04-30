@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <zmk/prospector_compat.h>
 #include <zmk/battery.h>
 #include <zmk/ble.h>
 #include <zmk/usb.h>
@@ -958,7 +959,8 @@ static void adv_work_handler(struct k_work *work) {
 }
 
 // Initialize Prospector simple advertising system
-static int init_prospector_status(void) {
+static int init_prospector_status(PROSPECTOR_SYS_INIT_ARGS) {
+    PROSPECTOR_SYS_INIT_UNUSED;
     k_work_init_delayable(&adv_work, adv_work_handler);
 
 #if IS_ENABLED(CONFIG_ZMK_STATUS_ADV_ACTIVITY_BASED)
