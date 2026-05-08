@@ -30,6 +30,65 @@ config ZMK_STATUS_ADV_INTERVAL_MS
       Interval between status advertisement broadcasts in milliseconds.
       Lower values provide more frequent updates but consume more battery.
 
+config PROSPECTOR_EXPECTED_PERIPHERAL_COUNT
+    int "Number of split peripherals expected for 'fully connected' state"
+    range 0 3
+    default 1 if ZMK_SPLIT_ROLE_CENTRAL
+    default 0
+    depends on ZMK_STATUS_ADVERTISEMENT
+    help
+      How many split peripherals must be connected before prospector treats
+      the keyboard as fully connected. While fewer than this many peripherals
+      are connected, prospector switches to a burst/silent cycle (see
+      PROSPECTOR_SPLIT_PARTIAL_BURST_MS / _SILENT_MS) so the central's
+      scan/connect can run without contention from prospector adv.
+
+      Defaults:
+        ZMK_SPLIT_ROLE_CENTRAL=y -> 1 (typical split keyboard, central+1)
+        otherwise                -> 0 (no peripherals expected; cycle never
+                                       engages, prospector behaves as in
+                                       prior versions)
+
+      Override in keyboard config for multi-peripheral builds (e.g. a split
+      keyboard with right half + trackball = 2). Range 0-3.
+
+config PROSPECTOR_SPLIT_PARTIAL_BURST_MS
+    int "Burst window during split partial state (ms)"
+    range 100 10000
+    default 200
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT_ROLE_CENTRAL
+    help
+      While the split central is still bringing up peripherals (count <
+      PROSPECTOR_EXPECTED_PERIPHERAL_COUNT), prospector cycles between a
+      short BURST window (this duration, fast 100-150ms adv interval) and
+      a longer SILENT window (PROSPECTOR_SPLIT_PARTIAL_SILENT_MS, adv set
+      released entirely). This prioritises peripheral discovery over
+      scanner visibility.
+
+      Default 200ms: long enough to fit 1-2 fast adv events given the
+      BLE-spec ADV_NONCONN_IND minimum interval of 100ms plus advDelay
+      0-10ms. Going below ~150ms risks zero adv events per burst.
+
+config PROSPECTOR_SPLIT_PARTIAL_SILENT_MS
+    int "Silent window during split partial state (ms)"
+    range 300 60000
+    default 1800
+    depends on ZMK_STATUS_ADVERTISEMENT && ZMK_SPLIT_ROLE_CENTRAL
+    help
+      Duration of the silent window in the burst/silent cycle (see
+      PROSPECTOR_SPLIT_PARTIAL_BURST_MS). During this window prospector
+      stops its own adv entirely so the controller's radio scheduler is
+      free to handle the central's scan and CONNECT_REQ tx without
+      collision.
+
+      Default 1800ms: with peripheral adv at ~100ms interval the central
+      has ~18 uncontested CONNECT_REQ opportunities, with comfortable
+      headroom for LL connection setup (50-100ms).
+
+      With BURST=200 and SILENT=1800, prospector adv is on 10% of the
+      time during split startup -- "see it if you're lucky" UX in trade
+      for rock-solid peripheral connect.
+
 config ZMK_STATUS_ADV_KEYBOARD_NAME
     string "Keyboard name for status advertisement"
     default ""
