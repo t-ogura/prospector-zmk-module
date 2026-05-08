@@ -441,6 +441,58 @@ static const struct bt_le_adv_param proxy_connectable_params = {
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,  // 150ms
 };
 
+// Burst-window ADV params: used during the BURST phase of the burst/silent
+// cycle that runs while the split central is still bringing up peripherals.
+//
+// Background: with prospector running its own adv, the radio scheduler is
+// forced to interleave adv tx with the central's scan/connect operations.
+// CONNECT_REQ has a hard 150us hardware deadline after a peripheral adv is
+// received; if a prospector adv tx is happening in those 150us, CONNECT_REQ
+// is dropped and the connect attempt fails. Slowing the interval reduces
+// collision probability but never eliminates it.
+//
+// The burst/silent cycle replaces the old "low impact" continuous-slow
+// approach with explicit time-multiplexing: during BURST we advertise at
+// fast interval so the scanner has a real chance of locking on, then during
+// SILENT we stop adv entirely so the central gets uncontested radio time
+// (deterministic connect window).
+static const struct bt_le_adv_param burst_adv_params = {
+    .options = 0, // ADV_NONCONN_IND: no connection requests, no scan response
+    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2, // 100ms
+    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2, // 150ms
+};
+
+// Track number of split-peripheral connections (we are CENTRAL on those).
+// Used to decide between full prospector adv and low-impact adv (see
+// adv_work_handler). Pre-init the counter at 0; post-boot, the central's
+// connected/disconnected callbacks keep it in sync.
+static atomic_t split_peripheral_count = ATOMIC_INIT(0);
+
+static inline bool prospector_split_fully_connected(void) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    return atomic_get(&split_peripheral_count) >=
+           CONFIG_PROSPECTOR_EXPECTED_PERIPHERAL_COUNT;
+#else
+    return true; // not split central → no peripherals to wait for
+#endif
+}
+
+// --- Connect callback: count split peripherals and refresh adv params ---
+static void prospector_ble_connected(struct bt_conn *conn, uint8_t err) {
+    if (err) return;
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) < 0) return;
+    if (info.role != BT_CONN_ROLE_CENTRAL) return; // host-side conn, not split
+    atomic_inc(&split_peripheral_count);
+    // Re-evaluate adv params now that connectivity changed.
+    if (adv_started) {
+        k_work_cancel_delayable(&adv_work);
+        k_work_schedule(&adv_work, K_NO_WAIT);
+    }
+#endif
+}
+
 // --- Disconnect callback: stop own ADV before ZMK restarts ---
 static void prospector_ble_disconnected(struct bt_conn *conn, uint8_t reason) {
     if (prospector_adv_active) {
@@ -448,9 +500,19 @@ static void prospector_ble_disconnected(struct bt_conn *conn, uint8_t reason) {
         prospector_adv_active = false;
         LOG_INF("📡 Disconnect detected - stopped own ADV for ZMK handoff");
     }
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) < 0) return;
+    if (info.role != BT_CONN_ROLE_CENTRAL) return;
+    atomic_dec(&split_peripheral_count);
+    if (atomic_get(&split_peripheral_count) < 0) {
+        atomic_set(&split_peripheral_count, 0); // defensive
+    }
+#endif
 }
 
 static struct bt_conn_cb prospector_conn_callbacks = {
+    .connected = prospector_ble_connected,
     .disconnected = prospector_ble_disconnected,
 };
 
@@ -831,6 +893,39 @@ static void adv_work_handler(struct k_work *work) {
 
     build_manufacturer_payload();
 
+    // ---- Burst/silent cycle gate (split central waiting for peripherals) ----
+    //
+    // While split is partial, enforce explicit time-multiplexing: yield the
+    // radio entirely during the SILENT window so the central's scan and
+    // CONNECT_REQ tx happen without collision. Adv only fires during the
+    // BURST window. Net "scanner adv up-time" defaults to 10% (1s/10s).
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (!prospector_split_fully_connected()) {
+        const uint32_t burst_ms = CONFIG_PROSPECTOR_SPLIT_PARTIAL_BURST_MS;
+        const uint32_t silent_ms = CONFIG_PROSPECTOR_SPLIT_PARTIAL_SILENT_MS;
+        const uint32_t cycle_ms = burst_ms + silent_ms;
+        uint32_t now = k_uptime_get_32();
+        uint32_t phase = now % cycle_ms;
+        bool in_silent = (phase >= burst_ms);
+
+        if (in_silent) {
+            // Stop own adv if running; release the adv set entirely.
+            if (prospector_adv_active) {
+                bt_le_adv_stop();
+                prospector_adv_active = false;
+                LOG_DBG("📡 SILENT phase: yielded radio for split scan/connect");
+            }
+            zmk_adv_was_active = false;
+            // Wake at the start of the next BURST window.
+            uint32_t until_burst = cycle_ms - phase;
+            k_work_schedule(&adv_work, K_MSEC(until_burst));
+            return;
+        }
+        // BURST phase: fall through to advertise. Schedule next wake at end
+        // of burst so we don't overshoot into silent.
+    }
+#endif
+
     // Determine if active profile needs connectable advertising
     bool active_connected = false;
 #if IS_ENABLED(CONFIG_ZMK_BLE) && (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
@@ -902,7 +997,23 @@ static void adv_work_handler(struct k_work *work) {
             // ZMK not advertising → start our own ADV
             zmk_adv_was_active = false;
 
-            if (active_connected) {
+            if (!prospector_split_fully_connected()) {
+                // BURST phase of the burst/silent cycle (silent phase is
+                // handled at the top of adv_work_handler and short-circuits
+                // before reaching this code). Use fast adv interval so the
+                // scanner has time to lock on within the brief burst window.
+                err = bt_le_adv_start(&burst_adv_params,
+                                      prospector_ad, ARRAY_SIZE(prospector_ad),
+                                      NULL, 0);
+                if (err == 0) {
+                    prospector_adv_active = true;
+                    prospector_adv_connectable = false;
+                    LOG_INF("📡 BURST ADV (split partial, %dms window)",
+                            CONFIG_PROSPECTOR_SPLIT_PARTIAL_BURST_MS);
+                } else if (err != -EALREADY) {
+                    LOG_WRN("Failed to start burst ADV: %d", err);
+                }
+            } else if (active_connected) {
                 // Active profile connected → non-connectable (status display only)
                 err = bt_le_adv_start(&prospector_adv_params,
                                       prospector_ad, ARRAY_SIZE(prospector_ad),
@@ -945,6 +1056,24 @@ static void adv_work_handler(struct k_work *work) {
 
     // Schedule next update with adaptive interval
     uint32_t interval_ms = get_current_update_interval();
+
+    // During the BURST phase of split partial cycle, cap the wake so we
+    // transition to SILENT on time. Without this, the idle 30s schedule
+    // would let the burst run for 30s before the silent check fires.
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (!prospector_split_fully_connected()) {
+        const uint32_t burst_ms = CONFIG_PROSPECTOR_SPLIT_PARTIAL_BURST_MS;
+        const uint32_t silent_ms = CONFIG_PROSPECTOR_SPLIT_PARTIAL_SILENT_MS;
+        const uint32_t cycle_ms = burst_ms + silent_ms;
+        uint32_t phase = k_uptime_get_32() % cycle_ms;
+        if (phase < burst_ms) {
+            uint32_t until_silent = burst_ms - phase;
+            if (until_silent < interval_ms) {
+                interval_ms = until_silent;
+            }
+        }
+    }
+#endif
 
     // Periodic logging (every 20th update to avoid spam)
     static int update_counter = 0;
@@ -1020,7 +1149,13 @@ static int init_prospector_status(PROSPECTOR_SYS_INIT_ARGS) {
     last_activity_time = k_uptime_get_32();
     is_active = true; // Start in active mode
 
-    // Register disconnect callback for clean handoff between own ADV and ZMK
+    // Register conn callback. The connected handler counts split-peripheral
+    // connections (used by prospector_split_fully_connected() to choose adv
+    // params) and triggers an immediate adv re-evaluation, which has the
+    // useful side effect of kicking the BLE scheduler into reconsidering
+    // the adv set state right after a peripheral connects -- this measurably
+    // helps the next peripheral get discovered. The disconnected handler
+    // stops own ADV before ZMK restarts.
     bt_conn_cb_register(&prospector_conn_callbacks);
 
     // Start hybrid advertising with initial burst for immediate scanner detection
