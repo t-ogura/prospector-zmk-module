@@ -281,16 +281,50 @@ config PROSPECTOR_MAX_KEYBOARDS
     help
       Maximum number of keyboards that can be tracked simultaneously.
 
+config PROSPECTOR_SCAN_INTERVAL_MS
+    int "BLE scan interval in milliseconds"
+    range 30 2000
+    default 30
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      BLE scan interval. Together with the scan window this sets the RX
+      duty cycle: duty = window / interval.
+
+      30ms (= the window default, so 100% duty) is the most reliable and
+      is what a USB-powered scanner should use: it matches keyboard adv
+      timing including the SCAN_REQ/SCAN_RSP handshake that carries the
+      device name.
+
+      Battery-powered scanners can raise this to save power, at the cost
+      of latency on layer/profile changes. Verify responsiveness against
+      the target keyboard firmware before shipping a value:
+        30  : 100% duty (default, instant response)
+        60  : 50% duty (mild power saving)
+        120 : 25% duty (battery friendly, may delay profile switch)
+        240 : 12.5% duty (aggressive, can miss SCAN_RSP data)
+
+config PROSPECTOR_SCAN_WINDOW_MS
+    int "BLE scan window in milliseconds"
+    range 10 2000
+    default 30
+    depends on PROSPECTOR_MODE_SCANNER
+    help
+      How long the radio listens each interval. Must be <=
+      PROSPECTOR_SCAN_INTERVAL_MS. 30ms is enough to catch a typical adv
+      packet (broadcast across 3 channels in quick succession).
+
 config PROSPECTOR_MAX_LAYERS
     int "Maximum number of layers to display"
-    range 4 10
+    range 4 256
     default 7
     depends on PROSPECTOR_MODE_SCANNER
     help
       Maximum number of layers to display in the layer status widget (layers 0 to N-1).
       Default is 7 layers (0-6). For 10-layer support set to 10 (0-9).
-      Range is 4-10 layers. Display shows layers 0 through (MAX_LAYERS-1).
-      Automatically centers when fewer layers are configured.
+      Display shows layers 0 through (MAX_LAYERS-1) and automatically
+      centers when fewer layers are configured. The fixed-row widget on
+      prospector_scanner is only legible up to about 10; sliding-window
+      widgets (scanner_pocket) can use the full range.
       This setting only applies to scanner mode and is ignored for keyboard builds.
 
 config PROSPECTOR_LAYER_SLIDE_DEFAULT

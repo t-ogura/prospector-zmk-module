@@ -1,0 +1,40 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+if(CONFIG_SHIELD_SCANNER_POCKET)
+  zephyr_library()
+  zephyr_library_sources(${ZEPHYR_BASE}/misc/empty_file.c)
+  zephyr_library_include_directories(${ZEPHYR_LVGL_MODULE_DIR})
+  zephyr_library_include_directories(${ZEPHYR_BASE}/lib/gui/lvgl/)
+  zephyr_library_include_directories(${ZEPHYR_BASE}/drivers)
+  zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+  zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
+  zephyr_library_include_directories(${ZEPHYR_CURRENT_CMAKE_DIR}/include)
+
+  # Add include directory for local headers
+  zephyr_library_include_directories(include)
+  zephyr_library_include_directories(assets)
+
+  # Custom fonts
+  zephyr_library_sources(assets/quinquefive_8.c)
+  zephyr_library_sources(assets/quinquefive_12.c)
+  zephyr_library_sources(assets/quinquefive_24.c)
+  zephyr_library_sources(assets/unscii_14.c)
+  zephyr_library_sources(assets/NerdFonts_Regular_20.c)
+  zephyr_library_sources(assets/NerdFonts_Regular_40.c)
+
+  # Scanner Pocket display. Keyboard state tracking comes from the module's
+  # src/scanner_core.c, shared with every other scanner shield.
+  zephyr_library_sources(src/pocket_display.c)
+
+  # Rotated display driver for landscape mode
+  if(CONFIG_SCANNER_POCKET_LANDSCAPE)
+    zephyr_library_sources(src/ls0xx_rotated.c)
+  endif()
+
+  # TODO: Add widgets as they are implemented
+  # zephyr_library_sources(src/widgets/keyboard_widget.c)
+  # zephyr_library_sources(src/widgets/layer_widget.c)
+  # zephyr_library_sources(src/widgets/battery_widget.c)
+  # zephyr_library_sources(src/widgets/signal_widget.c)
+endif()

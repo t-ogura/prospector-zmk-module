@@ -205,11 +205,14 @@ int zmk_status_scanner_start(void) {
         return 0;
     }
 
+    /* Duty cycle is per-shield: a USB-powered scanner wants 100%, a
+     * battery-powered one trades latency for radio time. BLE units are
+     * 0.625ms, hence the *1000/625 conversion. */
     struct bt_le_scan_param scan_param = {
         .type = BT_LE_SCAN_TYPE_ACTIVE,
         .options = BT_LE_SCAN_OPT_NONE,
-        .interval = BT_GAP_SCAN_FAST_WINDOW,
-        .window = BT_GAP_SCAN_FAST_WINDOW,
+        .interval = (uint16_t)((CONFIG_PROSPECTOR_SCAN_INTERVAL_MS * 1000) / 625),
+        .window = (uint16_t)((CONFIG_PROSPECTOR_SCAN_WINDOW_MS * 1000) / 625),
     };
 
     int err = bt_le_scan_start(&scan_param, scan_callback);
@@ -219,7 +222,9 @@ int zmk_status_scanner_start(void) {
     }
 
     scanning = true;
-    LOG_INF("Status scanner started (ACTIVE mode, 100%% duty cycle)");
+    LOG_INF("Status scanner started (ACTIVE mode, interval=%dms window=%dms, duty=%d%%)",
+            CONFIG_PROSPECTOR_SCAN_INTERVAL_MS, CONFIG_PROSPECTOR_SCAN_WINDOW_MS,
+            (CONFIG_PROSPECTOR_SCAN_WINDOW_MS * 100) / CONFIG_PROSPECTOR_SCAN_INTERVAL_MS);
     return 0;
 }
 
