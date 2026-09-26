@@ -251,6 +251,25 @@ config PROSPECTOR_TOUCH_ENABLED
 
       This automatically enables INPUT, INPUT_CST816S drivers when selected.
 
+config PROSPECTOR_BOOTLOADER_ON_1200_BAUD
+    bool "Enter the UF2 bootloader on a 1200 baud touch"
+    default n
+    depends on PROSPECTOR_MODE_SCANNER && USB_CDC_ACM && RETENTION_BOOT_MODE
+    select CDC_ACM_DTE_RATE_CALLBACK_SUPPORT
+    help
+      When the host sets any CDC ACM port of the scanner to 1200 baud
+      (for example "stty -f /dev/cu.usbmodemXXXX 1200" on macOS, or an
+      Arduino-style "1200 baud touch"), set the retained boot mode to
+      bootloader and warm-reboot 250 ms later, so the UF2 bootloader
+      mounts its drive without a reset double-tap. The delay lets the
+      host's control transfer complete before the device resets.
+
+      Needs the legacy USB device stack with CDC ACM and ZMK's retained
+      boot mode for the UF2 bootloader (the xiao_ble/nrf52840/zmk board
+      has both). Off by default:
+      with it on, any program that sets the port to 1200 baud, a serial
+      monitor included, reboots the scanner.
+
 config PROSPECTOR_DEFAULT_LAYOUT
     int "Default display layout"
     default 0

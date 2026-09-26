@@ -122,6 +122,24 @@ CONFIG_ZMK_STATUS_ADV_CENTRAL_SIDE="LEFT"
 
 The scanner is a standalone display device built with the `prospector_scanner` shield. It is referenced via `west.yml` in the config repository.
 
+### Optional: reflash without a reset double-tap
+
+Add to the scanner's `.conf`:
+
+```conf
+CONFIG_PROSPECTOR_BOOTLOADER_ON_1200_BAUD=y
+```
+
+The scanner then reboots into the UF2 bootloader when the host sets one of its USB serial (CDC ACM) ports to 1200 baud, the Arduino-style "1200 baud touch". Once the bootloader drive mounts, copy the new `.uf2` onto it as usual. On macOS:
+
+```sh
+stty -f /dev/cu.usbmodemXXXX 1200
+```
+
+- Off by default: with it on, any program that sets the port to 1200 baud, a serial monitor included, reboots the scanner.
+- Needs USB CDC ACM and boot-mode retention (both on in the default `xiao_ble/nrf52840/zmk` scanner build).
+- The first image with the option still goes on by double-tap.
+
 ## Attribution
 
 Based on the original Prospector project:

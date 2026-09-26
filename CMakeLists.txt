@@ -16,6 +16,7 @@ endif()
 if(CONFIG_PROSPECTOR_MODE_SCANNER)
         target_sources(app PRIVATE src/status_scanner.c)
         target_sources(app PRIVATE src/scanner_core.c)
+        target_sources_ifdef(CONFIG_PROSPECTOR_BOOTLOADER_ON_1200_BAUD app PRIVATE src/bootloader_on_1200_baud.c)
 
         # Get git describe for scanner version display
         execute_process(
