@@ -2,11 +2,15 @@
 
 if SHIELD_SCANNER_POCKET_V2
 
-# Prospector observer
-config PROSPECTOR_MODE_SCANNER
+# Prospector observer. BT itself is only selected by ZMK_BLE (the keyboard
+# role); an observer-only build has to ask for the host explicitly.
+config BT
     default y
 
 config BT_OBSERVER
+    default y
+
+config PROSPECTOR_MODE_SCANNER
     default y
 
 config PROSPECTOR_TOUCH_ENABLED
