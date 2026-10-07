@@ -1,0 +1,7 @@
+/*
+ * Intentionally empty. Zephyr enumerates shields from boards/shields/<name>/<name>.overlay,
+ * so the file has to exist; the HY0020 board (zmk-scanner-pocket-v2) already defines the
+ * LCD, SPI and inputs in its own devicetree and nothing is added here.
+ *
+ * SPDX-License-Identifier: MIT
+ */
