@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT
+
+if SHIELD_SCANNER_POCKET_V2
+
+# Prospector observer
+config PROSPECTOR_MODE_SCANNER
+    default y
+
+config BT_OBSERVER
+    default y
+
+config PROSPECTOR_TOUCH_ENABLED
+    default n
+
+# Display: Scanner Pocket's own LVGL screen (pocket_display.c)
+config ZMK_DISPLAY
+    default y
+
+choice ZMK_DISPLAY_STATUS_SCREEN
+    default ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+endchoice
+
+config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+    select LV_USE_LABEL
+    select LV_USE_IMG
+    select LV_USE_CANVAS
+    select LV_USE_BAR
+
+config LV_FONT_UNSCII_8
+    default y
+
+config LV_FONT_UNSCII_16
+    default y
+
+config ZMK_DISPLAY_BLANK_ON_IDLE
+    default n
+
+# pocket_display.c builds against the shield-local symbols of v1
+config SHIELD_SCANNER_POCKET
+    def_bool y
+
+config SCANNER_POCKET_WIDGET_STATUS
+    bool
+    default y
+
+config SCANNER_POCKET_INVERT_COLORS
+    bool "Invert display colors (white text on black background)"
+    default y
+
+config SCANNER_POCKET_LANDSCAPE
+    bool "Landscape orientation through the rotated ls0xx driver"
+    default n
+    help
+      v1 rotated the panel in a custom driver. The v2 board uses Zephyr's
+      stock ls0xx driver in portrait for now; enable once the rotated driver
+      has been brought over and the stock LS0XX driver disabled.
+
+endif # SHIELD_SCANNER_POCKET_V2

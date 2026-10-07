@@ -1,0 +1,8 @@
+file_format: "1"
+id: scanner_pocket_v2
+name: Scanner Pocket v2 UI
+type: shield
+url: https://github.com/t-ogura/zmk-scanner-pocket-v2
+requires: [scanner_pocket_v2]
+features:
+  - display

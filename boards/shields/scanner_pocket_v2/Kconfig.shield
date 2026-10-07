@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+#
+# Scanner Pocket v2 UI shield. The HY0020 board (zmk-scanner-pocket-v2) already
+# defines the LCD, SPI and inputs in its own devicetree, so this shield carries
+# no overlay: it only pulls in the Scanner Pocket display code and its fonts
+# from the v1 shield directory and selects the scanner configuration.
+
+config SHIELD_SCANNER_POCKET_V2
+    def_bool $(shields_list_contains,scanner_pocket_v2)

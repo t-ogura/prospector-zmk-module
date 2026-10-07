@@ -21,6 +21,7 @@
 #include <zephyr/init.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/bluetooth/bluetooth.h>
 #include <zmk/status_scanner.h>
 #include <zmk/status_advertisement.h>
 
@@ -673,6 +674,22 @@ static K_WORK_DELAYABLE_DEFINE(scanner_start_work, scanner_start_work_handler);
 
 static void scanner_start_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
+#if !IS_ENABLED(CONFIG_ZMK_BLE) && !IS_ENABLED(CONFIG_ZMK_SPLIT_BLE)
+    /* Observer-only builds: nobody else brings the Bluetooth host up.
+     * ZMK calls bt_enable() in ble.c (keyboard role) or the split
+     * peripheral; without either, a scanner would wait forever. */
+    static bool bt_ready;
+    if (!bt_ready) {
+        int err = bt_enable(NULL);
+        if (err && err != -EALREADY) {
+            LOG_ERR("bt_enable failed: %d", err);
+            k_work_schedule(&scanner_start_work, K_SECONDS(1));
+            return;
+        }
+        bt_ready = true;
+        LOG_INF("Bluetooth host enabled by scanner core (observer-only build)");
+    }
+#endif
     LOG_INF("Starting BLE scanner...");
     int ret = zmk_status_scanner_start();
     if (ret == 0) {
