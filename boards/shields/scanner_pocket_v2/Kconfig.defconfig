@@ -39,9 +39,11 @@ config LV_FONT_UNSCII_16
 config ZMK_DISPLAY_BLANK_ON_IDLE
     default n
 
-# pocket_display.c builds against the shield-local symbols of v1
-config SHIELD_SCANNER_POCKET
-    def_bool y
+# Do NOT set SHIELD_SCANNER_POCKET here. pocket_display.c does not need it,
+# and turning it on activates the whole v1 Kconfig.defconfig block (rotated
+# driver instead of the stock ls0xx that drives DISP/EXTCOMIN, 128 KiB LVGL
+# pool, 8 KiB stacks) - which left the panel white and corrupted the LVGL
+# heap through a 168-wide display behind 144-wide render alignment.
 
 config SCANNER_POCKET_WIDGET_STATUS
     bool
