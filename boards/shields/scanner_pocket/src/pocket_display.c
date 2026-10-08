@@ -998,6 +998,13 @@ static void create_keyboard_list_widgets(void) {
     /* Initial keyboard list */
     kl_update_entries();
 
+    /* Refresh the list while it is open so a keyboard that starts
+     * advertising after the screen opened still shows up (the v1 code
+     * declared this timer but never created it). */
+    if (!kl_update_timer) {
+        kl_update_timer = lv_timer_create(kl_update_timer_cb, 500, NULL);
+    }
+
     /* Initialize selection to currently selected keyboard */
     kl_selected_index = 0;  /* Default to first if not found */
     for (int i = 0; i < kl_entry_count; i++) {
