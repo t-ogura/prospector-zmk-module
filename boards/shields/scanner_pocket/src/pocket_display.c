@@ -1065,6 +1065,64 @@ static void destroy_main_widgets(void) {
     active_battery_count = 0;
 }
 
+/* Scanner battery, top-right: [██████]▌ 100
+ * The percentage sits in a fixed 3-digit box (unscii_8 = 8 px/char) that is
+ * right-aligned to the screen edge, so "100" fits and the bar never moves
+ * when the digit count changes. */
+#define SCANNER_BAT_PCT_W   (3 * 8)
+#define SCANNER_BAT_MARGIN  2
+#define SCANNER_BAT_GAP     2
+
+static void create_scanner_battery_widgets(lv_obj_t *parent) {
+    const int16_t bat_y = 2;
+    const int16_t pct_x = SCREEN_W - SCANNER_BAT_MARGIN - SCANNER_BAT_PCT_W;
+    const int16_t bat_x = pct_x - SCANNER_BAT_GAP - SCANNER_BAT_TIP_WIDTH - SCANNER_BAT_WIDTH;
+
+    /* Battery outline (main rectangle) */
+    scanner_bat_bg = lv_obj_create(parent);
+    lv_obj_set_size(scanner_bat_bg, SCANNER_BAT_WIDTH, SCANNER_BAT_HEIGHT);
+    lv_obj_set_pos(scanner_bat_bg, bat_x, bat_y);
+    lv_obj_set_style_bg_color(scanner_bat_bg, bg_color, 0);
+    lv_obj_set_style_bg_opa(scanner_bat_bg, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(scanner_bat_bg, text_color, 0);
+    lv_obj_set_style_border_width(scanner_bat_bg, 1, 0);
+    lv_obj_set_style_radius(scanner_bat_bg, 1, 0);
+    lv_obj_set_style_pad_all(scanner_bat_bg, 0, 0);
+    lv_obj_clear_flag(scanner_bat_bg, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* + terminal protrusion (small rectangle on the right) */
+    scanner_bat_tip = lv_obj_create(parent);
+    lv_obj_set_size(scanner_bat_tip, SCANNER_BAT_TIP_WIDTH, SCANNER_BAT_TIP_HEIGHT);
+    lv_obj_set_pos(scanner_bat_tip, bat_x + SCANNER_BAT_WIDTH,
+                   bat_y + (SCANNER_BAT_HEIGHT - SCANNER_BAT_TIP_HEIGHT) / 2);
+    lv_obj_set_style_bg_color(scanner_bat_tip, text_color, 0);
+    lv_obj_set_style_bg_opa(scanner_bat_tip, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(scanner_bat_tip, 0, 0);
+    lv_obj_set_style_radius(scanner_bat_tip, 0, 0);
+    lv_obj_set_style_pad_all(scanner_bat_tip, 0, 0);
+    lv_obj_clear_flag(scanner_bat_tip, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Fill bar (inside the outline) */
+    scanner_bat_fill = lv_obj_create(parent);
+    lv_obj_set_size(scanner_bat_fill, 0, SCANNER_BAT_HEIGHT - 4);  /* Initial: 0 width */
+    lv_obj_set_pos(scanner_bat_fill, bat_x + 2, bat_y + 2);
+    lv_obj_set_style_bg_color(scanner_bat_fill, text_color, 0);
+    lv_obj_set_style_bg_opa(scanner_bat_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(scanner_bat_fill, 0, 0);
+    lv_obj_set_style_radius(scanner_bat_fill, 0, 0);
+    lv_obj_set_style_pad_all(scanner_bat_fill, 0, 0);
+    lv_obj_clear_flag(scanner_bat_fill, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Percentage text, right-aligned in a fixed 3-digit box */
+    scanner_bat_pct = lv_label_create(parent);
+    lv_obj_set_style_text_color(scanner_bat_pct, text_color, 0);
+    lv_obj_set_style_text_font(scanner_bat_pct, &lv_font_unscii_8, 0);
+    lv_obj_set_width(scanner_bat_pct, SCANNER_BAT_PCT_W);
+    lv_obj_set_style_text_align(scanner_bat_pct, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(scanner_bat_pct, pct_x, bat_y);
+    lv_label_set_text(scanner_bat_pct, "?");
+}
+
 /* Forward declaration for create_main_widgets (will define after zmk_display_status_screen) */
 static void create_main_widgets(void);
 
@@ -1374,54 +1432,7 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_obj_set_style_bg_opa(main_screen, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_clear_flag(main_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Scanner Battery at top-right - bar shape with + terminal protrusion
-     * Layout: [██████████]▌ 85
-     *         ^bar        ^tip ^percentage
-     * Charging: fill animates from current level to max, then repeats
-     */
-    int16_t bat_x = SCREEN_W - 4 - 20 - SCANNER_BAT_WIDTH - SCANNER_BAT_TIP_WIDTH;  /* Right-aligned */
-    int16_t bat_y = 2;
-
-    /* Battery outline (main rectangle) */
-    scanner_bat_bg = lv_obj_create(main_screen);
-    lv_obj_set_size(scanner_bat_bg, SCANNER_BAT_WIDTH, SCANNER_BAT_HEIGHT);
-    lv_obj_set_pos(scanner_bat_bg, bat_x, bat_y);
-    lv_obj_set_style_bg_color(scanner_bat_bg, bg_color, 0);
-    lv_obj_set_style_bg_opa(scanner_bat_bg, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(scanner_bat_bg, text_color, 0);
-    lv_obj_set_style_border_width(scanner_bat_bg, 1, 0);
-    lv_obj_set_style_radius(scanner_bat_bg, 1, 0);
-    lv_obj_set_style_pad_all(scanner_bat_bg, 0, 0);
-    lv_obj_clear_flag(scanner_bat_bg, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* + terminal protrusion (small rectangle on right) */
-    scanner_bat_tip = lv_obj_create(main_screen);
-    lv_obj_set_size(scanner_bat_tip, SCANNER_BAT_TIP_WIDTH, SCANNER_BAT_TIP_HEIGHT);
-    lv_obj_set_pos(scanner_bat_tip, bat_x + SCANNER_BAT_WIDTH, bat_y + (SCANNER_BAT_HEIGHT - SCANNER_BAT_TIP_HEIGHT) / 2);
-    lv_obj_set_style_bg_color(scanner_bat_tip, text_color, 0);
-    lv_obj_set_style_bg_opa(scanner_bat_tip, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(scanner_bat_tip, 0, 0);
-    lv_obj_set_style_radius(scanner_bat_tip, 0, 0);
-    lv_obj_set_style_pad_all(scanner_bat_tip, 0, 0);
-    lv_obj_clear_flag(scanner_bat_tip, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* Fill bar (inside the outline) */
-    scanner_bat_fill = lv_obj_create(main_screen);
-    lv_obj_set_size(scanner_bat_fill, 0, SCANNER_BAT_HEIGHT - 4);  /* Initial: 0 width */
-    lv_obj_set_pos(scanner_bat_fill, bat_x + 2, bat_y + 2);
-    lv_obj_set_style_bg_color(scanner_bat_fill, text_color, 0);
-    lv_obj_set_style_bg_opa(scanner_bat_fill, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(scanner_bat_fill, 0, 0);
-    lv_obj_set_style_radius(scanner_bat_fill, 0, 0);
-    lv_obj_set_style_pad_all(scanner_bat_fill, 0, 0);
-    lv_obj_clear_flag(scanner_bat_fill, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* Percentage text (right of battery) */
-    scanner_bat_pct = lv_label_create(main_screen);
-    lv_obj_set_style_text_color(scanner_bat_pct, text_color, 0);
-    lv_obj_set_style_text_font(scanner_bat_pct, &lv_font_unscii_8, 0);
-    lv_obj_set_pos(scanner_bat_pct, bat_x + SCANNER_BAT_WIDTH + SCANNER_BAT_TIP_WIDTH + 2, bat_y);
-    lv_label_set_text(scanner_bat_pct, "?");
+    create_scanner_battery_widgets(main_screen);
 
     LOG_INF("Scanner battery widget created (bar style with charging animation)");
 
@@ -1510,50 +1521,7 @@ lv_obj_t *zmk_display_status_screen(void) {
 static void create_main_widgets(void) {
     LOG_INF("Creating main screen widgets...");
 
-    /* Scanner Battery at top-right */
-    int16_t bat_x = SCREEN_W - 4 - 20 - SCANNER_BAT_WIDTH - SCANNER_BAT_TIP_WIDTH;
-    int16_t bat_y = 2;
-
-    /* Battery outline (main rectangle) */
-    scanner_bat_bg = lv_obj_create(main_screen);
-    lv_obj_set_size(scanner_bat_bg, SCANNER_BAT_WIDTH, SCANNER_BAT_HEIGHT);
-    lv_obj_set_pos(scanner_bat_bg, bat_x, bat_y);
-    lv_obj_set_style_bg_color(scanner_bat_bg, bg_color, 0);
-    lv_obj_set_style_bg_opa(scanner_bat_bg, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(scanner_bat_bg, text_color, 0);
-    lv_obj_set_style_border_width(scanner_bat_bg, 1, 0);
-    lv_obj_set_style_radius(scanner_bat_bg, 1, 0);
-    lv_obj_set_style_pad_all(scanner_bat_bg, 0, 0);
-    lv_obj_clear_flag(scanner_bat_bg, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* + terminal protrusion */
-    scanner_bat_tip = lv_obj_create(main_screen);
-    lv_obj_set_size(scanner_bat_tip, SCANNER_BAT_TIP_WIDTH, SCANNER_BAT_TIP_HEIGHT);
-    lv_obj_set_pos(scanner_bat_tip, bat_x + SCANNER_BAT_WIDTH, bat_y + (SCANNER_BAT_HEIGHT - SCANNER_BAT_TIP_HEIGHT) / 2);
-    lv_obj_set_style_bg_color(scanner_bat_tip, text_color, 0);
-    lv_obj_set_style_bg_opa(scanner_bat_tip, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(scanner_bat_tip, 0, 0);
-    lv_obj_set_style_radius(scanner_bat_tip, 0, 0);
-    lv_obj_set_style_pad_all(scanner_bat_tip, 0, 0);
-    lv_obj_clear_flag(scanner_bat_tip, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* Fill bar */
-    scanner_bat_fill = lv_obj_create(main_screen);
-    lv_obj_set_size(scanner_bat_fill, 0, SCANNER_BAT_HEIGHT - 4);
-    lv_obj_set_pos(scanner_bat_fill, bat_x + 2, bat_y + 2);
-    lv_obj_set_style_bg_color(scanner_bat_fill, text_color, 0);
-    lv_obj_set_style_bg_opa(scanner_bat_fill, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(scanner_bat_fill, 0, 0);
-    lv_obj_set_style_radius(scanner_bat_fill, 0, 0);
-    lv_obj_set_style_pad_all(scanner_bat_fill, 0, 0);
-    lv_obj_clear_flag(scanner_bat_fill, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* Percentage text */
-    scanner_bat_pct = lv_label_create(main_screen);
-    lv_obj_set_style_text_color(scanner_bat_pct, text_color, 0);
-    lv_obj_set_style_text_font(scanner_bat_pct, &lv_font_unscii_8, 0);
-    lv_obj_set_pos(scanner_bat_pct, bat_x + SCANNER_BAT_WIDTH + SCANNER_BAT_TIP_WIDTH + 2, bat_y);
-    lv_label_set_text(scanner_bat_pct, "?");
+    create_scanner_battery_widgets(main_screen);
 
     /* Device name */
     device_name_label = lv_label_create(main_screen);
