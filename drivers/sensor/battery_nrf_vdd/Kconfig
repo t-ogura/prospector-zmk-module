@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+
+DT_COMPAT_PROSPECTOR_BATTERY_NRF_VDD := prospector,battery-nrf-vdd
+
+config PROSPECTOR_BATTERY_NRF_VDD
+    bool "Battery gauge from the nRF52 SAADC VDD input (CR2032 curve)"
+    default $(dt_compat_enabled,$(DT_COMPAT_PROSPECTOR_BATTERY_NRF_VDD))
+    select ADC
+    select ZMK_BATTERY
+    depends on SENSOR
+    help
+      Samples VDD through the SAADC's internal VDD input (gain 1/6, 0.6 V
+      reference) - no external resistors, as HANDOVER section 15 asks - and
+      reports state of charge on a CR2032 discharge curve.

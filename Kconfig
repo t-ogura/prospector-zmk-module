@@ -1,3 +1,5 @@
+rsource "drivers/sensor/battery_nrf_vdd/Kconfig"
+
 config PROSPECTOR_LAYER_ROLLER_ALL_CAPS
     bool "Convert layer names to all caps"
     default n

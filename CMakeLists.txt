@@ -54,3 +54,6 @@ if(CONFIG_SHIELD_PROSPECTOR_ADAPTER)
 endif()
 
 # Scanner shield sources are handled by boards/shields/prospector_scanner/CMakeLists.txt
+
+# Battery gauge from the nRF52 SAADC VDD input (coin-cell boards, e.g. Scanner Pocket v2)
+add_subdirectory_ifdef(CONFIG_PROSPECTOR_BATTERY_NRF_VDD drivers/sensor/battery_nrf_vdd)

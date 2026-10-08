@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+description: |
+  Battery gauge that samples the nRF52 supply rail (SAADC VDD input) with no
+  external divider, for coin-cell powered devices such as the Scanner Pocket v2
+  (nRF52832 + CR2032). State of charge follows a CR2032 discharge curve.
+
+compatible: "prospector,battery-nrf-vdd"
+
+include: base.yaml
