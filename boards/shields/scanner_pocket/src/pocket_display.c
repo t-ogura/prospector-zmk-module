@@ -41,8 +41,29 @@ LOG_MODULE_REGISTER(pocket_display, LOG_LEVEL_INF);
 /* Selected keyboard index - which keyboard's data to display on main screen */
 static int selected_keyboard_index = 0;
 
-/* ===== Navigation Button (D6 input, D3 GND) ===== */
+/* ===== Navigation input =====
+ * v1 board: one nav_button (D0).
+ * v2 board: a three-contact lever, gpio-keys nodes lever_a/b/c. Map the
+ * contacts to UI actions here; swap the three macros if the physical
+ * directions turn out different.
+ */
 #define NAV_BUTTON_NODE DT_NODELABEL(nav_button)
+#define LEVER_UP_NODE   DT_NODELABEL(lever_a)   /* P0.18 */
+#define LEVER_DOWN_NODE DT_NODELABEL(lever_b)   /* P0.20 */
+#define LEVER_PUSH_NODE DT_NODELABEL(lever_c)   /* P0.30 */
+
+enum nav_action { NAV_NONE, NAV_UP, NAV_DOWN, NAV_PUSH };
+
+#if DT_NODE_EXISTS(LEVER_UP_NODE) && DT_NODE_EXISTS(LEVER_DOWN_NODE) && DT_NODE_EXISTS(LEVER_PUSH_NODE)
+#define NAV_LEVER_ENABLED 1
+static const struct gpio_dt_spec lever_up   = GPIO_DT_SPEC_GET(LEVER_UP_NODE, gpios);
+static const struct gpio_dt_spec lever_down = GPIO_DT_SPEC_GET(LEVER_DOWN_NODE, gpios);
+static const struct gpio_dt_spec lever_push = GPIO_DT_SPEC_GET(LEVER_PUSH_NODE, gpios);
+static struct gpio_callback lever_cb_data;
+#else
+#define NAV_LEVER_ENABLED 0
+#endif
+
 #if DT_NODE_EXISTS(NAV_BUTTON_NODE)
 static const struct gpio_dt_spec nav_button = GPIO_DT_SPEC_GET(NAV_BUTTON_NODE, gpios);
 static struct gpio_callback nav_button_cb_data;
@@ -1044,12 +1065,9 @@ static void create_main_widgets(void);
 static volatile uint32_t button_press_count = 0;
 
 /* Button interrupt callback - simple press detection only */
-#if NAV_BUTTON_ENABLED
-static void nav_button_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
-    ARG_UNUSED(dev);
-    ARG_UNUSED(cb);
-    ARG_UNUSED(pins);
-
+/* Shared by the v1 single button and the v2 lever. ISR context: only flags
+ * and indices are touched; the display timer does the LVGL work. */
+static void nav_handle(enum nav_action action) {
     uint64_t now = k_uptime_get();
 
     /* Debounce */
@@ -1060,17 +1078,79 @@ static void nav_button_callback(const struct device *dev, struct gpio_callback *
     button_press_count++;
 
     if (current_screen == SCREEN_KEYBOARD_LIST) {
-        /* Keyboard list: select next keyboard + reset timeout */
-        if (kl_entry_count > 0) {
-            kl_selected_index = (kl_selected_index + 1) % kl_entry_count;
-        }
         kl_last_interaction_time = now;
-    } else {
-        /* Main screen: go to keyboard list */
-        screen_switch_pending = true;
+        switch (action) {
+        case NAV_UP:
+            if (kl_entry_count > 0) {
+                kl_selected_index = (kl_selected_index + kl_entry_count - 1) % kl_entry_count;
+            }
+            break;
+        case NAV_DOWN:
+            if (kl_entry_count > 0) {
+                kl_selected_index = (kl_selected_index + 1) % kl_entry_count;
+            }
+            break;
+        case NAV_PUSH:
+            screen_switch_pending = true;      /* back to main with the selection */
+            break;
+        default:
+            break;
+        }
+    } else if (action == NAV_PUSH) {
+        screen_switch_pending = true;          /* main -> keyboard list */
     }
 }
+
+#if NAV_BUTTON_ENABLED
+/* v1: one button. Cycles the list, push enters/leaves it. */
+static void nav_button_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+    ARG_UNUSED(dev);
+    ARG_UNUSED(cb);
+    ARG_UNUSED(pins);
+    nav_handle(current_screen == SCREEN_KEYBOARD_LIST ? NAV_DOWN : NAV_PUSH);
+}
 #endif /* NAV_BUTTON_ENABLED */
+
+#if NAV_LEVER_ENABLED
+static void lever_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+    ARG_UNUSED(dev);
+    ARG_UNUSED(cb);
+    if (pins & BIT(lever_push.pin)) {
+        nav_handle(NAV_PUSH);
+    } else if (pins & BIT(lever_up.pin)) {
+        nav_handle(NAV_UP);
+    } else if (pins & BIT(lever_down.pin)) {
+        nav_handle(NAV_DOWN);
+    }
+}
+
+static int lever_init(void) {
+    const struct gpio_dt_spec *contacts[] = { &lever_up, &lever_down, &lever_push };
+    uint32_t mask = 0;
+
+    for (size_t i = 0; i < ARRAY_SIZE(contacts); i++) {
+        if (!gpio_is_ready_dt(contacts[i])) {
+            LOG_ERR("Lever GPIO not ready");
+            return -ENODEV;
+        }
+        int ret = gpio_pin_configure_dt(contacts[i], GPIO_INPUT);
+        if (ret == 0) {
+            ret = gpio_pin_interrupt_configure_dt(contacts[i], GPIO_INT_EDGE_TO_ACTIVE);
+        }
+        if (ret) {
+            LOG_ERR("Lever GPIO %u configure failed: %d", contacts[i]->pin, ret);
+            return ret;
+        }
+        mask |= BIT(contacts[i]->pin);
+    }
+    /* All three contacts share one port on this board */
+    gpio_init_callback(&lever_cb_data, lever_callback, mask);
+    gpio_add_callback(lever_up.port, &lever_cb_data);
+    LOG_INF("Lever ready: up=P0.%02u down=P0.%02u push=P0.%02u",
+            lever_up.pin, lever_down.pin, lever_push.pin);
+    return 0;
+}
+#endif /* NAV_LEVER_ENABLED */
 
 /* Handle screen switch (called from LVGL timer - main thread safe) */
 static void handle_screen_switch(void) {
@@ -1391,6 +1471,9 @@ lv_obj_t *zmk_display_status_screen(void) {
     k_work_schedule(&scanner_battery_work, K_MSEC(1000));
 
     /* Initialize navigation button */
+#if NAV_LEVER_ENABLED
+    lever_init();
+#endif
 #if NAV_BUTTON_ENABLED
     if (gpio_is_ready_dt(&nav_button)) {
         int ret = gpio_pin_configure_dt(&nav_button, GPIO_INPUT);
