@@ -23,8 +23,10 @@ LOG_MODULE_REGISTER(ls0xx_rotated, CONFIG_DISPLAY_LOG_LEVEL);
 #include <zephyr/drivers/spi.h>
 #include <zephyr/sys/byteorder.h>
 
-/* Only compile if scanner pocket shield is used */
-#if defined(CONFIG_SHIELD_SCANNER_POCKET) && defined(CONFIG_SCANNER_POCKET_LANDSCAPE)
+/* Compiled only when a Scanner Pocket shield selects landscape mode */
+#if defined(CONFIG_SCANNER_POCKET_LANDSCAPE)
+
+#define DT_DRV_COMPAT sharp_ls0xx
 
 /* Physical display dimensions (hardware) */
 #define LS0XX_HW_WIDTH   144
@@ -50,7 +52,39 @@ static uint16_t dirty_line_end = 0;
 
 struct ls0xx_rotated_config {
 	struct spi_dt_spec bus;
+#if DT_INST_NODE_HAS_PROP(0, disp_en_gpios)
+	struct gpio_dt_spec disp_en_gpio;
+#endif
+#if DT_INST_NODE_HAS_PROP(0, extcomin_gpios)
+	struct gpio_dt_spec extcomin_gpio;
+#endif
 };
+
+#if DT_INST_NODE_HAS_PROP(0, extcomin_gpios)
+/*
+ * EXTMODE is tied high on boards that wire EXTCOMIN: VCOM must be inverted
+ * by pulsing the pin (same scheme as Zephyr's stock ls0xx driver).
+ */
+#define LS0XX_VCOM_STACK_SIZE 512
+#define LS0XX_VCOM_PRIO       3
+K_THREAD_STACK_DEFINE(ls0xx_vcom_stack, LS0XX_VCOM_STACK_SIZE);
+static struct k_thread ls0xx_vcom_thread;
+
+static void ls0xx_vcom_toggle(void *a, void *b, void *c)
+{
+	const struct device *dev = a;
+	const struct ls0xx_rotated_config *config = dev->config;
+
+	ARG_UNUSED(b);
+	ARG_UNUSED(c);
+	while (1) {
+		gpio_pin_toggle_dt(&config->extcomin_gpio);
+		k_usleep(3);
+		gpio_pin_toggle_dt(&config->extcomin_gpio);
+		k_msleep(1000 / DT_INST_PROP(0, extcomin_frequency));
+	}
+}
+#endif
 
 static int ls0xx_cmd(const struct device *dev, uint8_t *buf, uint8_t len)
 {
@@ -80,14 +114,26 @@ static int ls0xx_clear(const struct device *dev)
 
 static int ls0xx_blanking_off(const struct device *dev)
 {
+#if DT_INST_NODE_HAS_PROP(0, disp_en_gpios)
+	const struct ls0xx_rotated_config *config = dev->config;
+
+	return gpio_pin_set_dt(&config->disp_en_gpio, 1);
+#else
 	LOG_WRN("Blanking not supported");
 	return -ENOTSUP;
+#endif
 }
 
 static int ls0xx_blanking_on(const struct device *dev)
 {
+#if DT_INST_NODE_HAS_PROP(0, disp_en_gpios)
+	const struct ls0xx_rotated_config *config = dev->config;
+
+	return gpio_pin_set_dt(&config->disp_en_gpio, 0);
+#else
 	LOG_WRN("Blanking not supported");
 	return -ENOTSUP;
+#endif
 }
 
 /*
@@ -282,6 +328,25 @@ static int ls0xx_rotated_init(const struct device *dev)
 		return -ENODEV;
 	}
 
+#if DT_INST_NODE_HAS_PROP(0, disp_en_gpios)
+	if (!gpio_is_ready_dt(&config->disp_en_gpio)) {
+		LOG_ERR("DISP port device not ready");
+		return -ENODEV;
+	}
+	gpio_pin_configure_dt(&config->disp_en_gpio, GPIO_OUTPUT_HIGH);
+#endif
+#if DT_INST_NODE_HAS_PROP(0, extcomin_gpios)
+	if (!gpio_is_ready_dt(&config->extcomin_gpio)) {
+		LOG_ERR("EXTCOMIN port device not ready");
+		return -ENODEV;
+	}
+	gpio_pin_configure_dt(&config->extcomin_gpio, GPIO_OUTPUT_LOW);
+	k_thread_create(&ls0xx_vcom_thread, ls0xx_vcom_stack, LS0XX_VCOM_STACK_SIZE,
+			ls0xx_vcom_toggle, (void *)dev, NULL, NULL,
+			LS0XX_VCOM_PRIO, 0, K_NO_WAIT);
+	k_thread_name_set(&ls0xx_vcom_thread, "ls0xx_vcom");
+#endif
+
 	LOG_INF("Sharp Memory LCD initialized with 90° rotation (168x144)");
 
 	/* Clear display */
@@ -289,13 +354,17 @@ static int ls0xx_rotated_init(const struct device *dev)
 }
 
 /* Get SPI configuration from device tree */
-#define DT_DRV_COMPAT sharp_ls0xx
-
 static const struct ls0xx_rotated_config ls0xx_rotated_config = {
 	.bus = SPI_DT_SPEC_INST_GET(
 		0, SPI_OP_MODE_MASTER | SPI_WORD_SET(8) |
 		SPI_TRANSFER_LSB | SPI_CS_ACTIVE_HIGH |
 		SPI_HOLD_ON_CS | SPI_LOCK_ON, 0),
+#if DT_INST_NODE_HAS_PROP(0, disp_en_gpios)
+	.disp_en_gpio = GPIO_DT_SPEC_INST_GET(0, disp_en_gpios),
+#endif
+#if DT_INST_NODE_HAS_PROP(0, extcomin_gpios)
+	.extcomin_gpio = GPIO_DT_SPEC_INST_GET(0, extcomin_gpios),
+#endif
 };
 
 static DEVICE_API(display, ls0xx_rotated_driver_api) = {
@@ -311,4 +380,4 @@ DEVICE_DT_INST_DEFINE(0, ls0xx_rotated_init, NULL, NULL, &ls0xx_rotated_config,
 		      POST_KERNEL, CONFIG_DISPLAY_INIT_PRIORITY,
 		      &ls0xx_rotated_driver_api);
 
-#endif /* CONFIG_SHIELD_SCANNER_POCKET && CONFIG_SCANNER_POCKET_LANDSCAPE */
+#endif /* CONFIG_SCANNER_POCKET_LANDSCAPE */

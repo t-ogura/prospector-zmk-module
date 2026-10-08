@@ -55,10 +55,14 @@ config SCANNER_POCKET_INVERT_COLORS
 
 config SCANNER_POCKET_LANDSCAPE
     bool "Landscape orientation through the rotated ls0xx driver"
-    default n
+    default y
     help
-      v1 rotated the panel in a custom driver. The v2 board uses Zephyr's
-      stock ls0xx driver in portrait for now; enable once the rotated driver
-      has been brought over and the stock LS0XX driver disabled.
+      Use the v1 rotated driver (ls0xx_rotated.c, now with DISP/EXTCOMIN
+      support) so LVGL sees 168x144. The stock LS0XX driver must be off, or
+      both would bind to the same devicetree node.
+
+# The rotated driver replaces Zephyr's ls0xx on the same compatible
+config LS0XX
+    default n if SCANNER_POCKET_LANDSCAPE
 
 endif # SHIELD_SCANNER_POCKET_V2
