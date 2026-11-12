@@ -378,12 +378,18 @@ static struct zmk_status_adv_data manufacturer_data; // Use structured data dire
 // =====================================================================
 
 // --- MODE 1: Piggyback data ---
-// Name placement depends on Zephyr version:
-//   FORCE_NAME_IN_AD available (cormoran fork): name in AD → SD free for manufacturer
-//   FORCE_NAME_IN_AD absent (upstream Zephyr): name in SD → manufacturer must go in AD
-// Without this separation, 28-byte manufacturer + name in SD exceeds 31-byte limit → name truncated
-#if defined(BT_LE_ADV_OPT_FORCE_NAME_IN_AD)
-// Newer Zephyr: ZMK uses FORCE_NAME_IN_AD → name in AD, SD free for manufacturer data
+// ZMK advertises with BT_LE_ADV_OPT_USE_NAME | BT_LE_ADV_OPT_FORCE_NAME_IN_AD
+// (both ZMK v0.3 / Zephyr 3.5 and ZMK main / Zephyr 4.1), so Zephyr appends the
+// device name to whatever AD we pass to bt_le_adv_update_data(). The AD must
+// therefore leave room for the name: keep ZMK's own AD there and put the
+// 28-byte manufacturer element in the SCAN_RSP.
+//
+// This used to be selected with `#if defined(BT_LE_ADV_OPT_FORCE_NAME_IN_AD)`,
+// but that name is an enum constant, not a macro, so the test was always false
+// and the fallback (a full 31-byte AD) was used. With the name forced into the
+// AD on top of that, every piggyback update failed with
+// "Too big advertising data" (-EINVAL) and nothing reached the scanner while
+// no host was connected.
 static struct bt_data zmk_ad_restore[] = {
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, BT_BYTES_LIST_LE16(CONFIG_BT_DEVICE_APPEARANCE)),
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -395,9 +401,6 @@ static struct bt_data zmk_ad_restore[] = {
 static struct bt_data piggyback_sd[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, (uint8_t *)&manufacturer_data, sizeof(manufacturer_data)),
 };
-#endif
-// Older Zephyr (no FORCE_NAME_IN_AD): piggyback uses prospector_ad for AD, NULL for SD.
-// Zephyr auto-appends device name to SD. Scanner gets manufacturer from AD, name from SD.
 
 // --- MODE 2: Own non-connectable ADV data ---
 static struct bt_data prospector_ad[] = {
@@ -1019,16 +1022,9 @@ static void adv_work_handler(struct k_work *work) {
 
     if (!prospector_adv_active) {
         // Try piggyback on ZMK's advertising
-#if defined(BT_LE_ADV_OPT_FORCE_NAME_IN_AD)
-        // Newer Zephyr: ZMK puts name in AD → SD is free for manufacturer data
+        // ZMK puts the name in AD → SD is free for manufacturer data
         int err = bt_le_adv_update_data(zmk_ad_restore, ARRAY_SIZE(zmk_ad_restore),
                                         piggyback_sd, ARRAY_SIZE(piggyback_sd));
-#else
-        // Older Zephyr: name goes in SD → put manufacturer in AD to avoid truncation
-        // (31-byte SD can't hold both 28-byte manufacturer data AND device name)
-        int err = bt_le_adv_update_data(prospector_ad, ARRAY_SIZE(prospector_ad),
-                                        NULL, 0);
-#endif
 
         if (err == 0) {
             if (!zmk_adv_was_active) {
